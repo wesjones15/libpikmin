@@ -1,33 +1,53 @@
 //! Animation key timings that gameplay depends on.
 //!
-//! Several Pikmin actions are timed by animation key events rather than code constants:
+//! Many Pikmin actions are timed by animation key events rather than code constants:
 //! `PaniAnimator::checkConstantKey` (plugPikiNakata/panianimator.cpp) turns an AnimInfo's
 //! info keys into listener events (type 0 = loop start, 1 = loop end, 2..5 = `KEY_Action0..3`).
 //! Motions play at `mMotionSpeed` = 30 frames/s for everything but locomotion
 //! (`Piki::updateWalkAnimation`, piki.cpp), from anim key 0 to anim key 8 (clamped).
 //!
-//! The keys live in `pikis/animMgr.bin` on the disc (`AnimMgr::read`, `AnimInfo::doread`,
-//! plugPikiColin/animMgr.cpp). Motion → AnimInfo index comes from
-//! `PaniPikiAnimator::createMotionTable` (panipikianimator.cpp).
+//! The keys live in AnimMgr files on the disc (`AnimMgr::read`, `AnimInfo::doread`,
+//! plugPikiColin/animMgr.cpp): `pikis/animMgr.bin` (Pikmin and captains share it) and
+//! `objects/goal/anims.bin` (the Onion). Motion → AnimInfo index comes from
+//! `PaniPikiAnimator::createMotionTable` (panipikianimator.cpp) and `GoalAI` (itemAI.cpp).
 
 use crate::params::ParmError;
 
-/// `PIKIANIM_Attack` → AnimInfo 18 ("attack1.dca").
+/// `PIKIANIM_Nuku` (5) → 28 "nuku.dca", captain plucking.
+pub const ANIM_NUKU: usize = 28;
+/// `PIKIANIM_Attack` (23) → 18 "attack1.dca".
 pub const ANIM_ATTACK: usize = 18;
-/// `PIKIANIM_Kuttuku` → AnimInfo 71 ("kuttuku.dca").
+/// `PIKIANIM_PickLoop` (46) → 68 "pickloop.dca", lifting a pellet.
+pub const ANIM_PICKLOOP: usize = 68;
+/// `PIKIANIM_Kuttuku` (48) → 71 "kuttuku.dca".
 pub const ANIM_KUTTUKU: usize = 71;
+/// Onion motion 0, "flowrot.dck": seeds are emitted at each loop end (`GoalAI`).
+pub const ANIM_GOAL_FLOWROT: usize = 0;
+/// Onion motion 2, "suction.dck": played when something is sucked in (`GOAL_Effect`).
+pub const ANIM_GOAL_SUCTION: usize = 2;
 
-/// Frame timings for one animation, as gameplay sees them.
+/// Frame timings for one animation, as gameplay sees them. Missing keys are `f32::INFINITY`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AnimTiming {
-    /// `KEY_Action0`: hit window opens.
+    /// `KEY_Action0`
     pub action0: f32,
-    /// `KEY_Action1`: hit window closes.
+    /// `KEY_Action1`
     pub action1: f32,
     /// Loop start/end frames, if the animation loops.
     pub loop_range: Option<(f32, f32)>,
     /// Frame where a one-shot play finishes (`KEY_Finished`).
     pub end: f32,
+}
+
+impl AnimTiming {
+    const fn new(action0: f32, action1: f32, loop_range: Option<(f32, f32)>, end: f32) -> Self {
+        Self {
+            action0,
+            action1,
+            loop_range,
+            end,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -38,26 +58,29 @@ pub struct AnimTimings {
     pub attack: AnimTiming,
     /// Latched on, `ActJumpAttack` state 5.
     pub kuttuku: AnimTiming,
+    /// Lifting a pellet: `KEY_Action0` sets `mIsLiftActionDone` (`ActTransport`).
+    pub pickloop: AnimTiming,
+    /// Captain plucking a sprout: `KEY_Action0` pulls it out (`NaviNukuState`).
+    pub nuku: AnimTiming,
+    /// Onion seed loop: one seed per loop end.
+    pub goal_flowrot: AnimTiming,
+    /// Onion suck-in reaction.
+    pub goal_suction: AnimTiming,
 }
 
 impl Default for AnimTimings {
-    /// Values decoded from the GPIE01_01 disc's `pikis/animMgr.bin`. Used when the user's
-    /// file isn't available; prefer [`AnimTimings::from_anim_mgr_bin`].
+    /// Values decoded from the GPIE01_01 disc. Used when the user's files aren't available;
+    /// prefer the `apply_*` loaders.
     fn default() -> Self {
+        const INF: f32 = f32::INFINITY;
         Self {
             fps: 30.0,
-            attack: AnimTiming {
-                action0: 3.0,
-                action1: 5.0,
-                loop_range: None,
-                end: 19.0,
-            },
-            kuttuku: AnimTiming {
-                action0: 11.0,
-                action1: 17.0,
-                loop_range: Some((11.0, 30.0)),
-                end: 34.0,
-            },
+            attack: AnimTiming::new(3.0, 5.0, None, 19.0),
+            kuttuku: AnimTiming::new(11.0, 17.0, Some((11.0, 30.0)), 34.0),
+            pickloop: AnimTiming::new(10.0, 20.0, Some((13.0, 18.0)), 29.0),
+            nuku: AnimTiming::new(23.0, 24.0, None, 39.0),
+            goal_flowrot: AnimTiming::new(30.0, INF, Some((20.0, 40.0)), 58.0),
+            goal_suction: AnimTiming::new(INF, INF, None, 48.0),
         }
     }
 }
@@ -77,8 +100,8 @@ impl Info {
     fn timing(&self) -> Option<AnimTiming> {
         let end_idx = 8.min(self.anim_keys.len().checked_sub(1)?);
         Some(AnimTiming {
-            action0: self.frame_of_type(2)?,
-            action1: self.frame_of_type(3).unwrap_or(f32::MAX),
+            action0: self.frame_of_type(2).unwrap_or(f32::INFINITY),
+            action1: self.frame_of_type(3).unwrap_or(f32::INFINITY),
             loop_range: self.frame_of_type(0).zip(self.frame_of_type(1)),
             end: self.anim_keys[end_idx] as f32,
         })
@@ -121,48 +144,62 @@ impl Reader<'_> {
     }
 }
 
-impl AnimTimings {
-    /// Parses `pikis/animMgr.bin` from the user's disc.
-    pub fn from_anim_mgr_bin(data: &[u8]) -> Result<Self, ParmError> {
-        let mut r = Reader { d: data, o: 0 };
-        let version = r.i32()?;
-        let count = r.i32()?.max(0) as usize;
-        r.skip_params(&[b"a01"])?;
+/// Reads every AnimInfo in an AnimMgr file.
+fn parse_anim_mgr(data: &[u8]) -> Result<Vec<Info>, ParmError> {
+    let mut r = Reader { d: data, o: 0 };
+    let version = r.i32()?;
+    let count = r.i32()?.max(0) as usize;
+    r.skip_params(&[b"a01"])?;
 
-        let mut infos = Vec::with_capacity(count);
-        for _ in 0..count {
-            r.string()?;
-            r.skip_params(&[])?;
-            let n = r.i32()?.max(0) as usize;
-            let anim_keys = (0..n).map(|_| r.i32()).collect::<Result<Vec<_>, _>>()?;
-            let mut info_keys = Vec::new();
-            if version >= 1 {
-                for _ in 0..r.i32()?.max(0) {
-                    let frame = r.i32()?;
-                    let rest = r.take(4)?; // event type (i16), command id (u8), key type (u8)
-                    info_keys.push((frame, rest[3]));
-                }
-            }
+    let mut infos = Vec::with_capacity(count);
+    for _ in 0..count {
+        r.string()?;
+        r.skip_params(&[])?;
+        let n = r.i32()?.max(0) as usize;
+        let anim_keys = (0..n).map(|_| r.i32()).collect::<Result<Vec<_>, _>>()?;
+        let mut info_keys = Vec::new();
+        if version >= 1 {
             for _ in 0..r.i32()?.max(0) {
-                r.take(8)?;
+                let key = r.i32()?;
+                let rest = r.take(4)?; // event type (i16), command id (u8), key type (u8)
+                info_keys.push((key, rest[3]));
             }
-            infos.push(Info {
-                anim_keys,
-                info_keys,
-            });
         }
+        for _ in 0..r.i32()?.max(0) {
+            r.take(8)?;
+        }
+        infos.push(Info {
+            anim_keys,
+            info_keys,
+        });
+    }
+    Ok(infos)
+}
 
-        let get = |i: usize| {
-            infos
-                .get(i)
-                .and_then(Info::timing)
-                .ok_or(ParmError::Truncated)
-        };
-        Ok(Self {
-            fps: 30.0,
-            attack: get(ANIM_ATTACK)?,
-            kuttuku: get(ANIM_KUTTUKU)?,
-        })
+fn timing_at(infos: &[Info], idx: usize) -> Result<AnimTiming, ParmError> {
+    infos
+        .get(idx)
+        .and_then(Info::timing)
+        .ok_or(ParmError::Truncated)
+}
+
+impl AnimTimings {
+    /// Applies `pikis/animMgr.bin` from the user's disc.
+    pub fn apply_piki_anim_mgr(&mut self, data: &[u8]) -> Result<(), ParmError> {
+        let infos = parse_anim_mgr(data)?;
+        self.attack = timing_at(&infos, ANIM_ATTACK)?;
+        self.kuttuku = timing_at(&infos, ANIM_KUTTUKU)?;
+        self.pickloop = timing_at(&infos, ANIM_PICKLOOP)?;
+        self.nuku = timing_at(&infos, ANIM_NUKU)?;
+        Ok(())
+    }
+
+    /// Applies `objects/goal/anims.bin` (the Onion) from the user's disc.
+    pub fn apply_goal_anims(&mut self, data: &[u8]) -> Result<(), ParmError> {
+        let infos = parse_anim_mgr(data)?;
+        self.goal_flowrot = timing_at(&infos, ANIM_GOAL_FLOWROT)?;
+        self.goal_suction = timing_at(&infos, ANIM_GOAL_SUCTION)?;
+        Ok(())
     }
 }
 
@@ -172,15 +209,20 @@ mod tests {
 
     #[test]
     fn user_disc_matches_documented_defaults_if_present() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../extracted/pikis/animMgr.bin");
-        let Ok(data) = std::fs::read(&path) else {
-            eprintln!("skipping: {} not found", path.display());
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../extracted");
+        let (Ok(piki), Ok(goal)) = (
+            std::fs::read(root.join("pikis/animMgr.bin")),
+            std::fs::read(root.join("objects/goal/anims.bin")),
+        ) else {
+            eprintln!(
+                "skipping: extracted anim files not found under {}",
+                root.display()
+            );
             return;
         };
-        assert_eq!(
-            AnimTimings::from_anim_mgr_bin(&data).unwrap(),
-            AnimTimings::default()
-        );
+        let mut t = AnimTimings::default();
+        t.apply_piki_anim_mgr(&piki).unwrap();
+        t.apply_goal_anims(&goal).unwrap();
+        assert_eq!(t, AnimTimings::default());
     }
 }

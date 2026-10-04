@@ -120,6 +120,15 @@ pub trait Host {
     ) -> bool {
         false
     }
+
+    /// Waypoints for carrying something from `from` to an Onion at `to` (the last point should
+    /// be `to`). Pikmin 1 uses hand-placed route graphs (`RouteMgr`); hosts use their own
+    /// navmesh. Return false if there's no way, and the carriers put it down. Default: straight line.
+    fn carry_path(&mut self, _from: Vec3, to: Vec3, out: &mut Vec<Vec3>) -> bool {
+        out.clear();
+        out.push(to);
+        true
+    }
 }
 
 /// Infinite flat floor at y = 0 and no creatures. Useful for tests.

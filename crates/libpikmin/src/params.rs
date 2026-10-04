@@ -126,7 +126,11 @@ parms! {
 parms! {
     /// `NaviProp::Parms` (NaviMgr.h). Only the fields libpikmin uses.
     pub struct NaviParams {
+        /// Pluck reach near an Onion (`Navi::procActionButton` with `insideOnyon`).
         action_radius: f32 = 120.0, b"p00";
+        continuous_pluck_distance: f32 = 200.0, b"p60";
+        /// Pluck reach away from Onions. Not in the retail file, so always the code default.
+        pluck_distance_outside_onyon: f32 = 15.0, b"p62";
         whistle_max_radius: f32 = 100.0, b"p01";
         whistle_min_radius: f32 = 5.0, b"p53";
         whistle_expand_time: f32 = 0.2, b"p02";
@@ -181,6 +185,12 @@ parms! {
         max_flick_knockdown_time: f32 = 0.7, b"p43";
         min_flick_knockdown_time: f32 = 0.7, b"p74";
         flower_gravity_scale: f32 = 0.01, b"p48";
+        /// Sprout timings (`PikiHeadAI`, itemAI.cpp), each plus a random 0-2 s.
+        seed_up_time: f32 = 1.0, b"p49";
+        pluck_wait_time: f32 = 1.0, b"p50";
+        grow_up_time: f32 = 4.0, b"p51";
+        wilt_time: f32 = 4.0, b"p52";
+        rebirth_seed_time: f32 = 1.0, b"p53";
         post_work_join_party_range: f32 = 250.0, b"p61";
     }
 }
@@ -294,14 +304,14 @@ impl Params {
         Ok(applied)
     }
 
-    /// `pikis/animMgr.bin`: attack and cling animation timings.
+    /// `pikis/animMgr.bin`: attack, cling, lift and pluck animation timings.
     pub fn apply_anim_mgr_bin(&mut self, data: &[u8]) -> Result<(), ParmError> {
-        self.anim = AnimTimings::from_anim_mgr_bin(data)?;
-        Ok(())
+        self.anim.apply_piki_anim_mgr(data)
     }
 
     /// Loads everything libpikmin reads from a folder extracted from the user's disc, laid
-    /// out like `files/dataDir` (`parms/*.bin`, `pikis/animMgr.bin`). Returns what it applied.
+    /// out like `files/dataDir` (`parms/*.bin`, `pikis/animMgr.bin`,
+    /// `objects/goal/anims.bin`). Returns what it applied.
     pub fn load_extracted(
         &mut self,
         root: &std::path::Path,
@@ -311,6 +321,11 @@ impl Params {
         if anim.exists() {
             self.apply_anim_mgr_bin(&std::fs::read(anim)?)?;
             applied.push("animMgr.bin");
+        }
+        let goal = root.join("objects/goal/anims.bin");
+        if goal.exists() {
+            self.anim.apply_goal_anims(&std::fs::read(goal)?)?;
+            applied.push("goal/anims.bin");
         }
         Ok(applied)
     }

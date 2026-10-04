@@ -18,6 +18,9 @@ pub struct Sim {
     pub(crate) captains: Vec<Captain>,
     pub(crate) pikis: Vec<Piki>,
     pub(crate) creatures: CreatureFrame,
+    pub(crate) pellets: Vec<crate::carry::Pellet>,
+    pub(crate) onions: Vec<crate::onion::Onion>,
+    pub(crate) sprouts: Vec<Option<crate::onion::Sprout>>,
     pub(crate) events: Vec<Event>,
     pending_shakes: Vec<CreatureId>,
 }
@@ -38,6 +41,9 @@ impl Sim {
             captains: Vec::new(),
             pikis: Vec::new(),
             creatures: CreatureFrame::default(),
+            pellets: Vec::new(),
+            onions: Vec::new(),
+            sprouts: Vec::new(),
             events: Vec::new(),
             pending_shakes: Vec::new(),
         }
@@ -137,9 +143,12 @@ impl Sim {
         for ci in 0..self.captains.len() {
             self.update_captain(ci, host, dt);
         }
+        self.update_pellets(host, dt);
         for pi in 0..self.pikis.len() {
             self.update_piki(pi, host, dt);
         }
+        self.update_onions(dt);
+        self.update_sprouts(host, dt);
         self.separate();
         self.tick += 1;
     }
@@ -191,6 +200,7 @@ impl Sim {
             PikiState::Attack(a) => {
                 !matches!(a.mode, AttackMode::Latched { .. } | AttackMode::Jumping)
             }
+            PikiState::Carry(c) => matches!(c.phase, crate::carry::CarryPhase::Go { .. }),
             _ => false,
         };
 
@@ -234,6 +244,15 @@ impl Sim {
                     if (p.pos.y - part.centre.y).abs() < part.radius + p.size {
                         push_out(&mut p.pos, part.centre, part.radius + p.size);
                     }
+                }
+            }
+            // Pellets and corpses on the ground are solid too.
+            for pel in &self.pellets {
+                if matches!(
+                    pel.state,
+                    crate::carry::PelletState::Idle | crate::carry::PelletState::Carried { .. }
+                ) {
+                    push_out(&mut p.pos, pel.pos, pel.desc.radius + p.size);
                 }
             }
         }

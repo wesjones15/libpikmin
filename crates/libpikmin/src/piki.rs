@@ -17,6 +17,19 @@ pub enum PikiColor {
     Yellow,
 }
 
+impl PikiColor {
+    pub const ALL: [PikiColor; 3] = [PikiColor::Blue, PikiColor::Red, PikiColor::Yellow];
+
+    /// The decomp's colour index (Blue 0, Red 1, Yellow 2).
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    pub fn from_index(i: usize) -> Self {
+        Self::ALL[i % 3]
+    }
+}
+
 /// Leaf / bud / flower stage (`mHappa`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Happa {
@@ -80,6 +93,8 @@ pub enum PikiState {
     Knocked {
         timer: f32,
     },
+    /// Carrying a pellet or corpse (`ActTransport`).
+    Carry(crate::carry::Carry),
     Dead,
 }
 
@@ -157,6 +172,7 @@ impl Sim {
     pub(crate) fn update_piki(&mut self, pi: usize, host: &mut dyn Host, dt: f32) {
         match self.pikis[pi].state {
             PikiState::Dead => {}
+            PikiState::Carry(c) => self.piki_carry(pi, c, host, dt),
             PikiState::Idle => self.piki_idle(pi, host, dt),
             PikiState::Squad { .. } => self.piki_squad(pi, host, dt),
             PikiState::GoHang { captain } => self.piki_go_hang(pi, captain, host, dt),
@@ -184,7 +200,7 @@ impl Sim {
         }
     }
 
-    fn physics(&mut self, pi: usize, host: &mut dyn Host, dt: f32) {
+    pub(crate) fn physics(&mut self, pi: usize, host: &mut dyn Host, dt: f32) {
         let accel = self.params.piki_creature.acceleration;
         let gravity = self.params.ai.gravity;
         let face_adjust = self.params.piki_creature.face_dir_adjust;
@@ -379,6 +395,18 @@ impl Sim {
             return;
         }
 
+        // `procCollideMsg` with a pellet that has a free slot: start carrying it.
+        let (pos, size) = (self.pikis[pi].pos, self.pikis[pi].size);
+        if let Some(pel) = self
+            .pellets
+            .iter()
+            .find(|pl| pl.can_take_carrier() && pl.touches(pos, size))
+            .map(|pl| pl.id)
+            && self.start_carry(pi, pel)
+        {
+            return;
+        }
+
         let p = &mut self.pikis[pi];
         if p.on_ground {
             // `procBounceMsg` → `Piki::actOnSituaton`.
@@ -440,8 +468,9 @@ impl Sim {
         });
     }
 
-    /// `Piki::actOnSituaton` / `graspSituation`, attack branch only: go for the nearest
-    /// creature within `idle_attack_search_range` of its edge.
+    /// `Piki::actOnSituaton` / `graspSituation`: the nearest of a creature within
+    /// `idle_attack_search_range` of its edge, or a pellet with a free slot within
+    /// `idle_work_search_range`.
     pub(crate) fn act_on_situation(&mut self, pi: usize) {
         let range = self.params.piki.idle_attack_search_range;
         let pos = self.pikis[pi].pos;
@@ -456,11 +485,21 @@ impl Sim {
                 best = Some((c.id, d));
             }
         }
-        if let Some((target, _)) = best {
-            self.pikis[pi].state = PikiState::Attack(Attack {
-                target,
-                mode: AttackMode::Approach,
-            });
+        let pellet = self.nearest_free_pellet(pos, self.pikis[pi].size);
+        match (best, pellet) {
+            (Some((_, cd)), Some((pel, pd))) if pd < cd => {
+                self.start_carry(pi, pel);
+            }
+            (Some((target, _)), _) => {
+                self.pikis[pi].state = PikiState::Attack(Attack {
+                    target,
+                    mode: AttackMode::Approach,
+                });
+            }
+            (None, Some((pel, _))) => {
+                self.start_carry(pi, pel);
+            }
+            (None, None) => {}
         }
     }
 
@@ -684,8 +723,11 @@ impl Sim {
         });
     }
 
-    /// Remove a Pikmin from whatever it's part of (formation, a captain's hand).
+    /// Remove a Pikmin from whatever it's part of (formation, a captain's hand, a pellet).
     pub(crate) fn leave_current(&mut self, id: PikiId) {
+        if matches!(self.pikis[id.0 as usize].state, PikiState::Carry(_)) {
+            self.stop_carry(id.0 as usize);
+        }
         let p = &self.pikis[id.0 as usize];
         if p.state.in_squad()
             && let Some(cid) = p.captain

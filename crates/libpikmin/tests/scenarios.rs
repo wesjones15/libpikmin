@@ -567,3 +567,268 @@ fn hundred_pikmin_tick_budget() {
     eprintln!("100 Pikmin: {per_tick:.3} ms/tick");
     assert_eq!(sim.pikis().len(), 100);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Carrying, Onions, sprouts
+
+fn corpse(pos: Vec3, min: u32, max: u32, seeds: i32) -> libpikmin::PelletDesc {
+    libpikmin::PelletDesc {
+        pos,
+        yaw: 0.0,
+        radius: 12.0,
+        height: 10.0,
+        min_carriers: min,
+        max_carriers: max,
+        seeds_matching: seeds,
+        seeds_other: seeds,
+        color: None,
+        creature: None,
+    }
+}
+
+/// Captain with a squad of `color`, cursor aimed 100 to +X, a corpse under the cursor.
+fn carry_setup(
+    color: PikiColor,
+    n: u32,
+    min: u32,
+    max: u32,
+    seeds: i32,
+) -> (Sim, TestHost, CaptainId, libpikmin::PelletId) {
+    let mut sim = Sim::new(retail_params(), 31);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    for i in 0..n {
+        let a = i as f32 * 0.7;
+        sim.spawn_piki_in_squad(
+            color,
+            Vec3::new(a.sin() * 20.0, 0.0, a.cos() * 20.0 - 30.0),
+            c,
+        );
+    }
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 2.0, &mut ev);
+    aim_cursor(&mut sim, &mut host, c, Vec2::new(1.0, 0.0), 0.5);
+    let at = sim.captain(c).cursor_world;
+    let pel = sim.spawn_pellet(corpse(Vec3::new(at.x, 0.0, at.z), min, max, seeds));
+    (sim, host, c, pel)
+}
+
+#[test]
+fn thrown_piki_grabs_a_corpse_and_carries_at_the_decomp_speed() {
+    let (mut sim, mut host, c, pel) = carry_setup(PikiColor::Red, 3, 1, 2, 3);
+    sim.add_onion(Vec3::new(2000.0, 0.0, 0.0), &[PikiColor::Red]);
+    let mut ev = Vec::new();
+    throw_once(&mut sim, &mut host, c, &mut ev);
+
+    let mut lifted_at = None;
+    for _ in 0..120 {
+        sim.step(&mut host);
+        if sim
+            .drain_events()
+            .any(|e| matches!(e, Event::PelletLifted { .. }))
+        {
+            lifted_at = Some(sim.pellet(pel).pos);
+            break;
+        }
+    }
+    let start = lifted_at.expect("one carrier meets min 1 and lifts");
+    run(&mut sim, &mut host, 1.0, &mut ev);
+    let moved = (sim.pellet(pel).pos - start).with_y(0.0).length();
+    // aiTransport.cpp: max = 0.7 * 120 = 84, min = 42, speed = 42 + (1 + 1 - 1)/2 * 42 = 63.
+    assert!((moved - 63.0).abs() < 1.5, "moved {moved} in 1 s");
+}
+
+#[test]
+fn corpse_is_delivered_seeds_fly_out_and_sprouts_can_be_plucked() {
+    let (mut sim, mut host, c, pel) = carry_setup(PikiColor::Red, 3, 1, 2, 3);
+    let onion = sim.add_onion(Vec3::new(250.0, 0.0, 0.0), &[PikiColor::Red]);
+    let mut ev = Vec::new();
+    throw_once(&mut sim, &mut host, c, &mut ev);
+    // Lift + carry + 1.5 s settle + suck + suction + 3 seeds, then ~3.5 s of drifting down
+    // (air drag) and up to 4 s of sprout timers.
+    run(&mut sim, &mut host, 25.0, &mut ev);
+
+    assert!(
+        ev.iter().any(|e| matches!(e, Event::PelletDelivered { pellet, onion: o, seeds: 3, .. } if *pellet == pel && *o == onion)),
+        "delivered with 3 seeds"
+    );
+    assert!(matches!(
+        sim.pellet(pel).state,
+        libpikmin::PelletState::Gone
+    ));
+    let launched = ev
+        .iter()
+        .filter(|e| matches!(e, Event::SeedLaunched { .. }))
+        .count();
+    assert_eq!(launched, 3);
+    let ready: Vec<_> = sim
+        .sprouts()
+        .filter(|s| s.pluckable())
+        .map(|s| (s.id, s.pos))
+        .collect();
+    assert_eq!(
+        ready.len(),
+        3,
+        "code-default sprout timers are short: all ready within 25 s"
+    );
+
+    // Put the captain next to a sprout (host-driven pose) and press the action button.
+    let (_, at) = ready[0];
+    let squad_before = sim.captain(c).plate.len();
+    let pose = libpikmin::CaptainPose {
+        pos: at + Vec3::new(-10.0, 0.0, 0.0),
+        vel: Vec3::ZERO,
+        face: 0.0,
+    };
+    sim.set_input(
+        c,
+        CaptainInput {
+            pose: Some(pose),
+            ..Default::default()
+        },
+    );
+    run(&mut sim, &mut host, 0.2, &mut ev);
+    sim.set_input(
+        c,
+        CaptainInput {
+            throw: true,
+            ..Default::default()
+        },
+    );
+    run(&mut sim, &mut host, 0.1, &mut ev);
+    sim.set_input(c, CaptainInput::default());
+    ev.clear();
+    run(&mut sim, &mut host, 2.0, &mut ev);
+    let plucked = ev.iter().find_map(|e| match e {
+        Event::Plucked { captain, piki, .. } if *captain == c => Some(*piki),
+        _ => None,
+    });
+    let plucked = plucked.expect("the sprout should be plucked");
+    assert_eq!(sim.piki(plucked).color, PikiColor::Red);
+    assert_eq!(sim.captain(c).plate.len(), squad_before + 1);
+}
+
+#[test]
+fn too_few_carriers_struggle_then_drop_when_whistled_away() {
+    let (mut sim, mut host, c, pel) = carry_setup(PikiColor::Blue, 4, 2, 4, 2);
+    sim.add_onion(Vec3::new(2000.0, 0.0, 0.0), &[PikiColor::Blue]);
+    let mut ev = Vec::new();
+    throw_once(&mut sim, &mut host, c, &mut ev);
+    run(&mut sim, &mut host, 2.0, &mut ev);
+    assert!(
+        matches!(sim.pellet(pel).state, libpikmin::PelletState::Idle),
+        "1 of min 2: can not lift"
+    );
+    assert_eq!(sim.pellet(pel).carriers.len(), 1);
+
+    throw_once(&mut sim, &mut host, c, &mut ev);
+    for _ in 0..90 {
+        if matches!(
+            sim.pellet(pel).state,
+            libpikmin::PelletState::Carried { .. }
+        ) {
+            break;
+        }
+        run(&mut sim, &mut host, TICK_DT, &mut ev);
+    }
+    assert!(
+        matches!(
+            sim.pellet(pel).state,
+            libpikmin::PelletState::Carried { .. }
+        ),
+        "2 of min 2: lifted"
+    );
+
+    // Whistle at the pellet (the cursor is still on it): the carriers come back, it's put down.
+    ev.clear();
+    sim.set_input(
+        c,
+        CaptainInput {
+            whistle: true,
+            ..Default::default()
+        },
+    );
+    run(&mut sim, &mut host, 0.6, &mut ev);
+    assert!(ev.iter().any(|e| matches!(e, Event::PelletDropped { .. })));
+    assert!(sim.pellet(pel).carriers.is_empty());
+}
+
+#[test]
+fn carriers_colour_picks_the_onion_not_distance() {
+    let (mut sim, mut host, c, pel) = carry_setup(PikiColor::Blue, 3, 1, 2, 1);
+    let red = sim.add_onion(Vec3::new(300.0, 0.0, 0.0), &[PikiColor::Red]);
+    let blue = sim.add_onion(Vec3::new(-400.0, 0.0, 0.0), &[PikiColor::Blue]);
+    let mut ev = Vec::new();
+    throw_once(&mut sim, &mut host, c, &mut ev);
+    run(&mut sim, &mut host, 2.0, &mut ev);
+    let lifted = ev.iter().find_map(|e| match e {
+        Event::PelletLifted { pellet, onion } if *pellet == pel => Some(*onion),
+        _ => None,
+    });
+    assert_eq!(lifted, Some(blue));
+    assert_ne!(lifted, Some(red));
+}
+
+#[test]
+fn a_shared_onion_takes_any_colour() {
+    let (mut sim, mut host, c, pel) = carry_setup(PikiColor::Yellow, 3, 1, 2, 1);
+    let shared = sim.add_onion(Vec3::new(250.0, 0.0, 0.0), &PikiColor::ALL);
+    let mut ev = Vec::new();
+    throw_once(&mut sim, &mut host, c, &mut ev);
+    run(&mut sim, &mut host, 12.0, &mut ev);
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::PelletDelivered { pellet, onion, color: PikiColor::Yellow, .. } if *pellet == pel && *onion == shared
+    )));
+    assert!(sim.sprouts().all(|s| s.color == PikiColor::Yellow));
+}
+
+#[test]
+fn full_field_keeps_seeds_in_the_onion() {
+    let mut params = retail_params();
+    params.ai.max_pikis_on_field = 3;
+    let mut sim = Sim::new(params, 5);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    squad(&mut sim, c, 3, Vec3::ZERO);
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 2.0, &mut ev);
+    aim_cursor(&mut sim, &mut host, c, Vec2::new(1.0, 0.0), 0.5);
+    let at = sim.captain(c).cursor_world;
+    sim.spawn_pellet(corpse(Vec3::new(at.x, 0.0, at.z), 1, 2, 2));
+    let onion = sim.add_onion(Vec3::new(250.0, 0.0, 0.0), &[PikiColor::Red]);
+    throw_once(&mut sim, &mut host, c, &mut ev);
+    run(&mut sim, &mut host, 12.0, &mut ev);
+    assert_eq!(
+        ev.iter()
+            .filter(|e| matches!(e, Event::SeedStored { .. }))
+            .count(),
+        2
+    );
+    assert_eq!(
+        sim.onions()[onion.0 as usize].stored[PikiColor::Red.index()],
+        2
+    );
+}
+
+#[test]
+fn sprouts_grow_to_flower_then_wilt() {
+    let mut sim = Sim::new(Params::default(), 3);
+    let mut host = TestHost::default();
+    let s = sim.plant_sprout(PikiColor::Blue, Vec3::new(50.0, 0.0, 0.0));
+    let mut ev = Vec::new();
+    // Code defaults: grow 4 s (+0..2 random) per stage, wilt 4 s.
+    run(&mut sim, &mut host, 20.0, &mut ev);
+    let grew: Vec<_> = ev
+        .iter()
+        .filter_map(|e| match e {
+            Event::SproutGrew { sprout, happa } if *sprout == s => Some(*happa),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(grew[..2], [libpikmin::Happa::Bud, libpikmin::Happa::Flower]);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::SproutWilted { sprout } if *sprout == s))
+    );
+}

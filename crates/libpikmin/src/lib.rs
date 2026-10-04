@@ -6,22 +6,26 @@
 
 pub mod anim;
 pub mod captain;
+pub mod carry;
 pub mod clock;
 pub mod event;
 pub mod formation;
 pub mod host;
 pub mod math;
+pub mod onion;
 pub mod params;
 pub mod piki;
 mod sim;
 
 pub use captain::{Captain, CaptainInput, CaptainPose};
+pub use carry::{Pellet, PelletDesc, PelletId, PelletState};
 pub use clock::{FixedClock, TICK_DT, TICK_HZ};
 pub use event::Event;
 pub use glam::{Vec2, Vec3};
 pub use host::{CreatureFrame, CreatureId, CreaturePart, Host};
+pub use onion::{Onion, OnionId, Sprout, SproutId, SproutState};
 pub use params::Params;
-pub use piki::{Piki, PikiColor, PikiState};
+pub use piki::{Happa, Piki, PikiColor, PikiState};
 pub use sim::Sim;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

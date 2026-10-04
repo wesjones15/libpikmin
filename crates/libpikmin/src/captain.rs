@@ -73,6 +73,8 @@ pub struct Captain {
     pub whistle: WhistleState,
     pub throw: ThrowState,
     pub plate: Plate,
+    /// Plucking a sprout. Movement, whistle and throw are locked meanwhile.
+    pub pluck: Option<crate::onion::Pluck>,
     rearrange_pending: bool,
     pub(crate) input: CaptainInput,
     pub(crate) pressed: Pressed,
@@ -100,6 +102,7 @@ impl Captain {
             whistle: WhistleState::Off,
             throw: ThrowState::Idle,
             plate: Plate::default(),
+            pluck: None,
             rearrange_pending: false,
             input: CaptainInput::default(),
             pressed: Pressed::default(),
@@ -139,7 +142,25 @@ impl Sim {
         let input = self.captains[ci].input;
         let pressed = std::mem::take(&mut self.captains[ci].pressed);
 
-        self.captain_move(ci, host, dt, input);
+        if self.update_pluck(ci, dt, pressed.throw) {
+            self.captain_move(ci, host, dt, input, true);
+            self.captain_formation(ci);
+            return;
+        }
+
+        // The action button plucks when a sprout is in reach, else throws
+        // (`Navi::procActionButton` runs before entering `NaviThrowWaitState`).
+        if pressed.throw
+            && matches!(self.captains[ci].throw, ThrowState::Idle)
+            && let Some(sprout) = self.find_pluckable(ci)
+        {
+            self.start_pluck(ci, sprout);
+            self.captain_move(ci, host, dt, input, true);
+            self.captain_formation(ci);
+            return;
+        }
+
+        self.captain_move(ci, host, dt, input, false);
         self.captain_formation(ci);
         self.captain_whistle(ci, dt, input, pressed);
         self.captain_throw(ci, dt, input, pressed);
@@ -149,7 +170,15 @@ impl Sim {
     }
 
     /// `Navi::makeVelocity`: stick → target velocity, cursor movement, light-tilt aiming.
-    fn captain_move(&mut self, ci: usize, host: &mut dyn Host, dt: f32, input: CaptainInput) {
+    /// `locked`: the body is being moved by something else (plucking); only the cursor runs.
+    fn captain_move(
+        &mut self,
+        ci: usize,
+        host: &mut dyn Host,
+        dt: f32,
+        input: CaptainInput,
+        locked: bool,
+    ) {
         let navi = &self.params.navi;
         let accel = self.params.navi_creature.acceleration;
         let face_adjust = self.params.navi_creature.face_dir_adjust;
@@ -186,7 +215,8 @@ impl Sim {
         }
         // A light tilt (or standing still long enough) aims at the cursor instead of walking.
         let idle_long = c.neutral_time >= navi.cursor_move_delay_time;
-        let aiming = (idle_long || stick_mag > navi.neutral_stick_threshold)
+        let aiming = !locked
+            && (idle_long || stick_mag > navi.neutral_stick_threshold)
             && stick_mag <= navi.cursor_move_stick_threshold;
         if aiming {
             c.target_vel = Vec3::ZERO;
@@ -195,7 +225,13 @@ impl Sim {
             }
         }
 
-        if let Some(pose) = input.pose {
+        if locked {
+            c.target_vel = Vec3::ZERO;
+            if let Some(g) = host.ground_height(c.pos + Vec3::new(0.0, 20.0, 0.0)) {
+                c.pos.y = g;
+                c.on_ground = true;
+            }
+        } else if let Some(pose) = input.pose {
             c.pos = pose.pos;
             c.vel = pose.vel;
             c.face = pose.face;
@@ -338,7 +374,10 @@ impl Sim {
                 continue;
             }
             let eligible = match p.state {
-                PikiState::Idle | PikiState::Attack(_) | PikiState::Knocked { .. } => true,
+                PikiState::Idle
+                | PikiState::Attack(_)
+                | PikiState::Knocked { .. }
+                | PikiState::Carry(_) => true,
                 PikiState::Squad { .. } => p.captain != Some(me),
                 // In flight or in another captain's hand: can't be grabbed.
                 PikiState::Flying { .. } | PikiState::GoHang { .. } | PikiState::Held { .. } => {
