@@ -145,20 +145,40 @@ the frame delta to 1/30 s. We tick exactly 1/30 s and accumulate host time (max 
   a 30%-per-tick chance of switching to jump-prep (state 2).
 - **Jump prep (2):** back off or close in at half speed to the [size, size+6] band. Once facing,
   it jumps with velocity (100·dir.xz, 200). Touching the target in the air latches it. Landing returns to state 0.
-- **Swing (4):** after the swing time, a hit lands if within 10 of the part surface and facing within π/4.
-- **Latched (5):** rides the part (offset kept in the creature's yaw frame) and hits once per
-  cling-animation cycle.
+- **Swing (4):** plays "ATTACK". Between `KEY_Action0` and `KEY_Action1` the hit connects if
+  within 10 of the part surface and facing within π/4; otherwise it retries next tick. When the
+  animation finishes, the Pikmin goes back to state 0, which swings again if still in reach.
+- **Latched (5):** rides the part (offset kept in the creature's yaw frame) and plays the
+  looping "KUTTUKU" cling animation, hitting once per loop.
 - Each hit is `InteractAttack` → `Host::damage(creature, power, part)`. Power: red 15,
   blue 10, yellow 10 (`Piki::getAttackPower`).
-- **aiconst p10** (`_C4`): 1 = stop after one attack (latched Pikmin drop off), 0 = keep going
-  until the target dies. Retail is 0.
+- **aiconst p10** (`_C4`): 1 = after one *swing* the attack ends, 0 = keep swinging until the
+  target dies. Retail is 0. **It never affects latched Pikmin:** the cling animation loops, so
+  `KEY_Finished` never fires and state 5 never returns. Latched Pikmin hit until shaken off or the
+  target dies, whatever p10 says.
 - **aiconst p08:** return to the squad after attacking if within `mPostWorkJoinPartyRange`. Retail is 0, so they stay free.
 - **aiconst p01:** idle Pikmin look for targets on their own. Retail is 0.
 - Target dead, gone, or (for non-latched) flying: latched Pikmin fall off. All go free.
-- **APPROXIMATIONS:** hit timing comes from animation key events (`KEY_Action0` in the
-  "Kuttuku"/"Attack" motions), whose frames live in `pikis/animMgr.bin` and the animation bundle.
-  Until we decode those, latched hits are every 0.5 s and swings every 0.6 s
-  (`LATCH_HIT_INTERVAL`, `SWING_INTERVAL` in piki.rs).
+
+### Attack timing (animation keys)
+
+Hit timing is driven by animation key events, not code constants. `PaniAnimator::checkConstantKey`
+(plugPikiNakata/panianimator.cpp) maps an AnimInfo's info keys to events:
+- type 0 = loop start, type 1 = loop end (jump back to loop start unless finishing);
+- types 2–5 = `KEY_Action0`–`KEY_Action3`.
+
+A motion plays from anim key 0 to key 8 (clamped) at `mMotionSpeed` = 30 frames/s, the speed for
+every non-locomotion motion (`Piki::updateWalkAnimation`). That's one frame per tick.
+
+The keys are in `pikis/animMgr.bin` (`AnimMgr::read`, `AnimInfo::doread`, plugPikiColin/animMgr.cpp).
+The motion → AnimInfo mapping is in `PaniPikiAnimator::createMotionTable`. libpikmin parses the file
+from the user's disc (`Params::apply_anim_mgr_bin`). The GPIE01_01 values, also used as fallback defaults:
+
+| Motion | AnimInfo | Anim keys | Info keys | Result |
+|---|---|---|---|---|
+| ATTACK (23) | 18 `attack1.dca` | 0, 3, 5, 19 | Action0 @3, Action1 @5 | hit window frames 3–5, swing lasts 19 frames (0.63 s) |
+| KUTTUKU (48) | 71 `kuttuku.dca` | 0, 11, 17, 30, 34 | loop 11→30, Action0 @11, Action1 @17 | first hit 11 frames after latching (0.37 s), then every 19 frames (0.63 s) |
+
 - `getNearestCollPart(pos, '*t**')` is approximated as "nearest stickable part".
 - Not yet: climbing platform parts (`doClimb`), bosses' special parts, punching.
 

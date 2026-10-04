@@ -130,19 +130,19 @@ impl Host for World {
 fn load_params() -> (Params, String) {
     let mut params = Params::default();
     let candidates = [
-        std::env::var_os("PIKMIN_PARMS").map(PathBuf::from),
-        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../extracted/parms")),
+        std::env::var_os("PIKMIN_EXTRACTED").map(PathBuf::from),
+        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../extracted")),
     ];
     for dir in candidates.into_iter().flatten() {
-        if let Ok(applied) = params.load_p1_dir(&dir)
+        if let Ok(applied) = params.load_extracted(&dir)
             && !applied.is_empty()
         {
-            return (params, format!("disc parms ({} files)", applied.len()));
+            return (params, format!("disc data ({} files)", applied.len()));
         }
     }
     (
         params,
-        "code defaults (no disc parms found; set PIKMIN_PARMS)".into(),
+        "code defaults (no extracted disc data; set PIKMIN_EXTRACTED)".into(),
     )
 }
 

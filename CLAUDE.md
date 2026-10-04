@@ -10,7 +10,7 @@ This folder is the repo root. All work happens here. Sibling folders are read-on
 - `../er-mario-master/`: reference for the later Elden Ring host (me3 DLL, libsm64, fromsoftware-rs @ 59fbd3b).
 - `../pikmin2-main/`: projectPiki Pikmin 2 decomp, GPVE01. READ-ONLY secondary spec. Builds
   against the user's disc (game code 99.82% matched; gameplay code is in `src/plugProjectKandoU/`).
-- `../extracted/`: files copied off the user's discs with dtk (`parms/` = P1 binary parms,
+- `../extracted/`: files copied off the user's discs with dtk (`parms/` = P1 binary parms, `pikis/animMgr.bin` = P1 anim keys,
   `p2/` = P2 text parms). Never copy these into this repo.
 
 Workspace:

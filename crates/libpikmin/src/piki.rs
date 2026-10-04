@@ -26,16 +26,6 @@ pub enum Happa {
     Flower,
 }
 
-/// Seconds between hits while latched on.
-///
-/// APPROXIMATION: the original deals damage on the `KEY_Action0` event of the "Kuttuku" (cling)
-/// animation (`ActJumpAttack::animationKeyUpdated`), so the real rate lives in `pikis/animMgr.bin`
-/// and the animation bundle on the disc. Replace with the decoded value once we parse those.
-pub const LATCH_HIT_INTERVAL: f32 = 0.5;
-
-/// Seconds per ground swing. APPROXIMATION, same caveat with the "Attack" animation.
-pub const SWING_INTERVAL: f32 = 0.6;
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AttackMode {
     /// `ActJumpAttack` state 0: run at the nearest part.
@@ -44,11 +34,17 @@ pub enum AttackMode {
     JumpPrep,
     /// State 1: in the air after jumping at the target.
     Jumping,
-    /// State 4: standing swing at a part within reach.
-    Swing { timer: f32 },
-    /// State 5: stuck on a part, hitting repeatedly. `offset` is in the creature's yaw frame,
-    /// relative to the part centre.
-    Latched { part: u32, offset: Vec3, timer: f32 },
+    /// State 4: standing swing at a part within reach. `frame` is the "ATTACK" animation
+    /// counter; `hit` is set once this swing has landed.
+    Swing { frame: f32, hit: bool },
+    /// State 5: stuck on a part, hitting once per "KUTTUKU" animation loop. `offset` is in the
+    /// creature's yaw frame, relative to the part centre.
+    Latched {
+        part: u32,
+        offset: Vec3,
+        frame: f32,
+        hit: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -434,7 +430,8 @@ impl Sim {
             mode: AttackMode::Latched {
                 part: local_part,
                 offset,
-                timer: LATCH_HIT_INTERVAL * 0.5,
+                frame: 0.0,
+                hit: false,
             },
         });
         self.events.push(Event::Latched {
@@ -479,7 +476,8 @@ impl Sim {
         if let AttackMode::Latched {
             part,
             offset,
-            timer,
+            frame,
+            hit,
         } = a.mode
         {
             let Some(part_ref) = self.creatures.parts_of(&c).get(part as usize).copied() else {
@@ -492,11 +490,29 @@ impl Sim {
                 p.vel = Vec3::ZERO;
                 p.face = yaw_of(part_ref.centre - p.pos);
             }
-            let mut t = timer - dt;
-            if t <= 0.0 {
-                t += LATCH_HIT_INTERVAL;
+            // The cling animation loops, so it never finishes and aiconst p10 ("attack once")
+            // never lets go: latched Pikmin hit once per loop until shaken off or the target dies.
+            let anim = self.params.anim.kuttuku;
+            let mut frame = frame + self.params.anim.fps * dt;
+            let mut hit = hit;
+            match anim.loop_range {
+                Some((start, end)) if frame >= end => {
+                    frame -= end - start;
+                    hit = false;
+                }
+                None if frame >= anim.end => {
+                    if self.params.ai.attack_once != 0 {
+                        return self.finish_attack(pi);
+                    }
+                    frame = 0.0;
+                    hit = false;
+                }
+                _ => {}
+            }
+            if !hit && frame >= anim.action0 && frame < anim.action1 {
                 let dmg = self.attack_power(pi);
                 if host.damage(a.target, dmg, Some(part), id) {
+                    hit = true;
                     self.events.push(Event::Hit {
                         piki: id,
                         creature: a.target,
@@ -504,15 +520,13 @@ impl Sim {
                         latched: true,
                     });
                 }
-                if self.params.ai.attack_once != 0 {
-                    return self.finish_attack(pi);
-                }
             }
             self.pikis[pi].state = PikiState::Attack(Attack {
                 mode: AttackMode::Latched {
                     part,
                     offset,
-                    timer: t,
+                    frame,
+                    hit,
                 },
                 ..a
             });
@@ -528,6 +542,9 @@ impl Sim {
         let half = self.piki_speed(pi, 0.5);
         let full = self.piki_speed(pi, 1.0);
         let dmg = self.attack_power(pi);
+        let anim = self.params.anim.attack;
+        let fps = self.params.anim.fps;
+        let attack_once = self.params.ai.attack_once != 0;
         let r = self.rng.f32();
 
         let p = &mut self.pikis[pi];
@@ -543,7 +560,8 @@ impl Sim {
                 if angle.abs() < PI / 10.0 && dist3d < size + 10.0 {
                     p.target_vel = Vec3::ZERO;
                     mode = AttackMode::Swing {
-                        timer: SWING_INTERVAL,
+                        frame: 0.0,
+                        hit: false,
                     };
                 } else {
                     if dist2d < size && r > 0.7 {
@@ -573,16 +591,20 @@ impl Sim {
             AttackMode::Jumping => {
                 p.target_vel = Vec3::new(p.vel.x, 0.0, p.vel.z);
             }
-            AttackMode::Swing { timer } => {
+            AttackMode::Swing { frame, hit } => {
                 p.target_vel = Vec3::ZERO;
-                let t = timer - dt;
-                if t <= 0.0 {
+                let frame = frame + fps * dt;
+                let mut hit = hit;
+                // Between KEY_Action0 and KEY_Action1 the swing connects if the part is within
+                // 10 and roughly in front; otherwise it retries next tick (mIsCriticalHit).
+                if !hit && frame >= anim.action0 && frame < anim.action1 {
                     let reach = dist3d - size;
                     let id = p.id;
                     if reach < 10.0
                         && angle.abs() < PI / 4.0
                         && host.damage(a.target, dmg, None, id)
                     {
+                        hit = true;
                         self.events.push(Event::Hit {
                             piki: id,
                             creature: a.target,
@@ -590,13 +612,16 @@ impl Sim {
                             latched: false,
                         });
                     }
-                    if self.params.ai.attack_once != 0 {
+                }
+                if frame >= anim.end {
+                    // KEY_Finished: one attack done (aiconst p10), else back to state 0,
+                    // which swings again if still in reach.
+                    if attack_once {
                         return self.finish_attack(pi);
                     }
-                    // Swing finished: back to state 0, which re-swings if still in reach.
                     mode = AttackMode::Approach;
                 } else {
-                    mode = AttackMode::Swing { timer: t };
+                    mode = AttackMode::Swing { frame, hit };
                 }
             }
             AttackMode::Latched { .. } => unreachable!(),

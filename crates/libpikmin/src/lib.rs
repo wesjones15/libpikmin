@@ -4,6 +4,7 @@
 //! The sim never touches a game directly: everything goes through [`Host`]. Units are the
 //! decomp's (roughly cm); hosts convert.
 
+pub mod anim;
 pub mod captain;
 pub mod clock;
 pub mod event;

@@ -12,6 +12,8 @@
 
 use std::fmt;
 
+use crate::anim::AnimTimings;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParmError {
     Truncated,
@@ -216,6 +218,7 @@ pub struct Params {
     pub piki: PikiParams,
     pub plate: PlateParams,
     pub ai: AiParams,
+    pub anim: AnimTimings,
 }
 
 impl Default for Params {
@@ -237,6 +240,7 @@ impl Default for Params {
             piki: PikiParams::default(),
             plate: PlateParams::default(),
             ai: AiParams::default(),
+            anim: AnimTimings::default(),
         }
     }
 }
@@ -286,6 +290,27 @@ impl Params {
                 apply(self, &std::fs::read(&path)?)?;
                 applied.push(name);
             }
+        }
+        Ok(applied)
+    }
+
+    /// `pikis/animMgr.bin`: attack and cling animation timings.
+    pub fn apply_anim_mgr_bin(&mut self, data: &[u8]) -> Result<(), ParmError> {
+        self.anim = AnimTimings::from_anim_mgr_bin(data)?;
+        Ok(())
+    }
+
+    /// Loads everything libpikmin reads from a folder extracted from the user's disc, laid
+    /// out like `files/dataDir` (`parms/*.bin`, `pikis/animMgr.bin`). Returns what it applied.
+    pub fn load_extracted(
+        &mut self,
+        root: &std::path::Path,
+    ) -> Result<Vec<&'static str>, Box<dyn std::error::Error>> {
+        let mut applied = self.load_p1_dir(&root.join("parms"))?;
+        let anim = root.join("pikis/animMgr.bin");
+        if anim.exists() {
+            self.apply_anim_mgr_bin(&std::fs::read(anim)?)?;
+            applied.push("animMgr.bin");
         }
         Ok(applied)
     }

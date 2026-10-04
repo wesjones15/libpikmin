@@ -319,7 +319,7 @@ fn thrown_piki_latches_on_and_keeps_hitting() {
     let target = creature_at_cursor(&mut sim, &mut host, c, 1000.0);
 
     throw_once(&mut sim, &mut host, c, &mut ev);
-    run(&mut sim, &mut host, 3.0, &mut ev);
+    run(&mut sim, &mut host, 4.0, &mut ev);
 
     let latched: Vec<_> = sim
         .pikis()
@@ -343,7 +343,50 @@ fn thrown_piki_latches_on_and_keeps_hitting() {
 }
 
 #[test]
-fn attack_once_drops_off_after_one_hit() {
+fn latched_hits_follow_the_cling_animation() {
+    let mut sim = Sim::new(retail_params(), 9);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    squad(&mut sim, c, 3, Vec3::ZERO);
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 2.0, &mut ev);
+    creature_at_cursor(&mut sim, &mut host, c, 1000.0);
+
+    sim.set_input(
+        c,
+        CaptainInput {
+            throw: true,
+            ..Default::default()
+        },
+    );
+    let mut latched_at = None;
+    let mut hits_at = Vec::new();
+    for i in 0..200 {
+        if i == 30 {
+            sim.set_input(c, CaptainInput::default());
+        }
+        sim.step(&mut host);
+        let tick = sim.tick();
+        for e in sim.drain_events() {
+            match e {
+                Event::Latched { .. } => latched_at = Some(tick),
+                Event::Hit { latched: true, .. } => hits_at.push(tick),
+                _ => {}
+            }
+        }
+    }
+    let latched_at = latched_at.expect("should latch");
+    assert!(hits_at.len() >= 4, "{hits_at:?}");
+    // kuttuku.dca: KEY_Action0 at frame 11, loop 11→30, 30 frames/s = 1 frame per tick.
+    assert_eq!(hits_at[0] - latched_at, 11, "first hit");
+    for w in hits_at.windows(2) {
+        assert_eq!(w[1] - w[0], 19, "loop period");
+    }
+}
+
+#[test]
+fn attack_once_never_releases_latched_pikmin() {
+    // The cling animation loops, so KEY_Finished never fires and p10 has no effect on it.
     let mut params = retail_params();
     params.ai.attack_once = 1; // code default
     let mut sim = Sim::new(params, 9);
@@ -354,9 +397,45 @@ fn attack_once_drops_off_after_one_hit() {
     run(&mut sim, &mut host, 2.0, &mut ev);
     let target = creature_at_cursor(&mut sim, &mut host, c, 1000.0);
     throw_once(&mut sim, &mut host, c, &mut ev);
-    run(&mut sim, &mut host, 3.0, &mut ev);
-    assert_eq!(host.hits.iter().filter(|(id, _)| *id == target).count(), 1);
-    assert!(sim.pikis().iter().all(|p| p.state.latched_to().is_none()));
+    run(&mut sim, &mut host, 4.0, &mut ev);
+    assert!(host.hits.iter().filter(|(id, _)| *id == target).count() >= 4);
+    assert!(
+        sim.pikis()
+            .iter()
+            .any(|p| p.state.latched_to() == Some(target))
+    );
+}
+
+#[test]
+fn attack_once_stops_after_one_swing() {
+    let mut params = retail_params();
+    params.ai.attack_once = 1;
+    let mut sim = Sim::new(params, 13);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    squad(&mut sim, c, 3, Vec3::ZERO);
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 2.0, &mut ev);
+    aim_cursor(&mut sim, &mut host, c, Vec2::new(1.0, 0.0), 0.5);
+    let at = sim.captain(c).cursor_world;
+    // Low creature so a landed Pikmin swings at it from the ground.
+    host.creatures.push(Dummy {
+        id: 7,
+        pos: Vec3::new(at.x, 0.0, at.z + 50.0),
+        radius: 12.0,
+        height: 4.0,
+        hp: 1000.0,
+    });
+    throw_once(&mut sim, &mut host, c, &mut ev);
+    run(&mut sim, &mut host, 4.0, &mut ev);
+
+    let swings = ev
+        .iter()
+        .filter(|e| matches!(e, Event::Hit { latched: false, .. }))
+        .count();
+    let latched = ev.iter().any(|e| matches!(e, Event::Latched { .. }));
+    assert!(!latched, "this setup should produce a ground swing");
+    assert_eq!(swings, 1, "one swing, then the attack is over");
 }
 
 #[test]
