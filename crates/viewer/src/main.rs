@@ -3,15 +3,19 @@
 //! Controls: WASD/arrows move (hold Ctrl for a light tilt that only moves the cursor),
 //! Space = throw (hold, release to throw), Shift / right mouse = whistle, X = dismiss,
 //! Tab = switch captain, C = spawn a creature at the cursor, K = make creatures shake,
-//! F1 = formation debug, R = reset, mouse wheel = zoom.
+//! F1 = formation debug, R = reset, mouse wheel = zoom. Space next to a sprout plucks it.
+//!
+//! Dead creatures become corpses the Pikmin can carry to the Onions (red, yellow, blue).
 
 use std::path::PathBuf;
 
 use libpikmin::captain::WhistleState;
 use libpikmin::host::{CreatureFrame, CreatureId, CreaturePart};
+use libpikmin::onion::OnionAnim;
 use libpikmin::piki::AttackMode;
 use libpikmin::{
-    CaptainId, CaptainInput, Event, Host, Params, PikiColor, PikiId, PikiState, Sim, Vec2, Vec3,
+    CaptainId, CaptainInput, Event, Happa, Host, Params, PelletDesc, PelletId, PelletState,
+    PikiColor, PikiId, PikiState, Sim, SproutState, Vec2, Vec3,
 };
 use macroquad::prelude::*;
 
@@ -26,6 +30,7 @@ struct Dummy {
     wander: Vec3,
     shake_timer: f32,
     flash: f32,
+    corpse: Option<PelletId>,
 }
 
 #[derive(Default)]
@@ -56,6 +61,7 @@ impl World {
             wander: pos,
             shake_timer: 3.0,
             flash: 0.0,
+            corpse: None,
         });
     }
 
@@ -65,6 +71,23 @@ impl World {
             let c = &mut self.creatures[i];
             c.flash = (c.flash - dt).max(0.0);
             if c.hp <= 0.0 {
+                // Dead: becomes a corpse the Pikmin can carry. Carry weights and seeds are this
+                // host's choice (Pikmin 1's own per-enemy table lives in the disc's pelMgr.bin).
+                if c.corpse.is_none() {
+                    let min = (c.radius / 6.0).round().max(1.0) as u32;
+                    c.corpse = Some(sim.spawn_pellet(PelletDesc {
+                        pos: c.pos,
+                        yaw: c.yaw,
+                        radius: c.radius * 0.8,
+                        height: c.height,
+                        min_carriers: min,
+                        max_carriers: min * 2,
+                        seeds_matching: min as i32 + 1,
+                        seeds_other: min as i32 + 1,
+                        color: None,
+                        creature: Some(c.id),
+                    }));
+                }
                 continue;
             }
             // Slow wander so latched Pikmin visibly ride along.
@@ -98,7 +121,7 @@ impl Host for World {
 
     fn creatures(&mut self, out: &mut CreatureFrame) {
         out.clear();
-        for c in &self.creatures {
+        for c in self.creatures.iter().filter(|c| c.hp > 0.0) {
             let body = CreaturePart {
                 centre: c.pos + Vec3::new(0.0, c.height, 0.0),
                 radius: c.radius,
@@ -193,6 +216,9 @@ fn new_game() -> Game {
     world.spawn(Vec3::new(200.0, 0.0, 150.0), 26.0, 750.0);
     world.spawn(Vec3::new(-100.0, 0.0, 300.0), 18.0, 300.0);
     world.spawn(Vec3::new(350.0, 0.0, -50.0), 40.0, 2000.0);
+    sim.add_onion(Vec3::new(-220.0, 0.0, -260.0), &[PikiColor::Red]);
+    sim.add_onion(Vec3::new(0.0, 0.0, -340.0), &[PikiColor::Yellow]);
+    sim.add_onion(Vec3::new(220.0, 0.0, -260.0), &[PikiColor::Blue]);
     Game {
         sim,
         world,
@@ -301,13 +327,89 @@ async fn main() {
 
         draw_grid(&to_screen, zoom, cam);
 
-        for c in &g.world.creatures {
-            let s = to_screen(c.pos);
-            if c.hp <= 0.0 {
-                draw_circle(s.x, s.y, c.radius * zoom, Color::from_rgba(90, 80, 70, 200));
-                draw_text("corpse", s.x - 22.0, s.y + 4.0, 18.0, LIGHTGRAY);
+        for o in g.sim.onions() {
+            let s = to_screen(o.pos);
+            let col = piki_color(o.colors[0]);
+            draw_circle(s.x, s.y, 34.0 * zoom, Color::new(col.r, col.g, col.b, 0.35));
+            draw_circle_lines(s.x, s.y, 34.0 * zoom, 3.0, col);
+            let state = match o.anim {
+                OnionAnim::Idle => "",
+                OnionAnim::Suction { .. } => "slurp",
+                OnionAnim::Emitting { .. } => "seeds!",
+            };
+            let stored: u32 = o.stored.iter().sum();
+            draw_text(
+                format!("Onion {state}"),
+                s.x - 30.0,
+                s.y - 38.0 * zoom,
+                18.0,
+                WHITE,
+            );
+            if stored > 0 {
+                draw_text(
+                    format!("{stored} inside"),
+                    s.x - 26.0,
+                    s.y + 6.0,
+                    16.0,
+                    WHITE,
+                );
+            }
+        }
+
+        for pel in g.sim.pellets() {
+            if pel.state == PelletState::Gone {
                 continue;
             }
+            let r = pel.desc.radius * pel.scale * zoom;
+            let shadow = to_screen(Vec3::new(pel.pos.x, 0.0, pel.pos.z));
+            draw_circle(shadow.x, shadow.y, r, Color::from_rgba(0, 0, 0, 60));
+            let s = lifted(pel.pos + Vec3::new(0.0, pel.desc.height * 0.5, 0.0));
+            draw_circle(s.x, s.y, r, Color::from_rgba(140, 90, 110, 255));
+            draw_circle_lines(s.x, s.y, r, 2.0, BLACK);
+            if !matches!(pel.state, PelletState::Sucking { .. }) {
+                let label = format!("{}/{}", pel.carriers.len(), pel.desc.min_carriers);
+                draw_text(&label, s.x - 10.0, s.y - r - 6.0, 18.0, WHITE);
+            }
+        }
+
+        for sp in g.sim.sprouts() {
+            let col = piki_color(sp.color);
+            match sp.state {
+                SproutState::Flying => {
+                    let sh = to_screen(Vec3::new(sp.pos.x, 0.0, sp.pos.z));
+                    draw_circle(sh.x, sh.y, 2.0 * zoom, Color::from_rgba(0, 0, 0, 70));
+                    let s = lifted(sp.pos);
+                    draw_circle(s.x, s.y, 3.0 * zoom, col);
+                }
+                SproutState::Buried { .. } => {}
+                SproutState::Tane { .. } | SproutState::Wilted { .. } => {
+                    let s = to_screen(sp.pos);
+                    draw_circle(s.x, s.y, 1.5 * zoom, Color::from_rgba(110, 80, 40, 255));
+                }
+                SproutState::Ready { .. } => {
+                    let s = to_screen(sp.pos);
+                    let top = vec2(s.x, s.y - 7.0 * zoom);
+                    draw_line(
+                        s.x,
+                        s.y,
+                        top.x,
+                        top.y,
+                        1.5,
+                        Color::from_rgba(120, 220, 120, 255),
+                    );
+                    let (tr, tc) = match sp.happa {
+                        Happa::Leaf => (2.0, Color::from_rgba(90, 200, 90, 255)),
+                        Happa::Bud => (2.0, WHITE),
+                        Happa::Flower => (3.0, Color::from_rgba(255, 230, 250, 255)),
+                    };
+                    draw_circle(top.x, top.y, tr * zoom, tc);
+                    draw_circle(s.x, s.y, 1.5 * zoom, col);
+                }
+            }
+        }
+
+        for c in g.world.creatures.iter().filter(|c| c.hp > 0.0) {
+            let s = to_screen(c.pos);
             draw_circle(s.x, s.y, c.radius * zoom, Color::from_rgba(0, 0, 0, 60));
             let body = lifted(c.pos + Vec3::new(0.0, c.height, 0.0));
             let col = if c.flash > 0.0 {
@@ -429,8 +531,15 @@ async fn main() {
                 count(&|s| s.latched_to().is_some()),
                 count(&|s| matches!(s, PikiState::Knocked { .. })),
             ),
+            format!(
+                "carrying {} | sprouts {} (pluckable {}) | Pikmin {}",
+                count(&|s| matches!(s, PikiState::Carry(_))),
+                g.sim.sprouts().count(),
+                g.sim.sprouts().filter(|s| s.pluckable()).count(),
+                g.sim.pikis().iter().filter(|p| p.is_alive()).count(),
+            ),
             format!("hits {}  stolen {}  tick {}  {} fps  |  {}", g.hits, g.stolen, g.sim.tick(), get_fps(), g.params_source),
-            "WASD move (Ctrl: aim only)  Space throw  Shift/RMB whistle  X dismiss  Tab captain  C creature  K shake  F1 slots  R reset".into(),
+            "WASD move (Ctrl: aim only)  Space throw/pluck  Shift/RMB whistle  X dismiss  Tab captain  C creature  K shake  F1 slots  R reset".into(),
         ];
         for (i, l) in lines.iter().enumerate() {
             draw_text(l, 12.0, 22.0 + i as f32 * 20.0, 20.0, WHITE);

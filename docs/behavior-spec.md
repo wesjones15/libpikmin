@@ -195,13 +195,89 @@ The original resolves creature-vs-creature collision with inverse masses (Navi p
 We push grounded Pikmin apart on XZ, and push them and captains out of creature parts and
 captains. Pikmin walking to the hand ignore the captain's body.
 
+## 9. Corpses and pellets — implemented
+
+A dead enemy becomes a pellet: `BTeki::dieSoon` → `becomePellet(typeID)` at its `'carc'`
+collision sphere (plugPikiNakata/tekibteki.cpp). From then on it's a normal carryable with a
+`PelletConfig` (pelletMgr.cpp): min/max carriers (p01/p02) and Onion seeds (p06 matching, p07
+otherwise; negative = fireworks).
+- Hosts call `Sim::spawn_pellet(PelletDesc)` when a creature dies, choosing min/max carriers and
+  seeds (Pikmin 1's own table is in `pelMgr.bin`). They then drive their corpse object from
+  `Pellet::{pos, yaw, scale}` until `Event::PelletDelivered`.
+- Carry slots: `max_carriers` evenly spaced around the bottom radius, angle `TAU/max·i`
+  (`Pellet::getSlotLocalPos`). Corpses have no colour, so they always give `seeds_matching`
+  (the retail corpse configs have equal p06/p07 anyway).
+
+## 10. Carrying (ActTransport) — implemented
+
+aiTransport.cpp:
+- **Starting.** A thrown Pikmin that touches a pellet with a free slot starts carrying it
+  (`PikiFlyingState::procCollideMsg`). So does a landed one, if a pellet is the nearest job
+  within `mIdleWorkSearchRange` of its edge (`graspSituation` compares enemies and pellets by distance).
+- **Go.** Head for a random free slot (`getRandomFreeSlotIndex`). After 60 ticks within 100 of
+  it, switch to the nearest free slot, or give up if that's the same one. Within 6, take the slot
+  if it's free, else the nearest free one.
+- **Lift.** Hold the slot playing PICKLOOP. Its `KEY_Action0` (frame 10) marks this carrier
+  lifted (`mIsLiftActionDone`). When lifted carriers ≥ min, the stick leader decides the goal and
+  the pellet starts moving (`doLift`).
+- **Goal (`decideGoal`).** The majority colour among carriers (ties at random) picks the Onion.
+  With several Onions accepting that colour we take the nearest. If none accepts it, we take the
+  nearest Onion and use its colour.
+- **Speed.** Carriers count 1 + 0.5·leaf stage, so leaf 1, bud 1.5, flower 2 (`getCarriers`).
+  - max = 0.7·`mMaxLeafMoveSpeed`, min = 0.5·max
+  - speed = min + (carriers + 1 − minCarry) / maxCarry · (max − min)
+  - Retail values give 42–84.
+- **Too few carriers.** If carriers fall below the minimum while moving, the pellet is put down.
+  The original's carriers then go free and re-grab through the free AI; ours keep hold and struggle
+  (Lift), which looks the same.
+- **Paths.** The original follows the map's route graph (`RouteMgr`, `crMove`). We ask
+  `Host::carry_path` for waypoints (default: a straight line). No path = put down.
+- **Arrival.** Within 10 (XZ) of the Onion's goal point (`GoalItem::getGoalPos` = its position),
+  carriers let go and the pellet enters `PelletGoalState`.
+
+## 11. Onion — implemented
+
+goalItem.cpp, pelletState.cpp, itemAI.cpp `GoalAI`:
+- **Suck-in.** The pellet waits 1.5 s, then moves to the suck point (Onion + 74 up) with speed
+  accelerating at 720/s², shrinking to 25% (`PelletGoalState::exec`). Then `GoalItem::suckMe` adds
+  the seed count (fireworks if negative).
+- **Seed timing** comes from the Onion's animations (`objects/goal/anims.bin`). "suction"
+  (48 frames) plays, then "flowrot" loops 20→40, and **one seed is launched at each loop end**:
+  the first 40 frames after the suction, then every 20 frames (0.67 s).
+- **Seed flight.** From 110 above the Onion at (290·sin r, 800, 290·cos r), with r random.
+  Gravity applies plus air drag with R = 10 − 0.5·rand (`PikiHeadItem::startAI`):
+  `vy −= dt·R·vy` and `vxz −= dt·R·0.2·vxz` (`Creature::moveVelocity`, creatureMove.cpp). Seeds
+  rise about 85, drift about 145 out and float down at about 56/s.
+- **Field limit.** If Pikmin + sprouts ≥ aiconst p15, the seed stays inside the Onion
+  (`mHeldPikis`) instead. Getting stored Pikmin back out (the Onion menu) is not implemented yet.
+- **Colours.** An Onion accepts a *set* of colours: one per Onion like Pikmin 1, or several for
+  a shared Onion. Seeds take the delivery's colour.
+
+## 12. Sprouts — implemented
+
+`PikiHeadAI` (itemAI.cpp). Each timer adds a random 0–2 s.
+- Landing buries the seed for `mSeedUpTime`, then it shows as a seed for `mPluckWaitTime`.
+- It then becomes pluckable (`canPullout`: states Wait/Unk7/Growuped) and grows leaf → bud →
+  flower every `mGrowUpTime`.
+- A flower wilts after `mWiltTime` and reburies as a leaf after `mRebirthSeedTime`.
+- Retail: 0.1 s, 5 s, 120 s, 180 s and 60 s respectively.
+
+## 13. Plucking — implemented
+
+`Navi::procActionButton`, `NaviNukuAdjustState`, `NaviNukuState`:
+- **Reach.** The action button plucks instead of throwing when a pluckable sprout is within reach
+  and within 25 vertically. Reach is `mActionRadius` (retail 25) if within 220 of any Onion, else
+  `mPluckDistanceOutsideOnyon` (15; not in the retail file).
+- **Adjust.** The captain steps to 6 units short of the sprout. He turns 20% of the angle per
+  tick (at least π/20) and moves at 100/s, slowing to 0.5 per tick when close. This ends when
+  facing within π/10 and closer than 1. Our timeout is 2 s; the original uses an odometer.
+- **Pull.** "NUKU" plays; the Pikmin comes out at `KEY_Action0` (frame 23) with the sprout's
+  colour and leaf stage, and joins the squad. The captain is locked until frame 39.
+  Pressing again during the pull chains to the next sprout.
+
 ## Planned
 
-- Carry: `ActTransport` (aiTransport.cpp), `Pellet`/`PelletConfig` (pelletMgr.cpp). Speed:
-  max = 0.7·runSpeed, min = 0.5·max, speed = min + (carriers + 1 − minCarry)/maxCarry·(max − min).
-  Below the minimum carrier count the object is put down. Paths come from `Host`.
-- Corpses: `BTeki::dieSoon` → `becomePellet` (plugPikiNakata/tekibteki.cpp).
-- Onion: `GoalItem` (goalItem.cpp), seeds/sprouts/pluck. The Onion will hold a **set of colors**:
-  one Onion per color (Pikmin 1 style) or a single shared Onion are both just configuration.
 - Pikmin 2 types (Purple, White, Bulbmin), Candypop Buds, hazards.
 - Pikmin death (eaten, crushed), captain damage.
+- Onion menu (calling stored Pikmin out, putting them away), sunset.
+- Free-mode AI (`ActFree`: wandering and the periodic work search).
