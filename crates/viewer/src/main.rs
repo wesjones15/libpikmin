@@ -6,6 +6,8 @@
 //! F1 = formation debug, R = reset, mouse wheel = zoom. Space next to a sprout plucks it.
 //!
 //! Dead creatures become corpses the Pikmin can carry to the Onions (red, yellow, blue).
+//! Creatures fight back: they chase, bite (eating up to 3 Pikmin, hurting captains) and the big
+//! one stomps. H revives (or heals) the active captain.
 
 use std::path::PathBuf;
 
@@ -31,6 +33,9 @@ struct Dummy {
     shake_timer: f32,
     flash: f32,
     corpse: Option<PelletId>,
+    bite_timer: f32,
+    chew_timer: f32,
+    stomp_timer: f32,
 }
 
 #[derive(Default)]
@@ -62,6 +67,9 @@ impl World {
             shake_timer: 3.0,
             flash: 0.0,
             corpse: None,
+            bite_timer: 2.0,
+            chew_timer: 0.0,
+            stomp_timer: 5.0,
         });
     }
 
@@ -90,14 +98,86 @@ impl World {
                 }
                 continue;
             }
-            // Slow wander so latched Pikmin visibly ride along.
-            let to = c.wander - c.pos;
-            if to.length() < 10.0 {
-                c.wander = c.pos + Vec3::new((r1 - 0.5) * 300.0, 0.0, (r2 - 0.5) * 300.0);
+            // A simple enemy AI (this host's, not Pikmin's): chase the nearest Pikmin or
+            // captain on the ground, bite, chew. The sim only gets told what happened.
+            c.bite_timer -= dt;
+            c.stomp_timer -= dt;
+            let id = c.id;
+            if c.chew_timer > 0.0 {
+                c.chew_timer -= dt;
+                if c.chew_timer <= 0.0 {
+                    sim.chew(id);
+                }
             } else {
-                let step = to.normalize() * 25.0 * dt;
-                c.pos += step;
-                c.yaw = step.x.atan2(step.z);
+                let mut target = None;
+                let mut best = 200.0f32;
+                for cap in sim.captains().iter().filter(|k| !k.down) {
+                    let d = (cap.pos - c.pos).with_y(0.0).length();
+                    if d < best {
+                        best = d;
+                        target = Some(cap.pos);
+                    }
+                }
+                for pk in sim.pikis() {
+                    let free = pk.is_alive()
+                        && pk.on_ground
+                        && pk.state.latched_to().is_none()
+                        && !matches!(
+                            pk.state,
+                            PikiState::Swallowed { .. } | PikiState::Pressed { .. }
+                        );
+                    let d = (pk.pos - c.pos).with_y(0.0).length();
+                    if free && d < best {
+                        best = d;
+                        target = Some(pk.pos);
+                    }
+                }
+                let fwd = Vec3::new(c.yaw.sin(), 0.0, c.yaw.cos());
+                let mouth = c.pos + fwd * (c.radius + 6.0) + Vec3::new(0.0, 6.0, 0.0);
+                match target {
+                    Some(t) if best < c.radius + 24.0 && c.bite_timer <= 0.0 => {
+                        let eaten = sim.swallow_pikis(id, 0, mouth, 20.0, 3);
+                        let caps: Vec<_> = sim
+                            .captains()
+                            .iter()
+                            .filter(|k| !k.down && (k.pos - mouth).with_y(0.0).length() < 26.0)
+                            .map(|k| k.id)
+                            .collect();
+                        for k in caps {
+                            sim.damage_captain(k, 10.0); // InteractSwallow::actNavi takes 10
+                        }
+                        c.bite_timer = 2.5;
+                        if eaten > 0 {
+                            c.chew_timer = 1.0;
+                        }
+                        let _ = t;
+                    }
+                    Some(t) => {
+                        let to = (t - c.pos).with_y(0.0);
+                        if to.length() > c.radius + 10.0 {
+                            let step = to.normalize() * 40.0 * dt;
+                            c.pos += step;
+                        }
+                        c.yaw = to.x.atan2(to.z);
+                    }
+                    None => {
+                        let to = c.wander - c.pos;
+                        if to.length() < 10.0 {
+                            c.wander =
+                                c.pos + Vec3::new((r1 - 0.5) * 300.0, 0.0, (r2 - 0.5) * 300.0);
+                        } else {
+                            let step = to.normalize() * 25.0 * dt;
+                            c.pos += step;
+                            c.yaw = step.x.atan2(step.z);
+                        }
+                    }
+                }
+                // The big one stomps when Pikmin crowd it.
+                if c.radius >= 35.0 && c.stomp_timer <= 0.0 && best < c.radius + 30.0 {
+                    sim.crush_pikis_in_sphere(c.pos, c.radius + 30.0, 20.0);
+                    sim.shake_off(id);
+                    c.stomp_timer = 6.0;
+                }
             }
             // Shake when enough Pikmin hang on, like most Pikmin 1 enemies.
             c.shake_timer -= dt;
@@ -304,6 +384,15 @@ async fn main() {
             let at = g.sim.captain(active).cursor_world;
             g.world.spawn(Vec3::new(at.x, 0.0, at.z), 24.0, 600.0);
         }
+        if is_key_pressed(KeyCode::H) {
+            let c = g.sim.captain(active);
+            if c.down {
+                let pos = c.pos;
+                g.sim.revive_captain(active, pos);
+            } else {
+                g.sim.heal_captain(active, None);
+            }
+        }
         g.world.update(dt, &mut g.sim, is_key_pressed(KeyCode::K));
         g.sim.advance(&mut g.world, dt);
         for e in g.sim.drain_events() {
@@ -439,7 +528,7 @@ async fn main() {
         }
 
         // Pikmin: ground ones first, then airborne/latched on top.
-        let mut order: Vec<_> = g.sim.pikis().iter().filter(|p| p.is_alive()).collect();
+        let mut order: Vec<_> = g.sim.pikis().iter().filter(|p| p.on_field()).collect();
         order.sort_by(|a, b| a.pos.y.total_cmp(&b.pos.y));
         for p in &order {
             let shadow = to_screen(Vec3::new(p.pos.x, 0.0, p.pos.z));
@@ -452,8 +541,30 @@ async fn main() {
                 );
             }
             let s = lifted(p.pos);
-            let r = (p.size * zoom).max(2.0);
-            draw_circle(s.x, s.y, r, piki_color(p.color));
+            let mut r = (p.size * zoom).max(2.0);
+            let mut col = piki_color(p.color);
+            match p.state {
+                PikiState::Dying { .. } => {
+                    col = Color::new(col.r * 0.5, col.g * 0.5, col.b * 0.5, 1.0)
+                }
+                PikiState::Fading { timer } => {
+                    r *= (timer / 1.5).clamp(0.0, 1.0);
+                    col.a = 0.6;
+                }
+                PikiState::Swallowed { .. } => {
+                    r *= 0.7;
+                    col.a = 0.45;
+                }
+                PikiState::Pressed { .. } => {
+                    draw_ellipse(s.x, s.y, r * 2.0, r * 0.5, 0.0, col);
+                    continue;
+                }
+                _ => {}
+            }
+            if r < 0.5 {
+                continue;
+            }
+            draw_circle(s.x, s.y, r, col);
             let outline = match p.state {
                 PikiState::Attack(a) if matches!(a.mode, AttackMode::Latched { .. }) => Some(WHITE),
                 PikiState::Attack(_) => Some(ORANGE),
@@ -484,7 +595,26 @@ async fn main() {
             } else {
                 Color::from_rgba(120, 200, 255, 255)
             };
-            draw_circle(s.x, s.y, 9.0 * zoom, col);
+            let body = if c.down {
+                GRAY
+            } else if c.damage_frames > 0.0 {
+                WHITE
+            } else {
+                col
+            };
+            draw_circle(s.x, s.y, 9.0 * zoom, body);
+            let hp = (c.health / params.navi.health).clamp(0.0, 1.0);
+            draw_rectangle(s.x - 15.0, s.y + 11.0 * zoom, 30.0, 4.0, DARKGRAY);
+            draw_rectangle(
+                s.x - 15.0,
+                s.y + 11.0 * zoom,
+                30.0 * hp,
+                4.0,
+                if hp > 0.25 { GREEN } else { RED },
+            );
+            if c.down {
+                draw_text("DOWN (H)", s.x - 30.0, s.y + 30.0 * zoom, 18.0, RED);
+            }
             let tip = s + vec2(c.face.sin(), -c.face.cos()) * 14.0 * zoom;
             draw_line(s.x, s.y, tip.x, tip.y, 2.0, BLACK);
             draw_text(
@@ -539,7 +669,7 @@ async fn main() {
                 g.sim.pikis().iter().filter(|p| p.is_alive()).count(),
             ),
             format!("hits {}  stolen {}  tick {}  {} fps  |  {}", g.hits, g.stolen, g.sim.tick(), get_fps(), g.params_source),
-            "WASD move (Ctrl: aim only)  Space throw/pluck  Shift/RMB whistle  X dismiss  Tab captain  C creature  K shake  F1 slots  R reset".into(),
+            "WASD move (Ctrl: aim only)  Space throw/pluck  Shift/RMB whistle  H revive/heal  X dismiss  Tab captain  C creature  K shake  F1 slots  R reset".into(),
         ];
         for (i, l) in lines.iter().enumerate() {
             draw_text(l, 12.0, 22.0 + i as f32 * 20.0, 20.0, WHITE);
