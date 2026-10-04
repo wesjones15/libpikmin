@@ -1,0 +1,12 @@
+[package]
+name = "libpikmin-ffi"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "pikmin"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+libpikmin.workspace = true
