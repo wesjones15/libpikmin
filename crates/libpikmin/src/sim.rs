@@ -59,13 +59,14 @@ impl Sim {
 
     pub fn add_captain(&mut self, pos: Vec3) -> CaptainId {
         let id = CaptainId(self.captains.len() as u32);
-        self.captains.push(Captain::new(id, pos));
+        self.captains
+            .push(Captain::new(id, pos, self.params.navi.health));
         id
     }
 
     /// Spawns an idle Pikmin. Returns `None` at the field limit (`aiconst` p15, 100 on the disc).
     pub fn spawn_piki(&mut self, color: PikiColor, pos: Vec3) -> Option<PikiId> {
-        let alive = self.pikis.iter().filter(|p| p.is_alive()).count();
+        let alive = self.pikis.iter().filter(|p| p.on_field()).count();
         if alive >= self.params.ai.max_pikis_on_field.max(0) as usize {
             return None;
         }
@@ -86,6 +87,7 @@ impl Sim {
             on_ground: false,
             captain: None,
             state: PikiState::Idle,
+            health: self.params.piki.piki_max_health,
         });
         Some(id)
     }
@@ -176,6 +178,12 @@ impl Sim {
 
     pub fn piki(&self, id: PikiId) -> &Piki {
         &self.pikis[id.0 as usize]
+    }
+
+    /// Direct access, e.g. for a host to set a Pikmin's leaf stage. Changing `state` here
+    /// bypasses the sim's bookkeeping (squads, carry slots); use the sim's calls for that.
+    pub fn piki_mut(&mut self, id: PikiId) -> &mut Piki {
+        &mut self.pikis[id.0 as usize]
     }
 
     /// The creature snapshot from the last tick.

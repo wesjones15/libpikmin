@@ -41,9 +41,35 @@ pub enum Event {
         damage: f32,
         latched: bool,
     },
+    /// Shaken or flicked off; `creature` is set when it was shaken off a creature.
     KnockedOff {
         piki: PikiId,
+        creature: Option<CreatureId>,
+    },
+    PikiHurt {
+        piki: PikiId,
+        damage: f32,
+    },
+    /// Started dying. It plays a death animation and fades, unless crushed or eaten (fades at once).
+    PikiDied {
+        piki: PikiId,
+        cause: crate::damage::DeathCause,
+    },
+    Swallowed {
+        piki: PikiId,
         creature: CreatureId,
+    },
+    SpitOut {
+        piki: PikiId,
+    },
+    CaptainHurt {
+        captain: CaptainId,
+        damage: f32,
+        health: f32,
+    },
+    /// Health ran out or the host put him down. His squad was released.
+    CaptainDown {
+        captain: CaptainId,
     },
     Dismissed {
         captain: CaptainId,

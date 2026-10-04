@@ -13,6 +13,10 @@
 
 use crate::params::ParmError;
 
+/// `PIKIANIM_Dead`, `Dead2`, `Dead3` (7, 8, 9) → 20, 42, 48: one is picked at random.
+pub const ANIM_DEAD: [usize; 3] = [20, 42, 48];
+/// `PIKIANIM_Damage` (10) → 21 "damage.dca": the captain is invulnerable while it plays.
+pub const ANIM_DAMAGE: usize = 21;
 /// `PIKIANIM_Nuku` (5) → 28 "nuku.dca", captain plucking.
 pub const ANIM_NUKU: usize = 28;
 /// `PIKIANIM_Attack` (23) → 18 "attack1.dca".
@@ -66,6 +70,10 @@ pub struct AnimTimings {
     pub goal_flowrot: AnimTiming,
     /// Onion suck-in reaction.
     pub goal_suction: AnimTiming,
+    /// Lengths of the three death animations (`PikiDyingState`).
+    pub dead: [f32; 3],
+    /// Captain hit reaction (`Navi::finishDamage` at its end).
+    pub damage: AnimTiming,
 }
 
 impl Default for AnimTimings {
@@ -81,6 +89,8 @@ impl Default for AnimTimings {
             nuku: AnimTiming::new(23.0, 24.0, None, 39.0),
             goal_flowrot: AnimTiming::new(30.0, INF, Some((20.0, 40.0)), 58.0),
             goal_suction: AnimTiming::new(INF, INF, None, 48.0),
+            dead: [104.0, 114.0, 129.0],
+            damage: AnimTiming::new(INF, INF, None, 19.0),
         }
     }
 }
@@ -191,6 +201,10 @@ impl AnimTimings {
         self.kuttuku = timing_at(&infos, ANIM_KUTTUKU)?;
         self.pickloop = timing_at(&infos, ANIM_PICKLOOP)?;
         self.nuku = timing_at(&infos, ANIM_NUKU)?;
+        self.damage = timing_at(&infos, ANIM_DAMAGE)?;
+        for (slot, idx) in self.dead.iter_mut().zip(ANIM_DEAD) {
+            *slot = timing_at(&infos, idx)?.end;
+        }
         Ok(())
     }
 

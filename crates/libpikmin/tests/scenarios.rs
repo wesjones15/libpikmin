@@ -85,6 +85,9 @@ fn retail_params() -> Params {
     p.piki.max_leaf_move_speed = 120.0;
     p.piki.min_move_speed = 10.0;
     p.piki.idle_attack_search_range = 70.0;
+    p.piki.piki_max_health = 30.0;
+    p.piki.press_death_factor = 2.5;
+    p.piki.normal_piki_press_factor = 1.0;
     p.piki.min_piki_size = 3.0;
     p.piki.max_piki_size = 5.0;
     p.piki_creature.acceleration = 0.14;
@@ -831,4 +834,219 @@ fn sprouts_grow_to_flower_then_wilt() {
         ev.iter()
             .any(|e| matches!(e, Event::SproutWilted { sprout } if *sprout == s))
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Dying and captain damage
+
+fn died(ev: &[Event], piki: PikiId) -> Option<libpikmin::DeathCause> {
+    ev.iter().find_map(|e| match e {
+        Event::PikiDied { piki: p, cause } if *p == piki => Some(*cause),
+        _ => None,
+    })
+}
+
+#[test]
+fn attacks_use_up_health_then_the_death_animation_plays_and_it_fades() {
+    let mut sim = Sim::new(retail_params(), 41);
+    let mut host = TestHost::default();
+    let id = sim.spawn_piki(PikiColor::Red, Vec3::ZERO).unwrap();
+    assert_eq!(sim.piki(id).health, 30.0, "retail mPikiMaxHealth");
+
+    assert!(sim.attack_piki(id, 15.0));
+    assert!(sim.piki(id).is_alive());
+    assert!(sim.attack_piki(id, 15.0));
+    assert!(matches!(sim.piki(id).state, PikiState::Dying { .. }));
+    assert!(
+        !sim.attack_piki(id, 15.0),
+        "dying Pikmin can't be hit again"
+    );
+
+    let mut ev = Vec::new();
+    // Longest death animation is 129 frames, then 1.5 s of fading.
+    run(&mut sim, &mut host, 129.0 / 30.0 + 1.6, &mut ev);
+    assert!(matches!(sim.piki(id).state, PikiState::Dead));
+    assert!(!sim.piki(id).on_field());
+}
+
+#[test]
+fn a_dying_squad_member_leaves_the_formation() {
+    let mut sim = Sim::new(retail_params(), 42);
+    let c = sim.add_captain(Vec3::ZERO);
+    let ids = squad(&mut sim, c, 3, Vec3::ZERO);
+    sim.attack_piki(ids[0], 100.0);
+    assert!(!sim.captain(c).plate.members.contains(&ids[0]));
+    assert_eq!(sim.captain(c).plate.len(), 2);
+}
+
+#[test]
+fn crushing_kills_at_once_or_flattens_then_recovers() {
+    let mut sim = Sim::new(retail_params(), 43);
+    let mut host = TestHost::default();
+    let weak = sim
+        .spawn_piki(PikiColor::Blue, Vec3::new(0.0, 0.0, 0.0))
+        .unwrap();
+    let strong = sim
+        .spawn_piki(PikiColor::Blue, Vec3::new(10.0, 0.0, 0.0))
+        .unwrap();
+    sim.attack_piki(weak, 20.0); // 10 left
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 0.1, &mut ev);
+
+    assert_eq!(
+        sim.crush_pikis_in_sphere(Vec3::new(5.0, 0.0, 0.0), 20.0, 15.0),
+        2
+    );
+    run(&mut sim, &mut host, 0.1, &mut ev);
+    assert_eq!(died(&ev, weak), Some(libpikmin::DeathCause::Crushed));
+    assert!(matches!(sim.piki(strong).state, PikiState::Pressed { .. }));
+
+    // Retail: 1.5 s stun + mPressDeathFactor (2.5 s) flat, then back up.
+    run(&mut sim, &mut host, 3.5, &mut ev);
+    assert!(matches!(sim.piki(strong).state, PikiState::Pressed { .. }));
+    run(&mut sim, &mut host, 0.7, &mut ev);
+    assert!(matches!(sim.piki(strong).state, PikiState::Idle));
+}
+
+#[test]
+fn swallowed_pikmin_ride_in_the_mouth_and_die_when_chewed() {
+    let mut sim = Sim::new(retail_params(), 44);
+    let mut host = TestHost::default();
+    host.creatures.push(Dummy {
+        id: 9,
+        pos: Vec3::new(0.0, 0.0, 0.0),
+        radius: 15.0,
+        height: 15.0,
+        hp: 100.0,
+    });
+    let a = sim
+        .spawn_piki(PikiColor::Red, Vec3::new(20.0, 0.0, 0.0))
+        .unwrap();
+    let b = sim
+        .spawn_piki(PikiColor::Red, Vec3::new(22.0, 0.0, 5.0))
+        .unwrap();
+    let far = sim
+        .spawn_piki(PikiColor::Red, Vec3::new(200.0, 0.0, 0.0))
+        .unwrap();
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 0.1, &mut ev);
+
+    assert_eq!(
+        sim.swallow_pikis(9, 0, Vec3::new(20.0, 0.0, 0.0), 15.0, 5),
+        2
+    );
+    host.creatures[0].pos.x += 50.0;
+    run(&mut sim, &mut host, 0.2, &mut ev);
+    assert!(
+        (sim.piki(a).pos.x - 50.0).abs() < 20.0,
+        "rides along: {:?}",
+        sim.piki(a).pos
+    );
+    assert!(matches!(sim.piki(far).state, PikiState::Idle));
+
+    assert_eq!(sim.chew(9), 2);
+    run(&mut sim, &mut host, 0.1, &mut ev);
+    assert_eq!(died(&ev, a), Some(libpikmin::DeathCause::Eaten));
+    assert_eq!(died(&ev, b), Some(libpikmin::DeathCause::Eaten));
+}
+
+#[test]
+fn killing_the_creature_frees_whatever_it_swallowed() {
+    let mut sim = Sim::new(retail_params(), 45);
+    let mut host = TestHost::default();
+    host.creatures.push(Dummy {
+        id: 9,
+        pos: Vec3::ZERO,
+        radius: 15.0,
+        height: 15.0,
+        hp: 100.0,
+    });
+    let a = sim
+        .spawn_piki(PikiColor::Red, Vec3::new(15.0, 0.0, 0.0))
+        .unwrap();
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 0.1, &mut ev);
+    sim.swallow_pikis(9, 0, Vec3::new(15.0, 0.0, 0.0), 10.0, 1);
+    host.creatures[0].hp = 0.0;
+    run(&mut sim, &mut host, 0.5, &mut ev);
+    assert!(sim.piki(a).is_alive());
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::SpitOut { piki } if *piki == a))
+    );
+}
+
+#[test]
+fn captain_damage_has_an_invulnerable_window_and_runs_out() {
+    let mut sim = Sim::new(retail_params(), 46);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    let ids = squad(&mut sim, c, 4, Vec3::ZERO);
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 1.0, &mut ev);
+
+    assert!(sim.damage_captain(c, 40.0));
+    assert!(
+        !sim.damage_captain(c, 40.0),
+        "still in the 19-frame damage animation"
+    );
+    run(&mut sim, &mut host, 19.0 / 30.0 + 0.05, &mut ev);
+    assert!(sim.damage_captain(c, 40.0));
+    assert_eq!(sim.captain(c).health, 20.0);
+    run(&mut sim, &mut host, 0.7, &mut ev);
+    assert!(sim.damage_captain(c, 25.0));
+    assert!(
+        !sim.captain(c).down,
+        "goes down when the damage animation ends, not on the hit"
+    );
+    run(&mut sim, &mut host, 0.7, &mut ev);
+    assert!(sim.captain(c).down);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::CaptainDown { captain } if *captain == c))
+    );
+    assert!(sim.captain(c).plate.is_empty(), "the squad was released");
+    for id in &ids {
+        assert!(matches!(sim.piki(*id).state, PikiState::Idle));
+    }
+
+    // Down: no walking.
+    let before = sim.captain(c).pos;
+    sim.set_input(
+        c,
+        CaptainInput {
+            stick: Vec2::new(1.0, 0.0),
+            ..Default::default()
+        },
+    );
+    run(&mut sim, &mut host, 1.0, &mut ev);
+    assert_eq!(sim.captain(c).pos, before);
+
+    sim.revive_captain(c, Vec3::new(10.0, 0.0, 0.0));
+    assert_eq!(sim.captain(c).health, 100.0);
+    run(&mut sim, &mut host, 1.0, &mut ev);
+    assert!(sim.captain(c).pos.x > 50.0, "walks again");
+}
+
+#[test]
+fn a_dead_flower_can_leave_a_seed() {
+    let mut params = retail_params();
+    params.piki.piki_leave_seed_chance = 0.0; // rand >= 0 always: guaranteed seed
+    let mut sim = Sim::new(params, 47);
+    let mut host = TestHost::default();
+    let flower = sim
+        .spawn_piki(PikiColor::Yellow, Vec3::new(40.0, 0.0, 0.0))
+        .unwrap();
+    let leaf = sim
+        .spawn_piki(PikiColor::Yellow, Vec3::new(-40.0, 0.0, 0.0))
+        .unwrap();
+    sim.piki_mut(flower).happa = libpikmin::Happa::Flower;
+    sim.attack_piki(flower, 100.0);
+    sim.attack_piki(leaf, 100.0);
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 6.5, &mut ev);
+    let seeds: Vec<_> = sim.sprouts().collect();
+    assert_eq!(seeds.len(), 1, "only the flower leaves one");
+    assert_eq!(seeds[0].color, PikiColor::Yellow);
+    assert!((seeds[0].pos.x - 40.0).abs() < 5.0);
 }

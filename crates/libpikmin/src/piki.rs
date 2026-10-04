@@ -95,6 +95,27 @@ pub enum PikiState {
     },
     /// Carrying a pellet or corpse (`ActTransport`).
     Carry(crate::carry::Carry),
+    /// Flattened (`PikiPressedState`): invincible for `stun`, gets up when `death_timer` runs out.
+    Pressed {
+        stun: f32,
+        death_timer: f32,
+    },
+    /// In an enemy's mouth (`PikiSwallowedState`), riding its part `part`.
+    Swallowed {
+        creature: CreatureId,
+        part: u32,
+        offset: Vec3,
+    },
+    /// Playing a death animation (`PikiDyingState`).
+    Dying {
+        frame: f32,
+        end: f32,
+    },
+    /// Shrinking out (`PikiDeadState`).
+    Fading {
+        timer: f32,
+    },
+    /// Gone.
     Dead,
 }
 
@@ -141,10 +162,21 @@ pub struct Piki {
     /// Captain this Pikmin follows or last followed (`mNavi`).
     pub captain: Option<CaptainId>,
     pub state: PikiState,
+    /// `mHealth`, starts at `mPikiMaxHealth`.
+    pub health: f32,
 }
 
 impl Piki {
+    /// Not dying or dead.
     pub fn is_alive(&self) -> bool {
+        !matches!(
+            self.state,
+            PikiState::Dying { .. } | PikiState::Fading { .. } | PikiState::Dead
+        )
+    }
+
+    /// Still counts against the field limit (anything but fully gone).
+    pub fn on_field(&self) -> bool {
         !matches!(self.state, PikiState::Dead)
     }
 }
@@ -173,6 +205,10 @@ impl Sim {
         match self.pikis[pi].state {
             PikiState::Dead => {}
             PikiState::Carry(c) => self.piki_carry(pi, c, host, dt),
+            PikiState::Pressed { .. }
+            | PikiState::Swallowed { .. }
+            | PikiState::Dying { .. }
+            | PikiState::Fading { .. } => self.update_dying(pi, host, dt),
             PikiState::Idle => self.piki_idle(pi, host, dt),
             PikiState::Squad { .. } => self.piki_squad(pi, host, dt),
             PikiState::GoHang { captain } => self.piki_go_hang(pi, captain, host, dt),
@@ -191,11 +227,15 @@ impl Sim {
                 self.physics(pi, host, dt);
                 let p = &mut self.pikis[pi];
                 p.target_vel = Vec3::ZERO;
-                p.state = if t <= 0.0 && p.on_ground {
-                    PikiState::Idle
+                if t <= 0.0 && p.on_ground {
+                    if p.health <= 0.0 {
+                        self.start_dying(pi, crate::damage::DeathCause::Attacked);
+                    } else {
+                        p.state = PikiState::Idle;
+                    }
                 } else {
-                    PikiState::Knocked { timer: t }
-                };
+                    p.state = PikiState::Knocked { timer: t };
+                }
             }
         }
     }
@@ -705,13 +745,20 @@ impl Sim {
 
     /// Shaken off a creature (`PikiFlickState`): fly outward and lie on the ground for a while.
     pub(crate) fn knock_off(&mut self, pi: usize, from: CreatureId) {
+        let centre = self.creatures.get(from).map(|c| self.creatures.bounds(c).0);
+        let from_pos = centre.unwrap_or(self.pikis[pi].pos - Vec3::X);
+        self.knock_from(pi, from_pos, Some(from));
+    }
+
+    /// Thrown outward from `from` (120 out, 150 up) and down for a random time between
+    /// `mMinFlickKnockDownTime` and `mMaxFlickKnockDownTime`.
+    pub(crate) fn knock_from(&mut self, pi: usize, from: Vec3, creature: Option<CreatureId>) {
         let pp = &self.params.piki;
         let down = self
             .rng
             .range(pp.min_flick_knockdown_time, pp.max_flick_knockdown_time);
-        let centre = self.creatures.get(from).map(|c| self.creatures.bounds(c).0);
         let p = &mut self.pikis[pi];
-        let out = centre.map(|c| p.pos - c).unwrap_or(Vec3::X);
+        let out = p.pos - from;
         let out = Vec3::new(out.x, 0.0, out.z).normalize_or(Vec3::X);
         p.vel = out * 120.0 + Vec3::new(0.0, 150.0, 0.0);
         p.target_vel = Vec3::ZERO;
@@ -719,7 +766,7 @@ impl Sim {
         p.state = PikiState::Knocked { timer: down };
         self.events.push(Event::KnockedOff {
             piki: p.id,
-            creature: from,
+            creature,
         });
     }
 

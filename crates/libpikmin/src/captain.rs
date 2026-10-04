@@ -75,6 +75,12 @@ pub struct Captain {
     pub plate: Plate,
     /// Plucking a sprout. Movement, whistle and throw are locked meanwhile.
     pub pluck: Option<crate::onion::Pluck>,
+    /// `mHealth`, from `NaviParams::health`.
+    pub health: f32,
+    /// Frames left of the damage animation; invulnerable while > 0.
+    pub damage_frames: f32,
+    /// Health ran out (`NaviDeadState`) or the host put him down.
+    pub down: bool,
     rearrange_pending: bool,
     pub(crate) input: CaptainInput,
     pub(crate) pressed: Pressed,
@@ -88,7 +94,7 @@ pub(crate) struct Pressed {
 }
 
 impl Captain {
-    pub(crate) fn new(id: CaptainId, pos: Vec3) -> Self {
+    pub(crate) fn new(id: CaptainId, pos: Vec3, health: f32) -> Self {
         Self {
             id,
             pos,
@@ -103,6 +109,9 @@ impl Captain {
             throw: ThrowState::Idle,
             plate: Plate::default(),
             pluck: None,
+            health,
+            damage_frames: 0.0,
+            down: false,
             rearrange_pending: false,
             input: CaptainInput::default(),
             pressed: Pressed::default(),
@@ -141,6 +150,16 @@ impl Sim {
     pub(crate) fn update_captain(&mut self, ci: usize, host: &mut dyn Host, dt: f32) {
         let input = self.captains[ci].input;
         let pressed = std::mem::take(&mut self.captains[ci].pressed);
+
+        self.update_captain_damage(ci, dt);
+        if self.captains[ci].down {
+            let c = &mut self.captains[ci];
+            c.vel = Vec3::ZERO;
+            c.target_vel = Vec3::ZERO;
+            c.whistle = WhistleState::Off;
+            c.pluck = None;
+            return;
+        }
 
         if self.update_pluck(ci, dt, pressed.throw) {
             self.captain_move(ci, host, dt, input, true);
@@ -374,10 +393,12 @@ impl Sim {
                 continue;
             }
             let eligible = match p.state {
-                PikiState::Idle
-                | PikiState::Attack(_)
-                | PikiState::Knocked { .. }
-                | PikiState::Carry(_) => true,
+                PikiState::Idle | PikiState::Attack(_) | PikiState::Carry(_) => true,
+                PikiState::Knocked { .. } => p.health > 0.0,
+                PikiState::Pressed { .. }
+                | PikiState::Swallowed { .. }
+                | PikiState::Dying { .. }
+                | PikiState::Fading { .. } => false,
                 PikiState::Squad { .. } => p.captain != Some(me),
                 // In flight or in another captain's hand: can't be grabbed.
                 PikiState::Flying { .. } | PikiState::GoHang { .. } | PikiState::Held { .. } => {
@@ -560,7 +581,7 @@ impl Sim {
     }
 
     /// Dismiss: everyone in the squad goes idle where they stand.
-    fn dismiss(&mut self, ci: usize) {
+    pub(crate) fn dismiss(&mut self, ci: usize) {
         self.cancel_throw(ci);
         let members = std::mem::take(&mut self.captains[ci].plate.members);
         for id in members {

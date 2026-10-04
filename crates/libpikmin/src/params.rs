@@ -170,9 +170,14 @@ parms! {
         max_leaf_move_speed: f32 = 162.5, b"p01";
         max_flower_move_speed: f32 = 220.0, b"p54";
         max_bud_move_speed: f32 = 160.0, b"p65";
+        /// `mPikiMaxHealth`. Retail 30.
+        piki_max_health: f32 = 100.0, b"p03";
         blue_attack_power: f32 = 10.0, b"p04";
         red_attack_power: f32 = 15.0, b"p12";
         yellow_attack_power: f32 = 10.0, b"p13";
+        /// `PikiPressedState`: time flat (after the 1.5 s stun) before getting up.
+        press_death_factor: f32 = 5.0, b"p14";
+        normal_piki_press_factor: f32 = 3.0, b"p15";
         min_piki_size: f32 = 6.0, b"p27";
         max_piki_size: f32 = 10.0, b"p34";
         inv_mass: f32 = 100.0, b"p28";
@@ -192,6 +197,8 @@ parms! {
         wilt_time: f32 = 4.0, b"p52";
         rebirth_seed_time: f32 = 1.0, b"p53";
         post_work_join_party_range: f32 = 250.0, b"p61";
+        /// A dying flower leaves a seed when rand >= this (`Piki::doKill`).
+        piki_leave_seed_chance: f32 = 0.8, b"p56";
     }
 }
 

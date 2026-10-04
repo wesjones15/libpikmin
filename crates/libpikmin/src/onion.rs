@@ -192,7 +192,7 @@ impl Sim {
 
     /// Pikmin plus sprouts, against `aiconst` p15 ("ピキ＋芽 リミット").
     pub(crate) fn field_count(&self) -> usize {
-        self.pikis.iter().filter(|p| p.is_alive()).count() + self.sprouts.iter().flatten().count()
+        self.pikis.iter().filter(|p| p.on_field()).count() + self.sprouts.iter().flatten().count()
     }
 
     pub(crate) fn update_onions(&mut self, dt: f32) {
