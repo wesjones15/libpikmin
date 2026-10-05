@@ -262,6 +262,8 @@ pub struct Params {
     pub plate: PlateParams,
     pub ai: AiParams,
     pub anim: AnimTimings,
+    /// Nectar drop and puddle animation timings (`objects/water`, `objects/fl_water`).
+    pub nectar: crate::nectar::NectarTimings,
     pub extras: Extras,
 }
 
@@ -301,6 +303,7 @@ impl Default for Params {
             plate: PlateParams::default(),
             ai: AiParams::default(),
             anim: AnimTimings::default(),
+            nectar: Default::default(),
             extras: Extras::default(),
         }
     }
@@ -377,6 +380,14 @@ impl Params {
         if goal.exists() {
             self.anim.apply_goal_anims(&std::fs::read(goal)?)?;
             applied.push("goal/anims.bin");
+        }
+        let (water, fall) = (
+            root.join("objects/water/anims.bin"),
+            root.join("objects/fl_water/anims.bin"),
+        );
+        if water.exists() && fall.exists() {
+            self.nectar = crate::anim::nectar_timings(&std::fs::read(water)?, &std::fs::read(fall)?)?;
+            applied.push("water/anims.bin");
         }
         Ok(applied)
     }

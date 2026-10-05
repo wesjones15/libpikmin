@@ -515,6 +515,15 @@ async fn main() {
             let at = g.sim.captain(active).cursor_world;
             g.world.spawn(Vec3::new(at.x, 0.0, at.z), 24.0, 600.0);
         }
+        // N: drop nectar from above the cursor.
+        if is_key_pressed(KeyCode::N) {
+            let at = g.sim.captain(active).cursor_world;
+            g.sim.spawn_nectar(Vec3::new(at.x, 150.0, at.z));
+        }
+        if frames == 1 && std::env::var_os("PIKMIN_NECTAR").is_some() {
+            let at = g.sim.captain(active).pos + Vec3::new(0.0, 0.0, -45.0);
+            g.sim.spawn_nectar(Vec3::new(at.x, 150.0, at.z));
+        }
         // O: the nearest Onion gets 5 seeds of its colour (for watching seeds and sprouts).
         let seed_now = frames == 1 && std::env::var("PIKMIN_SEEDS").is_ok();
         if is_key_pressed(KeyCode::O) || seed_now {
@@ -869,7 +878,7 @@ fn draw_hud(g: &Game) {
             g.sim.pikis().iter().filter(|p| p.is_alive()).count(),
         ),
         format!("hits {}  stolen {}  tick {}  {} fps  |  {}", g.hits, g.stolen, g.sim.tick(), get_fps(), g.params_source),
-        "WASD move (Ctrl: aim only)  Space throw/pluck/punch  Shift/RMB whistle  IJKL swarm  X dismiss  Tab captain  H revive  O seeds  C creature  G shake  V 2D/3D  Q/E camera  F1 slots  R reset".into(),
+        "WASD move (Ctrl: aim only)  Space throw/pluck/punch  Shift/RMB whistle  IJKL swarm  X dismiss  Tab captain  H revive  N nectar  O seeds  C creature  G shake  V 2D/3D  Q/E camera  F1 slots  R reset".into(),
     ];
     for (i, l) in lines.iter().enumerate() {
         draw_text(l, 12.0, 22.0 + i as f32 * 20.0, 20.0, WHITE);

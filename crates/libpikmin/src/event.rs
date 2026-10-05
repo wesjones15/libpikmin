@@ -10,6 +10,14 @@ use crate::{CaptainId, PikiId};
 /// Drain with [`crate::Sim::drain_events`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Event {
+    /// A nectar drop hit the ground; its puddle appears shortly.
+    NectarSplash { pos: Vec3 },
+    /// A nectar puddle finished draining.
+    NectarGone,
+    /// A Pikmin started drinking nectar (`SEF_PIKI_DRINK`).
+    PikiDrinking { piki: PikiId },
+    /// A Pikmin's head became a flower from nectar (`SEF_PIKI_GROW4`).
+    Bloomed { piki: PikiId },
     /// A whistle called Pikmin this tick.
     Whistle {
         captain: CaptainId,

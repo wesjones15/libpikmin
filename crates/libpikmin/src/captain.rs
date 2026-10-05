@@ -461,6 +461,8 @@ impl Sim {
                 PikiState::Flying { .. } | PikiState::GoHang { .. } | PikiState::Held { .. } => {
                     false
                 }
+                // `Navi::callPikis` (navi.cpp) skips drinking and blooming Pikmin.
+                PikiState::Absorb { .. } | PikiState::GrowUp { .. } => false,
                 PikiState::Dead => false,
             };
             if !eligible {

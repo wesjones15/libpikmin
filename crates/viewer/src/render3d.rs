@@ -408,6 +408,10 @@ pub struct Scene3d {
     pellets: [GpuModel; 4],
     pikihead: GpuModel,
     pikihead_anims: AnimSet,
+    puddle: GpuModel,
+    puddle_anims: AnimSet,
+    drop: GpuModel,
+    drop_anims: AnimSet,
     sprouts: HashMap<libpikmin::onion::SproutId, SproutTrack>,
     piki_anims: AnimSet,
     onion_anims: AnimSet,
@@ -462,6 +466,10 @@ impl Scene3d {
                 m(paths::PELLETS[3])?,
             ],
             pikihead: m(paths::PIKIHEAD)?,
+            puddle: m(paths::WATER)?,
+            puddle_anims: AnimSet::load(assets, paths::WATER_ANIM_MGR, paths::WATER_BUNDLE)?,
+            drop: m(paths::FALL_WATER)?,
+            drop_anims: AnimSet::load(assets, paths::FALL_WATER_ANIM_MGR, paths::FALL_WATER_BUNDLE)?,
             pikihead_anims: AnimSet::load(assets, paths::PIKIHEAD_ANIM_MGR, paths::PIKIHEAD_BUNDLE)?,
             sprouts: HashMap::new(),
             piki_anims: AnimSet::load(assets, paths::PIKI_ANIM_MGR, paths::PIKI_BUNDLE)?,
@@ -714,6 +722,30 @@ impl Scene3d {
         }
         self.sprouts.retain(|id, _| live.contains(id));
 
+        // Nectar: falling drops ("leave", then "fall") and puddles, on the sim's own frames.
+        for d in sim.nectar_drops() {
+            let (motion, frame) = match d.state {
+                libpikmin::nectar::DropState::Falling { frame, leaving: true } => (1, frame),
+                libpikmin::nectar::DropState::Falling { frame, .. }
+                | libpikmin::nectar::DropState::Splash { frame, .. } => (0, frame),
+            };
+            let anim = self.drop_anims.get(motion).map(|(_, a)| (a, frame.min(a.frames as f32 - 1.0)));
+            let root = srt_matrix(GVec3::ONE, GVec3::ZERO, d.pos);
+            draw_model(&self.drop, root, anim, Look::default(), &mut ctx);
+        }
+        for n in sim.puddles() {
+            use libpikmin::PuddleState::*;
+            let (motion, frame) = match n.state {
+                Wait { frame } => (0, frame),
+                Touched { frame } => (1, frame),
+                Appear { frame } => (2, frame),
+                Drain { frame } => (3, frame),
+            };
+            let anim = self.puddle_anims.get(motion).map(|(_, a)| (a, frame.min(a.frames as f32 - 1.0)));
+            let root = srt_matrix(GVec3::ONE, GVec3::ZERO, n.pos);
+            draw_model(&self.puddle, root, anim, Look::default(), &mut ctx);
+        }
+
         // Creatures (host-side dummies).
         for &(pos, yaw, radius, height, hp, flash) in creatures {
             let body = pos + GVec3::new(0.0, height, 0.0);
@@ -792,6 +824,11 @@ impl Scene3d {
                     };
                     (m, Clock::Sim(frame))
                 }
+                PikiState::Absorb { frame, .. } => (Motion::Mizunomi, Clock::Sim(frame)),
+                PikiState::GrowUp { frame, second, .. } => (
+                    if second { Motion::GrowUp2 } else { Motion::GrowUp1 },
+                    Clock::Sim(frame),
+                ),
                 PikiState::Fading { timer } => {
                     fade = (timer / 1.5).clamp(0.0, 1.0);
                     scale = GVec3::splat(fade.max(0.05));

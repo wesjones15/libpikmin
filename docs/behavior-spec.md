@@ -370,8 +370,44 @@ naviState.cpp (`NaviDeadState`):
   - Gates, boulders, grass and bridges are the same idea; those objects aren't implemented yet.
 - **Charge.** There's no charge in Pikmin 1 or 2; it arrived in Pikmin 3. Swarming fills that role.
 
+## 18. Nectar — implemented
+
+`MizuItem` with `FallWaterAI` / `WaterAI` (mizuItem.cpp, itemAI.cpp); `PikiNormalState::
+procCollideMsg`, `PikiAbsorbState`, `PikiGrowupState` (pikiState.cpp). Frames are 30 fps and come
+from `objects/fl_water/anims.bin` and `objects/water/anims.bin` (retail values in parentheses).
+
+- **Drop.** Spawned in the air (a Honeywisp drops one when hit). It plays "leave" (8), then loops
+  "fall" (19–23) under gravity. When it touches the ground it jumps to frame 29
+  (`finishMotion(29)`), and the puddle appears at `KEY_Action0` (30). The drop disappears at
+  the end (37).
+- **Puddle.** Collision radius 15 (`Creature::getSize`). The states are:
+  - "swing" while forming (42 frames).
+  - Then a "wait" loop (40).
+  - A captain stepping in plays "touch" (50).
+  - The first drink message while waiting or touched starts "dead" (draining, 50 frames). From
+    then on the puddle isn't alive and is removed at the end.
+  - Drinking during "swing" doesn't drain it, because no arrow leaves that state.
+- **Drinking.** A Pikmin in its normal state that isn't a flower and isn't carrying starts
+  drinking when it touches a live puddle. "Normal state" here means idle, in a squad, or running
+  at an enemy. Starting to drink:
+  - takes it out of the squad (free mode);
+  - turns it to face the puddle;
+  - plays MIZUNOMI (anim 67).
+  - Collisions skip non-alive creatures (`creatureCollision.cpp`), so a draining puddle gets no
+    new drinkers.
+- **Drinking loop.** From the loop start (10) it drinks every tick and counts as having drunk,
+  even after the puddle starts draining. At each loop end (30) it loops again while the puddle
+  is alive, otherwise it plays out to the end (39).
+- **Blooming.** If it drank, it plays GROWUP1 (anim 39, first bloom) or GROWUP2 (anim 40,
+  later). It becomes a flower at `KEY_Action0` (49 / 32). When the motion ends (84 / 69) it is
+  idle and free. If it never reached the loop, it just goes back to normal.
+- **Whistle.** `Navi::callPikis` skips Pikmin that are drinking or blooming.
+- **What this means in play.** Everyone who touches the puddle while it is still forming will
+  drink, so nectar landing inside a packed squad blooms most of it.
+
 ## Planned
 
 - Pikmin 2 types (Purple, White, Bulbmin), Candypop Buds, hazards.
 - Onion menu (calling stored Pikmin out, putting them away), sunset.
+- Honeywisps and Spotty/Dwarf Bulborb AI in the core (they are viewer-side for now).
 - Free-mode AI (`ActFree`: wandering and the periodic work search).

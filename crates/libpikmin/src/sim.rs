@@ -21,6 +21,9 @@ pub struct Sim {
     pub(crate) pellets: Vec<crate::carry::Pellet>,
     pub(crate) onions: Vec<crate::onion::Onion>,
     pub(crate) sprouts: Vec<Option<crate::onion::Sprout>>,
+    pub(crate) nectar_drops: Vec<crate::nectar::NectarDrop>,
+    pub(crate) puddles: Vec<crate::nectar::Puddle>,
+    pub(crate) next_nectar: u32,
     pub(crate) events: Vec<Event>,
     pending_shakes: Vec<CreatureId>,
 }
@@ -44,6 +47,9 @@ impl Sim {
             pellets: Vec::new(),
             onions: Vec::new(),
             sprouts: Vec::new(),
+            nectar_drops: Vec::new(),
+            puddles: Vec::new(),
+            next_nectar: 0,
             events: Vec::new(),
             pending_shakes: Vec::new(),
         }
@@ -88,6 +94,7 @@ impl Sim {
             captain: None,
             state: PikiState::Idle,
             health: self.params.piki.piki_max_health,
+            blooms: 0,
         });
         Some(id)
     }
@@ -146,6 +153,8 @@ impl Sim {
             self.update_captain(ci, host, dt);
         }
         self.update_pellets(host, dt);
+        self.update_nectar(host, dt);
+        self.nectar_contacts();
         for pi in 0..self.pikis.len() {
             self.update_piki(pi, host, dt);
         }

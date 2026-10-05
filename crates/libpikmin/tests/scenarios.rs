@@ -4,7 +4,7 @@ use libpikmin::captain::ThrowState;
 use libpikmin::host::{CreatureFrame, CreatureId, CreaturePart};
 use libpikmin::piki::AttackMode;
 use libpikmin::{
-    CaptainId, CaptainInput, Event, Host, Params, PikiColor, PikiId, PikiState, Sim, TICK_DT, Vec2,
+    CaptainId, CaptainInput, Event, Happa, Host, Params, PikiColor, PikiId, PikiState, Sim, TICK_DT, Vec2,
     Vec3,
 };
 
@@ -1298,4 +1298,100 @@ fn settled_squad_members_attack_an_enemy_they_bump() {
             "aiconst p05 = {attack}: {attacking} attacking"
         );
     }
+}
+
+// ---- nectar ----
+
+#[test]
+fn nectar_drop_splashes_into_a_puddle() {
+    let mut sim = Sim::new(retail_params(), 60);
+    let mut host = TestHost::default();
+    sim.spawn_nectar(Vec3::new(50.0, 120.0, 0.0));
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 3.0, &mut ev);
+    assert!(ev.iter().any(|e| matches!(e, Event::NectarSplash { .. })));
+    assert!(sim.nectar_drops().is_empty(), "the drop is gone once its splash ends");
+    assert_eq!(sim.puddles().len(), 1);
+    assert!((sim.puddles()[0].pos - Vec3::new(50.0, 0.0, 0.0)).length() < 1.0);
+}
+
+#[test]
+fn leaf_pikmin_drinks_nectar_and_blooms() {
+    let mut sim = Sim::new(retail_params(), 61);
+    let mut host = TestHost::default();
+    sim.add_nectar_puddle(Vec3::ZERO);
+    let id = sim.spawn_piki(PikiColor::Blue, Vec3::new(10.0, 0.0, 0.0)).unwrap();
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 0.2, &mut ev);
+    assert!(matches!(sim.piki(id).state, PikiState::Absorb { .. }));
+    run(&mut sim, &mut host, 6.0, &mut ev);
+    assert_eq!(sim.piki(id).happa, Happa::Flower);
+    assert_eq!(sim.piki(id).state, PikiState::Idle);
+    assert!(ev.iter().any(|e| matches!(e, Event::Bloomed { piki } if *piki == id)));
+    assert!(sim.puddles().is_empty(), "drinking drained the puddle");
+}
+
+#[test]
+fn several_pikmin_share_one_puddle() {
+    let mut sim = Sim::new(retail_params(), 62);
+    let mut host = TestHost::default();
+    sim.add_nectar_puddle(Vec3::ZERO);
+    let ids: Vec<_> = (0..3)
+        .map(|i| {
+            let a = i as f32 * 2.1;
+            sim.spawn_piki(PikiColor::Red, Vec3::new(a.sin() * 12.0, 0.0, a.cos() * 12.0)).unwrap()
+        })
+        .collect();
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 7.0, &mut ev);
+    for id in ids {
+        assert_eq!(sim.piki(id).happa, Happa::Flower, "{id:?}");
+    }
+}
+
+#[test]
+fn squad_pikmin_leave_the_squad_to_drink_and_ignore_the_whistle() {
+    let mut sim = Sim::new(retail_params(), 63);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::new(0.0, 0.0, 200.0));
+    let id = sim.spawn_piki_in_squad(PikiColor::Yellow, Vec3::new(5.0, 0.0, 0.0), c).unwrap();
+    sim.add_nectar_puddle(Vec3::ZERO);
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 0.2, &mut ev);
+    assert!(matches!(sim.piki(id).state, PikiState::Absorb { .. }));
+    assert_eq!(sim.captain(c).plate.len(), 0, "drinking takes it out of the formation");
+    // Whistle over it while it drinks: Navi::callPikis skips PIKISTATE_Absorb.
+    aim_cursor(&mut sim, &mut host, c, Vec2::new(0.0, -1.0), 2.0);
+    sim.set_input(c, CaptainInput { whistle: true, ..Default::default() });
+    run(&mut sim, &mut host, 0.5, &mut ev);
+    assert!(!matches!(sim.piki(id).state, PikiState::Squad { .. }));
+}
+
+#[test]
+fn flower_pikmin_ignore_nectar() {
+    let mut sim = Sim::new(retail_params(), 64);
+    let mut host = TestHost::default();
+    sim.add_nectar_puddle(Vec3::ZERO);
+    let id = sim.spawn_piki(PikiColor::Blue, Vec3::new(10.0, 0.0, 0.0)).unwrap();
+    sim.piki_mut(id).happa = Happa::Flower;
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 3.0, &mut ev);
+    assert_eq!(sim.piki(id).state, PikiState::Idle);
+    assert_eq!(sim.puddles().len(), 1);
+}
+
+#[test]
+fn a_draining_puddle_takes_no_new_drinkers() {
+    let mut sim = Sim::new(retail_params(), 65);
+    let mut host = TestHost::default();
+    sim.add_nectar_puddle(Vec3::ZERO);
+    let first = sim.spawn_piki(PikiColor::Red, Vec3::new(10.0, 0.0, 0.0)).unwrap();
+    let mut ev = Vec::new();
+    // Past "swing" (42 frames) and the drinker's loop start: the puddle is draining now.
+    run(&mut sim, &mut host, 2.0, &mut ev);
+    assert!(matches!(sim.puddles()[0].state, libpikmin::PuddleState::Drain { .. }));
+    let late = sim.spawn_piki(PikiColor::Red, Vec3::new(-10.0, 0.0, 0.0)).unwrap();
+    run(&mut sim, &mut host, 5.0, &mut ev);
+    assert_eq!(sim.piki(first).happa, Happa::Flower);
+    assert_eq!(sim.piki(late).happa, Happa::Leaf);
 }

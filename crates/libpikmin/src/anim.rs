@@ -29,6 +29,10 @@ pub const ANIM_ATTACK: usize = 18;
 pub const ANIM_PICKLOOP: usize = 68;
 /// `PIKIANIM_Kuttuku` (48) → 71 "kuttuku.dca".
 pub const ANIM_KUTTUKU: usize = 71;
+/// `PIKIANIM_Mizunomi` (47) → 67 "mizunomi.dca": drinking nectar (`PikiAbsorbState`).
+pub const ANIM_MIZUNOMI: usize = 67;
+/// `PIKIANIM_GrowUp1` / `GrowUp2` (17, 18) → 39, 40: blooming after nectar (`PikiGrowupState`).
+pub const ANIM_GROW_UP: [usize; 2] = [39, 40];
 /// Onion motion 0, "flowrot.dck": seeds are emitted at each loop end (`GoalAI`).
 pub const ANIM_GOAL_FLOWROT: usize = 0;
 /// Onion motion 2, "suction.dck": played when something is sucked in (`GOAL_Effect`).
@@ -82,6 +86,11 @@ pub struct AnimTimings {
     pub punch: AnimTiming,
     /// Chained, faster plucking.
     pub nuku_fast: AnimTiming,
+    /// Drinking nectar: drinks during the loop.
+    pub mizunomi: AnimTiming,
+    /// Blooming: `KEY_Action0` makes the flower. First bloom and later ones.
+    pub grow_up1: AnimTiming,
+    pub grow_up2: AnimTiming,
 }
 
 impl Default for AnimTimings {
@@ -101,6 +110,9 @@ impl Default for AnimTimings {
             damage: AnimTiming::new(INF, INF, None, 19.0),
             punch: AnimTiming::new(1.0, 4.0, None, 9.0),
             nuku_fast: AnimTiming::new(9.0, INF, None, 19.0),
+            mizunomi: AnimTiming::new(INF, INF, Some((10.0, 30.0)), 39.0),
+            grow_up1: AnimTiming::new(49.0, INF, None, 84.0),
+            grow_up2: AnimTiming::new(32.0, INF, None, 69.0),
         }
     }
 }
@@ -214,6 +226,9 @@ impl AnimTimings {
         self.damage = timing_at(&infos, ANIM_DAMAGE)?;
         self.punch = timing_at(&infos, ANIM_PUNCH)?;
         self.nuku_fast = timing_at(&infos, ANIM_NUKU_FAST)?;
+        self.mizunomi = timing_at(&infos, ANIM_MIZUNOMI)?;
+        self.grow_up1 = timing_at(&infos, ANIM_GROW_UP[0])?;
+        self.grow_up2 = timing_at(&infos, ANIM_GROW_UP[1])?;
         for (slot, idx) in self.dead.iter_mut().zip(ANIM_DEAD) {
             *slot = timing_at(&infos, idx)?.end;
         }
@@ -227,6 +242,30 @@ impl AnimTimings {
         self.goal_suction = timing_at(&infos, ANIM_GOAL_SUCTION)?;
         Ok(())
     }
+}
+
+/// Nectar timings from `objects/water/anims.bin` and `objects/fl_water/anims.bin`.
+pub fn nectar_timings(water: &[u8], fall: &[u8]) -> Result<crate::nectar::NectarTimings, ParmError> {
+    let w = parse_anim_mgr(water)?;
+    let f = parse_anim_mgr(fall)?;
+    let end = |infos: &[Info], i: usize| -> Result<f32, ParmError> {
+        infos
+            .get(i)
+            .and_then(|x| x.anim_keys.last())
+            .map(|&k| k as f32)
+            .ok_or(ParmError::Truncated)
+    };
+    let fall0 = f.first().and_then(Info::timing).ok_or(ParmError::Truncated)?;
+    Ok(crate::nectar::NectarTimings {
+        leave_end: end(&f, 1)?,
+        fall_loop: fall0.loop_range.unwrap_or((19.0, 23.0)),
+        fall_emit: fall0.action0,
+        fall_end: end(&f, 0)?,
+        wait_end: end(&w, 0)?,
+        touch_end: end(&w, 1)?,
+        appear_end: end(&w, 2)?,
+        drain_end: end(&w, 3)?,
+    })
 }
 
 #[cfg(test)]
@@ -250,5 +289,11 @@ mod tests {
         t.apply_piki_anim_mgr(&piki).unwrap();
         t.apply_goal_anims(&goal).unwrap();
         assert_eq!(t, AnimTimings::default());
+        if let (Ok(w), Ok(f)) = (
+            std::fs::read(root.join("objects/water/anims.bin")),
+            std::fs::read(root.join("objects/fl_water/anims.bin")),
+        ) {
+            assert_eq!(nectar_timings(&w, &f).unwrap(), crate::nectar::NectarTimings::default());
+        }
     }
 }

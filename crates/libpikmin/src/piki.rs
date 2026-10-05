@@ -117,6 +117,21 @@ pub enum PikiState {
     Fading {
         timer: f32,
     },
+    /// Drinking nectar (`PikiAbsorbState`, MIZUNOMI). `drinking` once the loop starts;
+    /// `drank` if it drank anything; `finishing` when the puddle was gone at a loop end.
+    Absorb {
+        puddle: crate::nectar::NectarId,
+        frame: f32,
+        drinking: bool,
+        drank: bool,
+        finishing: bool,
+    },
+    /// Blooming after nectar (`PikiGrowupState`): GROWUP1, or GROWUP2 if `second`.
+    GrowUp {
+        frame: f32,
+        second: bool,
+        bloomed: bool,
+    },
     /// Gone.
     Dead,
 }
@@ -167,6 +182,8 @@ pub struct Piki {
     pub state: PikiState,
     /// `mHealth`, starts at `mPikiMaxHealth`.
     pub health: f32,
+    /// Times it has bloomed from nectar (`mFloweringTimer`).
+    pub blooms: u8,
 }
 
 impl Piki {
@@ -225,6 +242,7 @@ impl Sim {
             }
             PikiState::Flying { .. } => self.piki_flying(pi, host, dt),
             PikiState::Attack(a) => self.piki_attack(pi, a, host, dt),
+            PikiState::Absorb { .. } | PikiState::GrowUp { .. } => self.piki_nectar(pi, host, dt),
             PikiState::Knocked { timer } => {
                 let t = timer - dt;
                 self.physics(pi, host, dt);
