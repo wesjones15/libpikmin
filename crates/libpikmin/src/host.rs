@@ -2,7 +2,15 @@
 
 use glam::Vec3;
 
-use crate::PikiId;
+use crate::{CaptainId, PikiId};
+
+/// Who landed a hit on a creature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DamageSource {
+    Piki(PikiId),
+    /// A captain's punch (`NaviAttackState`).
+    Captain(CaptainId),
+}
 
 /// Host-chosen stable handle for a creature (enemy, animal, boss...).
 pub type CreatureId = u64;
@@ -116,7 +124,7 @@ pub trait Host {
         _creature: CreatureId,
         _amount: f32,
         _part: Option<u32>,
-        _from: PikiId,
+        _from: DamageSource,
     ) -> bool {
         false
     }

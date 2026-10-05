@@ -44,7 +44,7 @@ impl Host for TestHost {
         creature: CreatureId,
         amount: f32,
         _part: Option<u32>,
-        _from: PikiId,
+        _from: libpikmin::DamageSource,
     ) -> bool {
         let Some(c) = self.creatures.iter_mut().find(|c| c.id == creature) else {
             return false;
@@ -86,6 +86,7 @@ fn retail_params() -> Params {
     p.piki.min_move_speed = 10.0;
     p.piki.idle_attack_search_range = 70.0;
     p.piki.piki_max_health = 30.0;
+    p.navi.punch_damage = 10.0;
     p.piki.press_death_factor = 2.5;
     p.piki.normal_piki_press_factor = 1.0;
     p.piki.min_piki_size = 3.0;
@@ -380,7 +381,7 @@ fn latched_hits_follow_the_cling_animation() {
     }
     let latched_at = latched_at.expect("should latch");
     assert!(hits_at.len() >= 4, "{hits_at:?}");
-    // kuttuku.dca: KEY_Action0 at frame 11, loop 11→30, 30 frames/s = 1 frame per tick.
+    // kuttuku.dca: KEY_Action0 at frame 11, loop 11â†’30, 30 frames/s = 1 frame per tick.
     assert_eq!(hits_at[0] - latched_at, 11, "first hit");
     for w in hits_at.windows(2) {
         assert_eq!(w[1] - w[0], 19, "loop period");
@@ -1049,4 +1050,252 @@ fn a_dead_flower_can_leave_a_seed() {
     assert_eq!(seeds.len(), 1, "only the flower leaves one");
     assert_eq!(seeds[0].color, PikiColor::Yellow);
     assert!((seeds[0].pos.x - 40.0).abs() < 5.0);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Punch, chained plucking, C-stick swarming
+
+fn press_throw(sim: &mut Sim, host: &mut TestHost, c: CaptainId, ev: &mut Vec<Event>) {
+    sim.set_input(
+        c,
+        CaptainInput {
+            throw: true,
+            ..Default::default()
+        },
+    );
+    run(sim, host, TICK_DT, ev);
+    sim.set_input(c, CaptainInput::default());
+}
+
+#[test]
+fn punch_hits_what_is_in_front_when_nobody_can_be_thrown() {
+    let mut sim = Sim::new(retail_params(), 51);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO); // faces +Z
+    host.creatures.push(Dummy {
+        id: 1,
+        pos: Vec3::new(0.0, 0.0, 20.0),
+        radius: 10.0,
+        height: 10.0,
+        hp: 100.0,
+    });
+    host.creatures.push(Dummy {
+        id: 2,
+        pos: Vec3::new(0.0, 0.0, -20.0),
+        radius: 10.0,
+        height: 10.0,
+        hp: 100.0,
+    });
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 0.1, &mut ev);
+
+    press_throw(&mut sim, &mut host, c, &mut ev);
+    run(&mut sim, &mut host, 0.5, &mut ev);
+    assert_eq!(
+        host.hits,
+        vec![(1, 10.0)],
+        "one punch, retail mPunchDamage 10, only the one in front"
+    );
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::Punched { creature: 1, .. }))
+    );
+    assert!(sim.captain(c).punch.is_none(), "9-frame animation is over");
+}
+
+fn sprout_row(sim: &mut Sim, xs: &[f32]) {
+    for &x in xs {
+        sim.plant_sprout(PikiColor::Red, Vec3::new(x, 0.0, 0.0));
+    }
+}
+
+#[test]
+fn holding_the_button_chains_plucks_through_the_patch() {
+    // libpikmin extra (on by default): hold to keep plucking.
+    let mut sim = Sim::new(retail_params(), 52);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    sprout_row(&mut sim, &[10.0, 50.0, 90.0, 130.0]);
+    let mut ev = Vec::new();
+    sim.set_input(
+        c,
+        CaptainInput {
+            throw: true,
+            ..Default::default()
+        },
+    );
+    run(&mut sim, &mut host, 6.0, &mut ev);
+
+    let plucked = ev
+        .iter()
+        .filter(|e| matches!(e, Event::Plucked { .. }))
+        .count();
+    assert_eq!(
+        plucked, 4,
+        "chained across 40-unit gaps (mContinuousPluckDistance 200)"
+    );
+    assert_eq!(sim.captain(c).plate.len(), 4);
+}
+
+fn pikmin1_rules() -> Params {
+    let mut p = retail_params();
+    p.extras.hold_to_chain_pluck = false;
+    p
+}
+
+#[test]
+fn pikmin1_rules_mashing_chains_plucks() {
+    let mut sim = Sim::new(pikmin1_rules(), 52);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    sprout_row(&mut sim, &[10.0, 50.0, 90.0, 130.0]);
+    let mut ev = Vec::new();
+    let mut pull_starts = Vec::new();
+    for i in 0..180 {
+        let throw = i % 6 == 0; // tap: 1 tick down, 5 up
+        sim.set_input(
+            c,
+            CaptainInput {
+                throw,
+                ..Default::default()
+            },
+        );
+        run(&mut sim, &mut host, TICK_DT, &mut ev);
+        if let Some(libpikmin::onion::Pluck {
+            phase: libpikmin::onion::PluckPhase::Pull { frame, fast, .. },
+            ..
+        }) = sim.captain(c).pluck
+            && frame == 0.0
+        {
+            pull_starts.push(fast);
+        }
+    }
+    assert_eq!(
+        ev.iter()
+            .filter(|e| matches!(e, Event::Plucked { .. }))
+            .count(),
+        4
+    );
+    assert_eq!(
+        pull_starts.first(),
+        Some(&false),
+        "first pull is the normal NUKU"
+    );
+    assert!(
+        pull_starts[1..].iter().all(|&f| f),
+        "chained pulls use NUKU fast: {pull_starts:?}"
+    );
+}
+
+#[test]
+fn pikmin1_rules_holding_from_the_first_press_plucks_just_one() {
+    let mut sim = Sim::new(pikmin1_rules(), 53);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    sprout_row(&mut sim, &[10.0, 50.0]);
+    let mut ev = Vec::new();
+    sim.set_input(
+        c,
+        CaptainInput {
+            throw: true,
+            ..Default::default()
+        },
+    );
+    run(&mut sim, &mut host, 4.0, &mut ev);
+    assert_eq!(
+        ev.iter()
+            .filter(|e| matches!(e, Event::Plucked { .. }))
+            .count(),
+        1
+    );
+}
+
+fn formed_squad(seed: u64, n: u32) -> (Sim, TestHost, CaptainId) {
+    let mut sim = Sim::new(retail_params(), seed);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    squad(&mut sim, c, n, Vec3::ZERO);
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 3.0, &mut ev);
+    (sim, host, c)
+}
+
+fn squad_centre(sim: &Sim, c: CaptainId) -> Vec3 {
+    let m = &sim.captain(c).plate.members;
+    m.iter().map(|id| sim.piki(*id).pos).sum::<Vec3>() / m.len() as f32
+}
+
+#[test]
+fn the_c_stick_swings_the_squad_out_in_front() {
+    let (mut sim, mut host, c) = formed_squad(54, 12);
+    assert!(
+        squad_centre(&sim, c).z < -10.0,
+        "starts behind the captain (he faces +Z)"
+    );
+    let mut ev = Vec::new();
+    sim.set_input(
+        c,
+        CaptainInput {
+            swarm: Vec2::new(1.0, 0.0),
+            ..Default::default()
+        },
+    );
+    run(&mut sim, &mut host, 3.0, &mut ev);
+    assert!(sim.captain(c).swarming);
+    let centre = squad_centre(&sim, c);
+    assert!(centre.x > 40.0, "squad pushed toward +X: {centre:?}");
+}
+
+#[test]
+fn swarming_into_a_corpse_starts_carrying_but_walking_past_does_not() {
+    let (mut sim, mut host, c) = formed_squad(55, 12);
+    sim.add_onion(Vec3::new(-2000.0, 0.0, 0.0), &[PikiColor::Red]);
+    let pel = sim.spawn_pellet(corpse(Vec3::new(70.0, 0.0, -40.0), 3, 6, 4));
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 2.0, &mut ev);
+    assert!(
+        sim.pellet(pel).carriers.is_empty(),
+        "C-stick neutral: no pellet pickup on contact"
+    );
+
+    sim.set_input(
+        c,
+        CaptainInput {
+            swarm: Vec2::new(1.0, -0.6),
+            ..Default::default()
+        },
+    );
+    run(&mut sim, &mut host, 3.0, &mut ev);
+    assert!(
+        !sim.pellet(pel).carriers.is_empty(),
+        "swarmed into it: they grab on"
+    );
+}
+
+#[test]
+fn settled_squad_members_attack_an_enemy_they_bump() {
+    for (attack, expect) in [(1, true), (0, false)] {
+        let (mut sim, mut host, c) = formed_squad(56, 12);
+        sim.params_mut().ai.do_cstick_attack = attack;
+        let centre = squad_centre(&sim, c);
+        host.creatures.push(Dummy {
+            id: 5,
+            pos: centre.with_y(0.0),
+            radius: 12.0,
+            height: 10.0,
+            hp: 1e6,
+        });
+        let mut ev = Vec::new();
+        run(&mut sim, &mut host, 0.5, &mut ev);
+        let attacking = sim
+            .pikis()
+            .iter()
+            .filter(|p| matches!(p.state, PikiState::Attack(a) if a.target == 5))
+            .count();
+        assert_eq!(
+            attacking > 0,
+            expect,
+            "aiconst p05 = {attack}: {attacking} attacking"
+        );
+    }
 }

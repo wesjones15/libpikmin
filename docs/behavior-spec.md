@@ -270,10 +270,21 @@ goalItem.cpp, pelletState.cpp, itemAI.cpp `GoalAI`:
   `mPluckDistanceOutsideOnyon` (15; not in the retail file).
 - **Adjust.** The captain steps to 6 units short of the sprout. He turns 20% of the angle per
   tick (at least π/20) and moves at 100/s, slowing to 0.5 per tick when close. This ends when
-  facing within π/10 and closer than 1. Our timeout is 2 s; the original uses an odometer.
+  facing within π/10 and closer than 1. It gives up if he moves less than 4 units in 0.4 s
+  (`mOdoMeter.start(0.4, 4.0)`).
 - **Pull.** "NUKU" plays; the Pikmin comes out at `KEY_Action0` (frame 23) with the sprout's
   colour and leaf stage, and joins the squad. The captain is locked until frame 39.
-  Pressing again during the pull chains to the next sprout.
+- **Chaining** (`NaviNukuState::exec` / `procAnimMsg`, `mFastPluckKeyTaps`).
+  - During a pull, once the button has been seen up (`keyUp` is a level, reset at each pull's
+    start), pressing or holding it asks for another.
+  - When the pull finishes, the captain looks for the next sprout within
+    `mContinuousPluckDistance` (retail 200) and pulls it with "NUKU fast" (AnimInfo 43: out at
+    frame 9, done at 19).
+  - In Pikmin 1 that means mashing.
+  - **Extra:** `Params::extras.hold_to_chain_pluck` (on by default) also chains while the button
+    is simply held. Turn it off for Pikmin 1 rules.
+  - The original's squad auto-pluck (`PikiAutoNukiState` via the whistle) is off on the retail
+    disc (aiconst p13 = 0) and not implemented.
 
 ## 14. Pikmin dying — implemented (host-triggered)
 
@@ -324,6 +335,40 @@ naviState.cpp (`NaviDeadState`):
   - `Sim::down_captain` does this directly, for hosts whose player character has its own health.
 - **Healing.** The ship refills health completely (`NaviUfoState::cleanup`): `Sim::heal_captain`.
 - **Not yet:** knockback and flattening of the captain himself (`NaviFlickState`, `NaviPressedState`).
+
+## 16. Captain punch — implemented
+
+`NaviThrowWaitState::exec` → `NaviAttackState`:
+- **Trigger.** The throw button punches when no squad member is within 80 to throw.
+- **Walking.** The captain keeps walking (`makeVelocity`) while "PUNCH" (AnimInfo 94) plays.
+  - We assume 30 fps; `NaviAttackState` doesn't set the motion speed.
+- **Hit.** From `KEY_Action0` (frame 1) to the end (frame 9) it hits every living, non-flying
+  creature that is both:
+  - within its size + the captain's size + `mPunchRadius` (retail 10), and
+  - within 135° of facing.
+  - Damage is `mPunchDamage` (retail 10, code 1), sent to `Host::damage` with
+    `DamageSource::Captain`. Once something takes the hit, the punch is done.
+- **Whistle.** A whistle pressed mid-punch starts when the punch ends (`mGatherRequested`).
+
+## 17. C-stick swarming — implemented
+
+`Navi::makeCStick` (C-stick branch), `ActCrowd::exec`, `Piki::collisionCallback`:
+- **Input.** `CaptainInput::swarm` is the C-stick in world XZ; the dead zone is 0.05.
+- **Direction.** If the stick points within 120° of the squad's current direction, the plate
+  turns 40% of the way toward it each tick; otherwise it snaps to the stick.
+- **Shape.** Strength s = (|stick| − 0.05)/0.95 maps to 1 at s ≥ 0.9, else 0.6·s/0.9. That's
+  the plate's `refresh` interp, so a harder push makes it slimmer and longer. The plate sits
+  `length + offset` from the captain in that direction.
+- **No arcing.** While swarming, squad Pikmin don't arc around the captain
+  (`newVer && !check`).
+- **Bumping jobs.** A squad member that has reached its slot at least once (`STATE_Formed`)
+  takes a job when it touches something:
+  - **Enemy:** it attacks (aiconst p05 "宮本接触バトル", on for retail). This works whether or
+    not the C-stick is pushed, so walking a settled squad into an enemy starts a fight.
+  - **Pellet or corpse with a free slot:** it starts carrying, *only while the C-stick is
+    pushed* (`distCheck` = `mCStick.length() ≥ 0.1`).
+  - Gates, boulders, grass and bridges are the same idea; those objects aren't implemented yet.
+- **Charge.** There's no charge in Pikmin 1 or 2; it arrived in Pikmin 3. Swarming fills that role.
 
 ## Planned
 

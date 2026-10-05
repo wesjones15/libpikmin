@@ -70,11 +70,13 @@ pub struct Attack {
 pub enum PikiState {
     /// Free and standing around (`PikiMode::FreeMode`).
     Idle,
-    /// Following a captain's formation (`ActCrowd`).
+    /// Following a captain's formation (`ActCrowd`). `formed` once it has reached its slot
+    /// (`STATE_Formed`), which is when bumping into things gives it a job.
     Squad {
         lost_timer: f32,
         near_counter: u8,
         reslotted: bool,
+        formed: bool,
     },
     /// Walking to the captain's hand to be thrown (`PIKISTATE_GoHang`).
     GoHang {
@@ -125,6 +127,7 @@ impl PikiState {
             lost_timer: 0.0,
             near_counter: 0,
             reslotted: false,
+            formed: false,
         }
     }
 
@@ -306,21 +309,26 @@ impl Sim {
             return;
         };
         let slot_pos = c.plate.slot_world(slot);
-        let (cpos, plate_offset) = (c.pos, c.plate.offset);
+        let (cpos, plate_offset, swarming) = (c.pos, c.plate.offset, c.swarming);
         let accel = self.params.piki_creature.acceleration;
         let full = self.piki_speed(pi, 1.0);
         let half = self.piki_speed(pi, 0.5);
         let pp = self.params.piki.clone();
 
-        let p = &mut self.pikis[pi];
         let PikiState::Squad {
             mut lost_timer,
             mut near_counter,
             mut reslotted,
-        } = p.state
+            mut formed,
+        } = self.pikis[pi].state
         else {
             unreachable!()
         };
+        if formed && self.squad_contact(pi, swarming) {
+            return;
+        }
+
+        let p = &mut self.pikis[pi];
         let to = slot_pos - p.pos;
         let dist = to.x.hypot(to.z);
         let dir = Vec3::new(to.x, 0.0, to.z).normalize_or_zero();
@@ -342,6 +350,7 @@ impl Sim {
         if dist <= 7.0 || (near_counter < 6 && dist <= 15.0) {
             p.target_vel = Vec3::ZERO;
             face_captain(p);
+            formed = true;
         } else if dist < 15.0 {
             // Arrival: brake so we don't overshoot the slot.
             let factor = 10.0 / accel;
@@ -363,8 +372,9 @@ impl Sim {
             sidestep = true;
         }
 
-        // Pikmin in front of the captain arc around him instead of walking through.
-        if sidestep {
+        // Pikmin in front of the captain arc around him instead of walking through, except
+        // while the C-stick sends them forward on purpose (`newVer && !check`).
+        if sidestep && !swarming {
             let from_captain = p.pos - cpos;
             let plate_to_captain = (cpos - plate_offset).normalize_or_zero();
             if plate_to_captain.dot(from_captain) > 0.0 {
@@ -400,12 +410,53 @@ impl Sim {
             lost_timer,
             near_counter,
             reslotted,
+            formed,
         };
         if leave {
             self.leave_current(id);
             self.pikis[pi].state = PikiState::Idle;
         }
         self.physics(pi, host, dt);
+    }
+
+    /// `Piki::collisionCallback` for a formed squad member: bumping an enemy starts an attack
+    /// (aiconst p05, always); bumping a pellet with a free slot starts carrying, but only while
+    /// the C-stick is pushing (`distCheck`). Returns true if it left the squad for a job.
+    fn squad_contact(&mut self, pi: usize, swarming: bool) -> bool {
+        let (pos, size, id) = (self.pikis[pi].pos, self.pikis[pi].size, self.pikis[pi].id);
+        // Separation keeps bodies exactly touching, so allow a unit of slack.
+        let touch = 1.0;
+        if self.params.ai.do_cstick_attack != 0 {
+            let hit = self.creatures.creatures.iter().find(|c| {
+                c.alive
+                    && self.creatures.parts_of(c).iter().any(|part| {
+                        let d = pos - part.centre;
+                        d.length() < part.radius + size + touch
+                            || (Vec3::new(d.x, 0.0, d.z).length() < part.radius + size + touch
+                                && d.y.abs() < part.radius + size)
+                    })
+            });
+            if let Some(c) = hit {
+                let target = c.id;
+                self.leave_current(id);
+                self.pikis[pi].state = PikiState::Attack(Attack {
+                    target,
+                    mode: AttackMode::Approach,
+                });
+                return true;
+            }
+        }
+        if swarming
+            && let Some(pel) = self
+                .pellets
+                .iter()
+                .find(|pl| pl.can_take_carrier() && pl.touches(pos, size + touch))
+                .map(|pl| pl.id)
+        {
+            self.leave_current(id);
+            return self.start_carry(pi, pel);
+        }
+        false
     }
 
     fn piki_go_hang(&mut self, pi: usize, captain: CaptainId, host: &mut dyn Host, dt: f32) {
@@ -590,7 +641,12 @@ impl Sim {
             }
             if !hit && frame >= anim.action0 && frame < anim.action1 {
                 let dmg = self.attack_power(pi);
-                if host.damage(a.target, dmg, Some(part), id) {
+                if host.damage(
+                    a.target,
+                    dmg,
+                    Some(part),
+                    crate::host::DamageSource::Piki(id),
+                ) {
                     hit = true;
                     self.events.push(Event::Hit {
                         piki: id,
@@ -681,7 +737,7 @@ impl Sim {
                     let id = p.id;
                     if reach < 10.0
                         && angle.abs() < PI / 4.0
-                        && host.damage(a.target, dmg, None, id)
+                        && host.damage(a.target, dmg, None, crate::host::DamageSource::Piki(id))
                     {
                         hit = true;
                         self.events.push(Event::Hit {

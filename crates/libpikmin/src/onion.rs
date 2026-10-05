@@ -107,17 +107,23 @@ impl Sprout {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PluckPhase {
-    /// `NaviNukuAdjustState`: step to 6 units short of the sprout and face it.
+    /// `NaviNukuAdjustState`: step to 6 units short of the sprout and face it. Gives up if the
+    /// captain moves less than 4 units in 0.4 s (`mOdoMeter.start(0.4, 4.0)`).
     Adjust {
         approach: Vec3,
         face: f32,
-        timer: f32,
+        odo_timer: f32,
+        odo_dist: f32,
     },
-    /// `NaviNukuState`: the "NUKU" animation. The Pikmin comes out at `KEY_Action0`.
+    /// `NaviNukuState`: "NUKU" (or "NUKU fast" when chaining). The Pikmin comes out at
+    /// `KEY_Action0`. Letting go of the button and then pressing or holding it again asks for
+    /// the next sprout (`mExtractKeyReleased`, `mWantsNextPluck`).
     Pull {
         frame: f32,
-        released: bool,
+        popped: bool,
+        let_go: bool,
         again: bool,
+        fast: bool,
     },
 }
 
@@ -354,7 +360,10 @@ impl Sim {
     pub(crate) fn find_pluckable(&self, ci: usize) -> Option<SproutId> {
         let c = &self.captains[ci];
         let near_onion = self.onions.iter().any(|o| dist_xz(o.pos, c.pos) <= 220.0);
-        let reach = if near_onion {
+        let reach = if c.fast_pluck {
+            // Chaining: `mContinuousPluckDistance` (200).
+            self.params.navi.continuous_pluck_distance
+        } else if near_onion {
             self.params.navi.action_radius
         } else {
             self.params.navi.pluck_distance_outside_onyon
@@ -383,13 +392,15 @@ impl Sim {
             phase: PluckPhase::Adjust {
                 approach: s.pos - dir * 6.0,
                 face: yaw_of(dir),
-                timer: 2.0,
+                odo_timer: 0.4,
+                odo_dist: 0.0,
             },
         });
     }
 
-    /// Runs a captain's pluck. Returns true while plucking (movement is locked).
-    pub(crate) fn update_pluck(&mut self, ci: usize, dt: f32, press_again: bool) -> bool {
+    /// Runs a captain's pluck. `held` / `pressed`: the action button's level and edge.
+    /// Returns true while plucking (movement is locked).
+    pub(crate) fn update_pluck(&mut self, ci: usize, dt: f32, held: bool, pressed: bool) -> bool {
         let Some(pl) = self.captains[ci].pluck else {
             return false;
         };
@@ -398,18 +409,19 @@ impl Sim {
             .get(pl.sprout.0 as usize)
             .is_some_and(Option::is_some);
         let fps = self.params.anim.fps;
-        let nuku = self.params.anim.nuku;
         let cid = self.captains[ci].id;
 
         match pl.phase {
             PluckPhase::Adjust {
                 approach,
                 face,
-                timer,
+                odo_timer,
+                odo_dist,
             } => {
-                if !alive || timer <= 0.0 {
+                if !alive {
                     return self.cancel_pluck(ci);
                 }
+                let fast = self.captains[ci].fast_pluck;
                 let c = &mut self.captains[ci];
                 let ang = ang_dist(face, c.face);
                 let to = Vec3::new(approach.x - c.pos.x, 0.0, approach.z - c.pos.z);
@@ -420,72 +432,100 @@ impl Sim {
                     c.pluck = Some(Pluck {
                         phase: PluckPhase::Pull {
                             frame: 0.0,
-                            released: false,
+                            popped: false,
+                            let_go: false,
                             again: false,
+                            fast,
                         },
                         ..pl
                     });
-                } else {
-                    let mut v = ang * 0.2;
-                    if v.abs() < PI / 20.0 {
-                        v = (PI / 20.0).copysign(ang);
-                    }
-                    if ang.abs() < PI / 20.0 {
-                        v = ang;
-                    }
-                    c.face = round_ang(c.face + v);
-                    // 100 u/s, slowing to 0.5 units per tick when close.
-                    let speed = if dt * 100.0 > len { 0.5 / dt } else { 100.0 };
-                    let step = (to.normalize_or_zero() * speed * dt).clamp_length_max(len);
-                    c.pos += step;
-                    c.vel = step / dt;
-                    c.target_vel = Vec3::ZERO;
-                    c.pluck = Some(Pluck {
-                        phase: PluckPhase::Adjust {
-                            approach,
-                            face,
-                            timer: timer - dt,
-                        },
-                        ..pl
-                    });
+                    return true;
                 }
+                let mut v = ang * 0.2;
+                if v.abs() < PI / 20.0 {
+                    v = (PI / 20.0).copysign(ang);
+                }
+                if ang.abs() < PI / 20.0 {
+                    v = ang;
+                }
+                c.face = round_ang(c.face + v);
+                // 100 u/s, slowing to 0.5 units per tick when close.
+                let speed = if dt * 100.0 > len { 0.5 / dt } else { 100.0 };
+                let step = (to.normalize_or_zero() * speed * dt).clamp_length_max(len);
+                c.pos += step;
+                c.vel = step / dt;
+                c.target_vel = Vec3::ZERO;
+                // Odometer: abort if stuck (moved < 4 in 0.4 s) while still far off.
+                let mut odo_timer = odo_timer - dt;
+                let mut odo_dist = odo_dist + step.length();
+                if odo_timer <= 0.0 {
+                    if odo_dist < 4.0 && len >= 1.0 && ang.abs() < PI / 10.0 {
+                        return self.cancel_pluck(ci);
+                    }
+                    odo_timer = 0.4;
+                    odo_dist = 0.0;
+                }
+                let c = &mut self.captains[ci];
+                c.pluck = Some(Pluck {
+                    phase: PluckPhase::Adjust {
+                        approach,
+                        face,
+                        odo_timer,
+                        odo_dist,
+                    },
+                    ..pl
+                });
                 true
             }
             PluckPhase::Pull {
                 frame,
-                mut released,
+                mut popped,
+                let_go,
                 again,
+                fast,
             } => {
-                let again = again || press_again;
+                let anim = if fast {
+                    self.params.anim.nuku_fast
+                } else {
+                    self.params.anim.nuku
+                };
+                let let_go = let_go || !held;
+                let hold_chains = self.params.extras.hold_to_chain_pluck;
+                let again = again || pressed || (held && (let_go || hold_chains));
                 let f = frame + fps * dt;
-                if !released && f >= nuku.action0 {
-                    released = true;
-                    if let Some(s) = self.sprouts[pl.sprout.0 as usize].take() {
-                        let piki = self.spawn_plucked(s.color, s.happa, s.pos, cid);
-                        if let Some(piki) = piki {
-                            self.events.push(Event::Plucked {
-                                captain: cid,
-                                piki,
-                                sprout: s.id,
-                            });
-                        }
+                if !popped && f >= anim.action0 {
+                    popped = true;
+                    if let Some(s) = self.sprouts[pl.sprout.0 as usize].take()
+                        && let Some(piki) = self.spawn_plucked(s.color, s.happa, s.pos, cid)
+                    {
+                        self.events.push(Event::Plucked {
+                            captain: cid,
+                            piki,
+                            sprout: s.id,
+                        });
                     }
                 }
                 let c = &mut self.captains[ci];
                 c.vel = Vec3::ZERO;
                 c.target_vel = Vec3::ZERO;
-                if f >= nuku.end {
+                if f >= anim.end {
                     c.pluck = None;
-                    // Holding the button again plucks the next one (`mWantsNextPluck`).
-                    if again && let Some(next) = self.find_pluckable(ci) {
-                        self.start_pluck(ci, next);
+                    // `KEY_Finished` with `mWantsNextPluck`: look again, wider, and pull faster.
+                    c.fast_pluck = again;
+                    if again {
+                        match self.find_pluckable(ci) {
+                            Some(next) => self.start_pluck(ci, next),
+                            None => self.captains[ci].fast_pluck = false,
+                        }
                     }
                 } else {
                     c.pluck = Some(Pluck {
                         phase: PluckPhase::Pull {
                             frame: f,
-                            released,
+                            popped,
+                            let_go,
                             again,
+                            fast,
                         },
                         ..pl
                     });

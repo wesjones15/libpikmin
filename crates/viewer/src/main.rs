@@ -2,7 +2,7 @@
 //!
 //! Controls: WASD/arrows move (hold Ctrl for a light tilt that only moves the cursor),
 //! Space = throw (hold, release to throw), Shift / right mouse = whistle, X = dismiss,
-//! Tab = switch captain, C = spawn a creature at the cursor, K = make creatures shake,
+//! Tab = switch captain, C = spawn a creature at the cursor, G = make creatures shake, IJKL = C-stick swarm,
 //! F1 = formation debug, R = reset, mouse wheel = zoom. Space next to a sprout plucks it.
 //!
 //! Dead creatures become corpses the Pikmin can carry to the Onions (red, yellow, blue).
@@ -17,7 +17,7 @@ use libpikmin::onion::OnionAnim;
 use libpikmin::piki::AttackMode;
 use libpikmin::{
     CaptainId, CaptainInput, Event, Happa, Host, Params, PelletDesc, PelletId, PelletState,
-    PikiColor, PikiId, PikiState, Sim, SproutState, Vec2, Vec3,
+    PikiColor, PikiState, Sim, SproutState, Vec2, Vec3,
 };
 use macroquad::prelude::*;
 
@@ -216,7 +216,7 @@ impl Host for World {
         creature: CreatureId,
         amount: f32,
         _part: Option<u32>,
-        _from: PikiId,
+        _from: libpikmin::DamageSource,
     ) -> bool {
         let Some(c) = self.creatures.iter_mut().find(|c| c.id == creature) else {
             return false;
@@ -363,6 +363,21 @@ async fn main() {
         if is_key_down(KeyCode::LeftControl) && stick != Vec2::ZERO {
             stick = stick.normalize() * 0.5;
         }
+        // C-stick on IJKL: swarm the squad.
+        let mut swarm = Vec2::ZERO;
+        if is_key_down(KeyCode::I) {
+            swarm.y += 1.0;
+        }
+        if is_key_down(KeyCode::K) {
+            swarm.y -= 1.0;
+        }
+        if is_key_down(KeyCode::L) {
+            swarm.x += 1.0;
+        }
+        if is_key_down(KeyCode::J) {
+            swarm.x -= 1.0;
+        }
+        let swarm = swarm.normalize_or_zero();
         for (i, &cid) in g.captains.iter().enumerate() {
             let input = if i == g.active {
                 CaptainInput {
@@ -371,6 +386,7 @@ async fn main() {
                         || is_mouse_button_down(MouseButton::Right),
                     throw: is_key_down(KeyCode::Space),
                     dismiss: is_key_down(KeyCode::X),
+                    swarm,
                     pose: None,
                 }
             } else {
@@ -393,7 +409,7 @@ async fn main() {
                 g.sim.heal_captain(active, None);
             }
         }
-        g.world.update(dt, &mut g.sim, is_key_pressed(KeyCode::K));
+        g.world.update(dt, &mut g.sim, is_key_pressed(KeyCode::G));
         g.sim.advance(&mut g.world, dt);
         for e in g.sim.drain_events() {
             match e {
@@ -616,6 +632,15 @@ async fn main() {
                 draw_text("DOWN (H)", s.x - 30.0, s.y + 30.0 * zoom, 18.0, RED);
             }
             let tip = s + vec2(c.face.sin(), -c.face.cos()) * 14.0 * zoom;
+            if c.punch.is_some() {
+                let fist = s + vec2(c.face.sin(), -c.face.cos()) * 18.0 * zoom;
+                draw_circle(
+                    fist.x,
+                    fist.y,
+                    4.0 * zoom,
+                    Color::from_rgba(255, 220, 120, 255),
+                );
+            }
             draw_line(s.x, s.y, tip.x, tip.y, 2.0, BLACK);
             draw_text(
                 if i == 0 { "Olimar" } else { "Louie" },
@@ -669,7 +694,7 @@ async fn main() {
                 g.sim.pikis().iter().filter(|p| p.is_alive()).count(),
             ),
             format!("hits {}  stolen {}  tick {}  {} fps  |  {}", g.hits, g.stolen, g.sim.tick(), get_fps(), g.params_source),
-            "WASD move (Ctrl: aim only)  Space throw/pluck  Shift/RMB whistle  H revive/heal  X dismiss  Tab captain  C creature  K shake  F1 slots  R reset".into(),
+            "WASD move (Ctrl: aim only)  Space throw/pluck  Shift/RMB whistle  H revive/heal  IJKL swarm  X dismiss  Tab captain  C creature  G shake  F1 slots  R reset".into(),
         ];
         for (i, l) in lines.iter().enumerate() {
             draw_text(l, 12.0, 22.0 + i as f32 * 20.0, 20.0, WHITE);

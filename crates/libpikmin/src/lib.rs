@@ -24,7 +24,7 @@ pub use clock::{FixedClock, TICK_DT, TICK_HZ};
 pub use damage::DeathCause;
 pub use event::Event;
 pub use glam::{Vec2, Vec3};
-pub use host::{CreatureFrame, CreatureId, CreaturePart, Host};
+pub use host::{CreatureFrame, CreatureId, CreaturePart, DamageSource, Host};
 pub use onion::{Onion, OnionId, Sprout, SproutId, SproutState};
 pub use params::Params;
 pub use piki::{Happa, Piki, PikiColor, PikiState};

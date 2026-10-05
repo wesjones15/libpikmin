@@ -74,6 +74,12 @@ pub enum Event {
     Dismissed {
         captain: CaptainId,
     },
+    /// A captain's punch landed (`NaviAttackState`).
+    Punched {
+        captain: CaptainId,
+        creature: CreatureId,
+        damage: f32,
+    },
     /// Enough carriers lifted it; it's heading for `onion`.
     PelletLifted {
         pellet: PelletId,

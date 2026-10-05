@@ -160,6 +160,9 @@ parms! {
         cursor_max_radius: f32 = 300.0, b"p46";
         cursor_move_speed: f32 = 200.0, b"p47";
         health: f32 = 100.0, b"p50";
+        /// `NaviAttackState`: punch damage and extra reach. Retail damage 10.
+        punch_damage: f32 = 1.0, b"p51";
+        punch_radius: f32 = 10.0, b"p52";
     }
 }
 
@@ -217,6 +220,8 @@ parms! {
         gravity: f32 = 550.0, b"p00";
         /// "ピキ：オートアタック" (`_34`).
         auto_attack: i32 = 1, b"p01";
+        /// "宮本接触バトル" (`mDoCStickAttack`): settled squad Pikmin attack enemies they bump into.
+        do_cstick_attack: i32 = 1, b"p05";
         /// "攻撃したら戻る" (`_A4`): return to formation after an attack.
         return_after_attack: i32 = 1, b"p08";
         /// "１回だけ攻撃=1 死ぬまで攻撃=0" (`_C4`): 1 = one attack, 0 = keep attacking until the target dies.
@@ -236,6 +241,23 @@ pub struct Params {
     pub plate: PlateParams,
     pub ai: AiParams,
     pub anim: AnimTimings,
+    pub extras: Extras,
+}
+
+/// Behaviour that isn't in Pikmin 1, opted into for libpikmin's hosts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Extras {
+    /// Holding the action button keeps plucking the next sprout. Pikmin 1 only chains on
+    /// repeated presses (`NaviNukuState` needs the button seen up during each pull).
+    pub hold_to_chain_pluck: bool,
+}
+
+impl Default for Extras {
+    fn default() -> Self {
+        Self {
+            hold_to_chain_pluck: true,
+        }
+    }
 }
 
 impl Default for Params {
@@ -258,6 +280,7 @@ impl Default for Params {
             plate: PlateParams::default(),
             ai: AiParams::default(),
             anim: AnimTimings::default(),
+            extras: Extras::default(),
         }
     }
 }

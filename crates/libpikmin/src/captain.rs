@@ -18,6 +18,9 @@ pub struct CaptainInput {
     pub whistle: bool,
     pub throw: bool,
     pub dismiss: bool,
+    /// C-stick: swarm direction in world XZ, camera-relative like `stick`
+    /// (`Navi::makeCStick`). Zero = neutral.
+    pub swarm: Vec2,
     /// When set, the host drives the captain's body (a player avatar, libsm64...) and the sim
     /// only runs the cursor, whistle, throw and squad.
     pub pose: Option<CaptainPose>,
@@ -75,6 +78,14 @@ pub struct Captain {
     pub plate: Plate,
     /// Plucking a sprout. Movement, whistle and throw are locked meanwhile.
     pub pluck: Option<crate::onion::Pluck>,
+    /// Chained plucking (`mFastPluckKeyTaps > 0`): faster pulls, wider search.
+    pub fast_pluck: bool,
+    /// Punching (`NaviAttackState`).
+    pub punch: Option<Punch>,
+    /// The C-stick is pushing the squad (`!mIsCStickNeutral`).
+    pub swarming: bool,
+    /// Last squad direction (`mPlateYaw`).
+    pub plate_yaw: f32,
     /// `mHealth`, from `NaviParams::health`.
     pub health: f32,
     /// Frames left of the damage animation; invulnerable while > 0.
@@ -84,6 +95,16 @@ pub struct Captain {
     rearrange_pending: bool,
     pub(crate) input: CaptainInput,
     pub(crate) pressed: Pressed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Punch {
+    /// "PUNCH" animation counter.
+    pub frame: f32,
+    /// Landed on something this punch.
+    pub hit: bool,
+    /// Whistle pressed mid-punch: whistle when it ends (`mGatherRequested`).
+    pub whistle_queued: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -109,6 +130,10 @@ impl Captain {
             throw: ThrowState::Idle,
             plate: Plate::default(),
             pluck: None,
+            fast_pluck: false,
+            punch: None,
+            swarming: false,
+            plate_yaw: std::f32::consts::PI,
             health,
             damage_frames: 0.0,
             down: false,
@@ -161,7 +186,7 @@ impl Sim {
             return;
         }
 
-        if self.update_pluck(ci, dt, pressed.throw) {
+        if self.update_pluck(ci, dt, input.throw, pressed.throw) {
             self.captain_move(ci, host, dt, input, true);
             self.captain_formation(ci);
             return;
@@ -181,6 +206,9 @@ impl Sim {
 
         self.captain_move(ci, host, dt, input, false);
         self.captain_formation(ci);
+        if self.captain_punch(ci, host, dt, pressed) {
+            return;
+        }
         self.captain_whistle(ci, dt, input, pressed);
         self.captain_throw(ci, dt, input, pressed);
         if pressed.dismiss {
@@ -278,11 +306,35 @@ impl Sim {
         c.cursor_world = Vec3::new(c.pos.x + c.cursor.x, ground + 1.0, c.pos.z + c.cursor.z);
     }
 
-    /// Formation upkeep, from the C-stick-neutral branch of `Navi::makeCStick`.
+    /// Formation upkeep (`Navi::makeCStick`). With the C-stick pushed the plate swings toward
+    /// it (40% of the way if within 120° of where it points, else straight there) and slims
+    /// down as the stick goes further; neutral, it settles behind the captain.
     fn captain_formation(&mut self, ci: usize) {
         let navi = &self.params.navi;
         let plate_parms = &self.params.plate;
         let c = &self.captains[ci];
+        let swarm = Vec3::new(c.input.swarm.x, 0.0, c.input.swarm.y);
+        let dead_zone = 0.05;
+
+        if swarm.length() > dead_zone {
+            let input_yaw = yaw_of(swarm);
+            let squad_yaw = c.plate.direction;
+            let target = if dir_of(input_yaw).dot(dir_of(squad_yaw)) > (2.094_395_2f32).cos() {
+                round_ang(squad_yaw + 0.4 * ang_dist(input_yaw, squad_yaw))
+            } else {
+                round_ang(input_yaw)
+            };
+            let s = ((swarm.length().min(1.0) - dead_zone) / (1.0 - dead_zone)).max(0.0);
+            let strength = if s >= 0.9 { 1.0 } else { 0.6 * (s / 0.9) };
+            let (pos, vel) = (c.pos, c.vel);
+            let c = &mut self.captains[ci];
+            c.neutral_time = 0.0;
+            c.swarming = true;
+            c.plate_yaw = target;
+            c.plate.refresh(plate_parms, strength);
+            c.plate.set_pos(plate_parms, pos, target, vel);
+            return;
+        }
 
         // Distance bands from the nearest squad member decide when the plate re-sorts.
         let mut nearest = f32::MAX;
@@ -305,6 +357,7 @@ impl Sim {
         let (pos, vel) = (c.pos, c.vel);
         let pikis = &self.pikis;
         let c = &mut self.captains[ci];
+        c.swarming = false;
         c.plate.refresh(plate_parms, 0.0);
         if band == 2 {
             if c.rearrange_pending {
@@ -312,9 +365,13 @@ impl Sim {
                 c.rearrange_pending = false;
             }
             c.plate.set_pos(plate_parms, pos, behind, vel);
+            c.plate_yaw = behind;
         } else {
             c.rearrange_pending = true;
-            let dir = if moving { behind } else { c.plate.direction };
+            let dir = if moving { behind } else { c.plate_yaw };
+            if moving {
+                c.plate_yaw = behind;
+            }
             c.plate.set_pos(plate_parms, pos, dir, vel);
         }
     }
@@ -434,8 +491,14 @@ impl Sim {
         if pressed.throw
             && matches!(self.captains[ci].throw, ThrowState::Idle)
             && matches!(self.captains[ci].whistle, WhistleState::Off)
+            && !self.start_throw_wait(ci)
         {
-            self.start_throw_wait(ci);
+            // Nobody to throw: `NaviThrowWaitState::exec` goes to `NAVISTATE_Attack`.
+            self.captains[ci].punch = Some(Punch {
+                frame: 0.0,
+                hit: false,
+                whistle_queued: false,
+            });
         }
 
         let ThrowState::Wait {
@@ -494,7 +557,7 @@ impl Sim {
     }
 
     /// `NaviThrowWaitState::init`: pick the nearest squad member within 80, preferring ones behind.
-    fn start_throw_wait(&mut self, ci: usize) {
+    fn start_throw_wait(&mut self, ci: usize) -> bool {
         let grab = self.params.navi.pluck_grab_range;
         let c = &self.captains[ci];
         let fwd = dir_of(c.face);
@@ -516,7 +579,7 @@ impl Sim {
             }
         }
         let Some((id, dist)) = best else {
-            return; // the original punches here (NAVISTATE_Attack); not implemented
+            return false;
         };
         let captain = c.id;
         let (held, pending) = if dist <= grab {
@@ -532,6 +595,68 @@ impl Sim {
             pending_timeout: 3.0,
             hold_time: 0.0,
         };
+        true
+    }
+
+    /// `NaviAttackState`: walk on while the "PUNCH" animation plays. From its `KEY_Action0`
+    /// to the end it hits every non-flying creature within reach (`getCentreSize` of both +
+    /// `mPunchRadius`) and within 135° of facing, until something takes the hit. Returns
+    /// true while punching.
+    fn captain_punch(&mut self, ci: usize, host: &mut dyn Host, dt: f32, pressed: Pressed) -> bool {
+        let Some(mut punch) = self.captains[ci].punch else {
+            return false;
+        };
+        let anim = self.params.anim.punch;
+        let reach_extra = self.params.navi.body_collision_radius + self.params.navi.punch_radius;
+        let damage = self.params.navi.punch_damage;
+        punch.whistle_queued |= pressed.whistle;
+        punch.frame += self.params.anim.fps * dt;
+
+        let (cpos, face, cid) = (
+            self.captains[ci].pos,
+            self.captains[ci].face,
+            self.captains[ci].id,
+        );
+        if !punch.hit && punch.frame >= anim.action0 {
+            let targets: Vec<_> = self
+                .creatures
+                .creatures
+                .iter()
+                .filter(|c| c.alive && !c.flying && c.parts_len > 0)
+                .filter(|c| {
+                    let diff = c.pos - cpos;
+                    let size = self.creatures.bounds(c).1;
+                    diff.length() <= size + reach_extra
+                        && ang_dist(face, yaw_of(diff)).abs() < 2.356_194_5
+                })
+                .map(|c| c.id)
+                .collect();
+            for creature in targets {
+                if host.damage(
+                    creature,
+                    damage,
+                    None,
+                    crate::host::DamageSource::Captain(cid),
+                ) {
+                    punch.hit = true;
+                    self.events.push(Event::Punched {
+                        captain: cid,
+                        creature,
+                        damage,
+                    });
+                }
+            }
+        }
+
+        if punch.frame >= anim.end {
+            self.captains[ci].punch = None;
+            if punch.whistle_queued {
+                self.captains[ci].whistle = WhistleState::Expanding { timer: 0.0 };
+            }
+        } else {
+            self.captains[ci].punch = Some(punch);
+        }
+        true
     }
 
     fn cancel_throw(&mut self, ci: usize) {

@@ -17,6 +17,10 @@ use crate::params::ParmError;
 pub const ANIM_DEAD: [usize; 3] = [20, 42, 48];
 /// `PIKIANIM_Damage` (10) → 21 "damage.dca": the captain is invulnerable while it plays.
 pub const ANIM_DAMAGE: usize = 21;
+/// `PIKIANIM_Punch` (25) → 94 "punch.dca": the captain's punch.
+pub const ANIM_PUNCH: usize = 94;
+/// `PIKIANIM_Nuku_Fast` (82) → 43 "nuku3.dca": chained plucks (`mFastPluckKeyTaps > 0`).
+pub const ANIM_NUKU_FAST: usize = 43;
 /// `PIKIANIM_Nuku` (5) → 28 "nuku.dca", captain plucking.
 pub const ANIM_NUKU: usize = 28;
 /// `PIKIANIM_Attack` (23) → 18 "attack1.dca".
@@ -74,6 +78,10 @@ pub struct AnimTimings {
     pub dead: [f32; 3],
     /// Captain hit reaction (`Navi::finishDamage` at its end).
     pub damage: AnimTiming,
+    /// Captain punch: hits from `KEY_Action0` to the end (`NaviAttackState`).
+    pub punch: AnimTiming,
+    /// Chained, faster plucking.
+    pub nuku_fast: AnimTiming,
 }
 
 impl Default for AnimTimings {
@@ -91,6 +99,8 @@ impl Default for AnimTimings {
             goal_suction: AnimTiming::new(INF, INF, None, 48.0),
             dead: [104.0, 114.0, 129.0],
             damage: AnimTiming::new(INF, INF, None, 19.0),
+            punch: AnimTiming::new(1.0, 4.0, None, 9.0),
+            nuku_fast: AnimTiming::new(9.0, INF, None, 19.0),
         }
     }
 }
@@ -202,6 +212,8 @@ impl AnimTimings {
         self.pickloop = timing_at(&infos, ANIM_PICKLOOP)?;
         self.nuku = timing_at(&infos, ANIM_NUKU)?;
         self.damage = timing_at(&infos, ANIM_DAMAGE)?;
+        self.punch = timing_at(&infos, ANIM_PUNCH)?;
+        self.nuku_fast = timing_at(&infos, ANIM_NUKU_FAST)?;
         for (slot, idx) in self.dead.iter_mut().zip(ANIM_DEAD) {
             *slot = timing_at(&infos, idx)?.end;
         }
