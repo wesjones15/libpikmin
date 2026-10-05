@@ -115,6 +115,8 @@ struct Game {
     hits: u32,
     stolen: u32,
     params_source: String,
+    /// A message for the HUD and how long it stays up.
+    notice: Option<(String, f32)>,
 }
 
 fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
@@ -132,12 +134,14 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
         );
         sim.spawn_piki_in_squad(colors[i % 3], pos, olimar);
     }
-    for i in 0..20 {
+    // 80 in all, so the Onions have room to shoot seeds (100 on the field, `aiconst` p15,
+    // keeps them inside).
+    for i in 0..10 {
         let a = i as f32 * 2.4;
         let pos = Vec3::new(-250.0 + a.sin() * 30.0, 0.0, 110.0 + a.cos() * 30.0);
         sim.spawn_piki_in_squad(PikiColor::Blue, pos, louie);
     }
-    for i in 0..20 {
+    for i in 0..10 {
         sim.spawn_piki(
             PikiColor::Red,
             Vec3::new(
@@ -191,6 +195,7 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
         hits: 0,
         stolen: 0,
         params_source,
+        notice: None,
     }
 }
 
@@ -487,6 +492,12 @@ async fn main() {
             }
         }
         let sim_dt = if paused { 0.0 } else { dt };
+        if let Some((_, t)) = g.notice.as_mut() {
+            *t -= dt;
+            if *t <= 0.0 {
+                g.notice = None;
+            }
+        }
         if !paused {
             g.world.tekis.update(dt, &mut g.sim, is_key_pressed(KeyCode::G));
         }
@@ -510,6 +521,9 @@ async fn main() {
             }
             match e {
                 Event::Hit { .. } => g.hits += 1,
+                Event::SeedStored { .. } => {
+                    g.notice = Some(("Field full (100): seeds stay in the Onion".into(), 3.0));
+                }
                 Event::Recruited {
                     stolen_from: Some(_),
                     ..
@@ -847,6 +861,10 @@ fn draw_hud(g: &Game) {
     ];
     for (i, l) in lines.iter().enumerate() {
         draw_text(l, 12.0, 22.0 + i as f32 * 20.0, 20.0, WHITE);
+    }
+    if let Some((text, _)) = &g.notice {
+        let w = measure_text(text, None, 26, 1.0).width;
+        draw_text(text, (screen_width() - w) / 2.0, screen_height() - 80.0, 26.0, YELLOW);
     }
 
 }
