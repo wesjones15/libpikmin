@@ -94,7 +94,84 @@ pub enum Blend {
     Inverse,
 }
 
-/// What a renderer needs from a `Material`. The full TEV setup is parsed past but not kept.
+/// One colour key. The channel value is stored in the key's small integer field
+/// (`PVWKeyInfoU8`/`S10::mTime`); the floats are the in/out tangents in units per frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ColorKey {
+    pub frame: f32,
+    pub value: f32,
+    pub in_tan: f32,
+    pub out_tan: f32,
+}
+
+/// `PVWPolygonColourInfo` / `PVWTevColReg` animation: keyed RGB and alpha channels.
+#[derive(Debug, Clone, Default)]
+pub struct ColorAnim {
+    pub frames: u32,
+    pub speed: f32,
+    pub rgb: [Vec<ColorKey>; 3],
+    pub alpha: Vec<ColorKey>,
+}
+
+/// `subExtract` (graphics.cpp): Hermite in frame units. One key is constant; outside every
+/// key pair the first pair is used, like `PVWColourAnimInfo::extract`.
+fn sample_keys(keys: &[ColorKey], frame: f32) -> Option<f32> {
+    match keys {
+        [] => None,
+        [k] => Some(k.value),
+        _ => {
+            let i = (0..keys.len() - 1)
+                .find(|&i| keys[i].frame <= frame && keys[i + 1].frame >= frame)
+                .unwrap_or(0);
+            let (k0, k1) = (keys[i], keys[i + 1]);
+            let span = k1.frame - k0.frame;
+            if span <= 0.0 {
+                return Some(k0.value);
+            }
+            let a = frame - k0.frame;
+            let s = a / span;
+            let (s2, s3) = (s * s, s * s * s);
+            Some(
+                (2.0 * s3 - 3.0 * s2 + 1.0) * k0.value
+                    + (-2.0 * s3 + 3.0 * s2) * k1.value
+                    + a * (s2 - 2.0 * s + 1.0) * k0.out_tan
+                    + a * (s2 - s) * k1.in_tan,
+            )
+        }
+    }
+}
+
+impl ColorAnim {
+    /// Samples R, G, B, A at `frame`; channels without keys come back `None`.
+    pub fn sample(&self, frame: f32) -> [Option<f32>; 4] {
+        [
+            sample_keys(&self.rgb[0], frame),
+            sample_keys(&self.rgb[1], frame),
+            sample_keys(&self.rgb[2], frame),
+            sample_keys(&self.alpha, frame),
+        ]
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rgb.iter().all(Vec::is_empty) && self.alpha.is_empty()
+    }
+}
+
+/// `PVWTevColReg` (PVW.h): a TEV colour register with signed 10-bit channels.
+#[derive(Debug, Clone, Default)]
+pub struct TevColReg {
+    pub color: [i16; 4],
+    pub anim: ColorAnim,
+}
+
+/// The parts of `PVWTevInfo` (PVW.h) that are kept: colour registers 0-2 and konst colours.
+#[derive(Debug, Clone, Default)]
+pub struct TevInfo {
+    pub regs: [TevColReg; 3],
+    pub konst: [[u8; 4]; 4],
+}
+
+/// What a renderer needs from a `Material`. TEV stages are parsed past but not kept.
 #[derive(Debug, Clone)]
 pub struct Material {
     pub flags: u32,
@@ -105,6 +182,10 @@ pub struct Material {
     pub tex_attr: Option<usize>,
     /// `PVWLightingInfo::mCtrlFlag`; bit 0 = lit, bit 11 = vertex colour as material colour.
     pub lighting: u32,
+    /// Keyed animation of `color` (`ShapeDynMaterials::animate`).
+    pub color_anim: ColorAnim,
+    /// Index into [`Model::tev_infos`] for PVW materials.
+    pub tev_info: Option<usize>,
 }
 
 impl Material {
@@ -191,6 +272,7 @@ pub struct Model {
     pub textures: Vec<TexImage>,
     pub tex_attrs: Vec<TexAttr>,
     pub materials: Vec<Material>,
+    pub tev_infos: Vec<TevInfo>,
     pub vtx_matrices: Vec<Skin>,
     pub envelopes: Vec<Envelope>,
     pub meshes: Vec<Mesh>,
@@ -208,17 +290,52 @@ fn skip_anim_info(r: &mut Reader, channels: usize, key_bytes: usize) -> Result<(
     r.skip(n * (4 + channels * key_bytes))
 }
 
-/// `PVWTevInfo::read` (PVW.h). Only advances the reader.
-fn skip_tev_info(r: &mut Reader) -> Result<(), Error> {
-    for _ in 0..3 {
-        // PVWTevColReg: ShortColour, frame count, speed, colour and alpha S10 keys.
-        r.skip(8 + 4 + 4)?;
-        skip_anim_info(r, 3, 12)?;
-        skip_anim_info(r, 1, 12)?;
+/// One channel of a `PVWAnimKey1/3`: `PVWKeyInfoU8` (u8 + 3 pad) or `PVWKeyInfoS10`
+/// (i16 + 2 pad), then the in and out tangents.
+fn read_key_channel(r: &mut Reader, frame: f32, s10: bool) -> Result<ColorKey, Error> {
+    let value = if s10 { r.i16()? as f32 } else { r.u8()? as f32 };
+    r.skip(if s10 { 2 } else { 3 })?;
+    Ok(ColorKey {
+        frame,
+        value,
+        in_tan: r.f32()?,
+        out_tan: r.f32()?,
+    })
+}
+
+/// Frame count, speed, then `PVWAnimInfo3` (RGB) and `PVWAnimInfo1` (alpha) keys.
+fn read_color_anim(r: &mut Reader, s10: bool) -> Result<ColorAnim, Error> {
+    let mut anim = ColorAnim {
+        frames: r.u32()?,
+        speed: r.f32()?,
+        ..Default::default()
+    };
+    for _ in 0..r.count()? {
+        let frame = r.u32()? as f32;
+        for ch in &mut anim.rgb {
+            ch.push(read_key_channel(r, frame, s10)?);
+        }
     }
-    r.skip(4 * 4)?; // konst colours
+    for _ in 0..r.count()? {
+        let frame = r.u32()? as f32;
+        anim.alpha.push(read_key_channel(r, frame, s10)?);
+    }
+    Ok(anim)
+}
+
+/// `PVWTevInfo::read` (PVW.h). TEV stages are skipped.
+fn read_tev_info(r: &mut Reader) -> Result<TevInfo, Error> {
+    let mut info = TevInfo::default();
+    for reg in &mut info.regs {
+        reg.color = [r.i16()?, r.i16()?, r.i16()?, r.i16()?];
+        reg.anim = read_color_anim(r, true)?;
+    }
+    for k in &mut info.konst {
+        *k = read_colour(r)?;
+    }
     let stages = r.count()?;
-    r.skip(stages * (8 + 12 + 12))
+    r.skip(stages * (8 + 12 + 12))?;
+    Ok(info)
 }
 
 /// `Material::read` (graphics.cpp).
@@ -228,13 +345,13 @@ fn read_material(r: &mut Reader) -> Result<Material, Error> {
     let mut color = read_colour(r)?;
     let mut tex_attr = (texture_index >= 0).then_some(texture_index as usize);
     let mut lighting = 1;
+    let mut color_anim = ColorAnim::default();
+    let mut tev_info = None;
     if flags & mat_flags::PVW != 0 {
-        let _tev_info = r.i32()?;
+        tev_info = usize::try_from(r.i32()?).ok();
         // PVWPolygonColourInfo
         color = read_colour(r)?;
-        r.skip(8)?; // frame count, speed
-        skip_anim_info(r, 3, 12)?;
-        skip_anim_info(r, 1, 12)?;
+        color_anim = read_color_anim(r, false)?;
         // PVWLightingInfo
         lighting = r.u32()?;
         r.skip(4)?;
@@ -263,6 +380,8 @@ fn read_material(r: &mut Reader) -> Result<Material, Error> {
         color,
         tex_attr,
         lighting,
+        color_anim,
+        tev_info,
     })
 }
 
@@ -343,7 +462,7 @@ impl Model {
                     let tevs = r.count()?;
                     r.align(0x20);
                     for _ in 0..tevs {
-                        skip_tev_info(&mut r)?;
+                        m.tev_infos.push(read_tev_info(&mut r)?);
                     }
                     for _ in 0..n {
                         m.materials.push(read_material(&mut r)?);

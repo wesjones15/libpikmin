@@ -1,12 +1,14 @@
-//! Loads Pikmin 1 models, textures and animations from the user's own disc image.
+//! Loads Pikmin 1 models, textures and animations extracted from the user's own disc.
 //!
-//! Nothing here ships Nintendo data: every asset is read at runtime from a disc the user
-//! provides. Formats are reimplemented from the projectPiki decomp (file/function citations
-//! are in each module). The crate is renderer-agnostic: hosts get triangle batches, decoded
-//! RGBA images and posed joint matrices, and draw them however they like.
+//! Nothing here ships Nintendo data. On first run [`extract`] copies the needed folders off the
+//! user's disc image into the git-ignored `assets/` folder (same layout as the disc's
+//! `files/dataDir`), and everything loads from there. Formats are reimplemented from the
+//! projectPiki decomp (file/function citations are in each module). The crate is
+//! renderer-agnostic: hosts get triangle batches, decoded RGBA images and posed joint matrices.
 
 pub mod anim;
 pub mod disc;
+pub mod extract;
 pub mod model;
 pub mod motion;
 pub mod pose;
@@ -26,7 +28,7 @@ pub enum Error {
     Io(std::io::Error),
     Truncated(usize),
     Bad(String),
-    NotFound(String),
+    NotFound(std::path::PathBuf),
 }
 
 impl fmt::Display for Error {
@@ -35,7 +37,11 @@ impl fmt::Display for Error {
             Error::Io(e) => write!(f, "{e}"),
             Error::Truncated(at) => write!(f, "data ended early at {at:#x}"),
             Error::Bad(s) => write!(f, "{s}"),
-            Error::NotFound(p) => write!(f, "{p} is not on the disc"),
+            Error::NotFound(p) => write!(
+                f,
+                "{} is missing; point PIKMIN_DISC at your Pikmin disc image to extract assets",
+                p.display()
+            ),
         }
     }
 }
@@ -48,34 +54,34 @@ impl From<std::io::Error> for Error {
     }
 }
 
-/// Disc paths under `files/`.
+/// Paths inside the assets folder (= under the disc's `files/dataDir/`).
 pub mod paths {
     /// Olimar (`NaviMgr::NaviMgr`, naviMgr.cpp).
-    pub const OLIMAR: &str = "dataDir/pikis/nv3Model.mod";
+    pub const OLIMAR: &str = "pikis/nv3Model.mod";
     /// Pikmin by `PikiColor` order Blue, Red, Yellow (`ViewPiki`/`PikiShapeObject`, viewPiki.cpp).
     pub const PIKMIN: [&str; 3] = [
-        "dataDir/pikis/bluModel.mod",
-        "dataDir/pikis/redModel.mod",
-        "dataDir/pikis/yelModel.mod",
+        "pikis/bluModel.mod",
+        "pikis/redModel.mod",
+        "pikis/yelModel.mod",
     ];
     /// The animation bundle every Pikmin and Olimar share (gameSetup.cpp).
-    pub const PIKI_BUNDLE: &str = "dataDir/pikis/bluModel.anm";
-    pub const PIKI_ANIM_MGR: &str = "dataDir/pikis/animMgr.bin";
+    pub const PIKI_BUNDLE: &str = "pikis/bluModel.anm";
+    pub const PIKI_ANIM_MGR: &str = "pikis/animMgr.bin";
     /// Leaf, bud, flower, drawn on joint 6 (`ViewPiki::demoDraw`, viewPiki.cpp).
     pub const HAPPA: [&str; 3] = [
-        "dataDir/pikis/happas/leaf.mod",
-        "dataDir/pikis/happas/bud.mod",
-        "dataDir/pikis/happas/flower.mod",
+        "pikis/happas/leaf.mod",
+        "pikis/happas/bud.mod",
+        "pikis/happas/flower.mod",
     ];
-    pub const ONION: &str = "dataDir/objects/goal/goal.mod";
-    pub const ONION_BUNDLE: &str = "dataDir/objects/goal/goal.anm";
-    pub const ONION_ANIM_MGR: &str = "dataDir/objects/goal/anims.bin";
+    pub const ONION: &str = "objects/goal/goal.mod";
+    pub const ONION_BUNDLE: &str = "objects/goal/goal.anm";
+    pub const ONION_ANIM_MGR: &str = "objects/goal/anims.bin";
     /// Numbered pellets 1, 5, 10, 20 (gameSetup.cpp).
     pub const PELLETS: [&str; 4] = [
-        "dataDir/objects/pellets/white1.mod",
-        "dataDir/objects/pellets/white2.mod",
-        "dataDir/objects/pellets/white3.mod",
-        "dataDir/objects/pellets/white4.mod",
+        "objects/pellets/white1.mod",
+        "objects/pellets/white2.mod",
+        "objects/pellets/white3.mod",
+        "objects/pellets/white4.mod",
     ];
 }
 
@@ -109,9 +115,9 @@ impl AnimSet {
         AnimSet { mgr, anims }
     }
 
-    pub fn load(disc: &Disc, anim_mgr: &str, bundle: &str) -> Result<Self, Error> {
-        let mgr = AnimMgr::parse(&disc.read(anim_mgr)?)?;
-        let bundle = anim::parse_bundle(&disc.read(bundle)?)?;
+    pub fn load(assets: &Assets, anim_mgr: &str, bundle: &str) -> Result<Self, Error> {
+        let mgr = AnimMgr::parse(&assets.read(anim_mgr)?)?;
+        let bundle = anim::parse_bundle(&assets.read(bundle)?)?;
         Ok(Self::new(mgr, bundle))
     }
 
@@ -120,23 +126,64 @@ impl AnimSet {
     }
 }
 
-/// Default disc location for development: the decomp's `orig/` folder next to the repo.
-pub fn find_disc() -> Option<std::path::PathBuf> {
-    if let Some(p) = std::env::var_os("PIKMIN_DISC") {
-        return Some(p.into());
+/// The extracted assets folder.
+#[derive(Debug, Clone)]
+pub struct Assets {
+    pub root: std::path::PathBuf,
+}
+
+impl Assets {
+    /// `assets/` at the repository root.
+    pub fn default_dir() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets")
     }
-    let here = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    for dir in ["../../../pikmin-main/orig/GPIE01_01", "../../../pikmin-main/pikmin-main/orig/GPIE01_01"] {
-        let dir = here.join(dir);
-        if let Ok(rd) = std::fs::read_dir(&dir) {
-            for e in rd.flatten() {
-                let p = e.path();
-                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-                if matches!(ext.as_str(), "iso" | "ciso" | "gcm") {
-                    return Some(p);
-                }
-            }
+
+    /// Uses `explicit`, else `PIKMIN_ASSETS`, else [`Assets::default_dir`]. Returns `None` if
+    /// the folder hasn't been extracted yet.
+    pub fn discover(explicit: Option<&std::path::Path>) -> Option<Self> {
+        let candidates = [
+            explicit.map(std::path::Path::to_path_buf),
+            std::env::var_os("PIKMIN_ASSETS").map(Into::into),
+            Some(Self::default_dir()),
+        ];
+        candidates
+            .into_iter()
+            .flatten()
+            .find(|p| extract::is_complete(p))
+            .map(|root| Assets { root })
+    }
+
+    /// First-run helper: if `dir` is not a complete extraction, build it from the disc image
+    /// at `iso`, then use it. The disc is not touched again afterwards.
+    pub fn ensure(iso: &std::path::Path, dir: &std::path::Path, log: &mut dyn FnMut(&str)) -> Result<Self, Error> {
+        if !extract::is_complete(dir) {
+            extract::extract_assets(iso, dir, log)?;
         }
+        Ok(Assets { root: dir.to_path_buf() })
     }
-    None
+
+    /// What a host calls at startup: an existing extraction if there is one, else extract into
+    /// [`Assets::default_dir`] from a disc found by [`extract::find_disc`] in `disc_dirs`.
+    pub fn discover_or_extract(disc_dirs: &[std::path::PathBuf], log: &mut dyn FnMut(&str)) -> Result<Self, Error> {
+        if let Some(a) = Self::discover(None) {
+            return Ok(a);
+        }
+        let iso = extract::find_disc(disc_dirs).ok_or_else(|| {
+            Error::Bad("no assets yet and no Pikmin disc found; set PIKMIN_DISC to your .iso/.ciso".into())
+        })?;
+        log(&format!("first run: extracting assets from {}", iso.display()));
+        Self::ensure(&iso, &Self::default_dir(), log)
+    }
+
+    pub fn read(&self, path: &str) -> Result<Vec<u8>, Error> {
+        let full = self.root.join(path);
+        std::fs::read(&full).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => Error::NotFound(full),
+            _ => Error::Io(e),
+        })
+    }
+
+    pub fn model(&self, path: &str) -> Result<Model, Error> {
+        Model::parse(&self.read(path)?)
+    }
 }

@@ -405,10 +405,10 @@ mod tests {
         assert_eq!(p.apply_cunit_bin(b"p00\x04\x00"), Err(ParmError::Truncated));
     }
 
-    /// Runs only when the user has extracted their disc next to the repo.
+    /// Runs only when `assets/` has been extracted from the user's disc.
     #[test]
     fn user_disc_values_if_present() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../extracted/parms");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/parms");
         if !dir.exists() {
             eprintln!("skipping: {} not found", dir.display());
             return;

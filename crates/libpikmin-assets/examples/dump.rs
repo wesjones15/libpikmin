@@ -1,10 +1,9 @@
 //! Prints what the loaders find on the user's disc. `cargo run -p libpikmin-assets --example dump`
-use libpikmin_assets::{anim, paths, AnimSet, Disc, Model};
+use libpikmin_assets::{anim, paths, AnimSet, Assets, Model};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = libpikmin_assets::find_disc().ok_or("no disc found; set PIKMIN_DISC")?;
-    let disc = Disc::open(&path)?;
-    println!("disc {} ({})", disc.game_id, path.display());
+    let disc = Assets::discover(None).ok_or("no assets/ yet; run the viewer once or the extract-assets bin")?;
+    println!("assets {}", disc.root.display());
     let mut models = vec![paths::OLIMAR, paths::ONION];
     models.extend(paths::PIKMIN);
     models.extend(paths::HAPPA);

@@ -235,13 +235,13 @@ mod tests {
 
     #[test]
     fn user_disc_matches_documented_defaults_if_present() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../extracted");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
         let (Ok(piki), Ok(goal)) = (
             std::fs::read(root.join("pikis/animMgr.bin")),
             std::fs::read(root.join("objects/goal/anims.bin")),
         ) else {
             eprintln!(
-                "skipping: extracted anim files not found under {}",
+                "skipping: assets/ not extracted yet (run the viewer once) under {}",
                 root.display()
             );
             return;

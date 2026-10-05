@@ -10,13 +10,16 @@ This folder is the repo root. All work happens here. Sibling folders are read-on
 - `../er-mario-master/`: reference for the later Elden Ring host (me3 DLL, libsm64, fromsoftware-rs @ 59fbd3b).
 - `../pikmin2-main/`: projectPiki Pikmin 2 decomp, GPVE01. READ-ONLY secondary spec. Builds
   against the user's disc (game code 99.82% matched; gameplay code is in `src/plugProjectKandoU/`).
-- `../extracted/`: files copied off the user's discs with dtk (`parms/` = P1 binary parms, `pikis/animMgr.bin` = P1 anim keys,
-  `p2/` = P2 text parms). Never copy these into this repo.
+- `../extracted/p2/`: Pikmin 2 text parms copied off the user's disc with dtk (reference only).
+- `assets/` (git-ignored, never commit): Pikmin 1 files extracted from the user's disc on first
+  run, same layout as `files/dataDir/` (`parms/`, `pikis/`, `objects/goal/`, `objects/pellets/`).
+  Everything at runtime loads from here; the disc is only read to build it.
 
 Workspace:
 - `crates/libpikmin/`: core sim. No Elden Ring or libsm64 types.
-- `crates/libpikmin-assets/`: reads models, textures and animations straight off the user's disc
-  image (.iso/.ciso). Renderer-agnostic: triangle batches, RGBA images, posed joint matrices.
+- `crates/libpikmin-assets/`: first-run extractor (pure Rust: .iso/.gcm/.ciso → `assets/`, no
+  Python or dtk) and loaders for models, textures and animations. Renderer-agnostic: triangle
+  batches, RGBA images, posed joint matrices. Hosts call `Assets::discover_or_extract` at startup.
 - `crates/libpikmin-ffi/`: C ABI (cdylib/staticlib) for hosts.
 - `crates/viewer/`: top-down 2D test host (macroquad) for play-testing without a game.
 - `docs/`: behavior spec written from the decomp.
@@ -35,7 +38,8 @@ Workspace:
   plain text in `files/user/Abe/piki/{pikiParms,naviParms}.txt` (Shift-JIS). The crate parses
   both from the user's discs at runtime and falls back to code defaults.
 - No Nintendo or FromSoftware data in git: no disc images, no extracted `.bin`, models or
-  textures. Assets are read from the user's own disc at first run.
+  textures. Assets are extracted from the user's own disc at first run into `assets/`. Users
+  never need Python or dtk.
 - Offline only. Never suggest running modded Elden Ring online.
 
 ## Decisions

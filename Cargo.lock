@@ -303,6 +303,7 @@ name = "viewer"
 version = "0.1.0"
 dependencies = [
  "libpikmin",
+ "libpikmin-assets",
  "macroquad",
 ]
 

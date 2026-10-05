@@ -230,23 +230,30 @@ impl Host for World {
     }
 }
 
+/// Finds the extracted `assets/` folder, extracting it from the user's disc on first run
+/// (`PIKMIN_DISC`, or an image next to the repo), then loads the tuning parms from it.
 fn load_params() -> (Params, String) {
-    let mut params = Params::default();
-    let candidates = [
-        std::env::var_os("PIKMIN_EXTRACTED").map(PathBuf::from),
-        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../extracted")),
+    let ws = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let disc_dirs = [
+        ws.clone(),
+        ws.join("../iso backups"),
+        ws.join("../pikmin-main/orig/GPIE01_01"),
+        std::env::current_dir().unwrap_or_default(),
     ];
-    for dir in candidates.into_iter().flatten() {
-        if let Ok(applied) = params.load_extracted(&dir)
-            && !applied.is_empty()
-        {
-            return (params, format!("disc data ({} files)", applied.len()));
+    let mut params = Params::default();
+    let assets = match libpikmin_assets::Assets::discover_or_extract(&disc_dirs, &mut |m| {
+        println!("{m}")
+    }) {
+        Ok(a) => a,
+        Err(e) => return (params, format!("code defaults ({e})")),
+    };
+    match params.load_extracted(&assets.root) {
+        Ok(applied) if !applied.is_empty() => {
+            (params, format!("disc data ({} files)", applied.len()))
         }
+        Ok(_) => (params, "code defaults (assets/ has no parms)".into()),
+        Err(e) => (Params::default(), format!("code defaults ({e})")),
     }
-    (
-        params,
-        "code defaults (no extracted disc data; set PIKMIN_EXTRACTED)".into(),
-    )
 }
 
 struct Game {

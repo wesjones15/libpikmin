@@ -1,12 +1,12 @@
-//! Checks against the user's own disc. Skipped when no disc is found (set `PIKMIN_DISC`).
+//! Checks against assets extracted from the user's disc (`libpikmin_assets::extract`).
+//! Skipped when `assets/` is missing.
 
 use glam::{Mat4, Vec3};
 use libpikmin_assets::motion::Motion;
-use libpikmin_assets::{AnimSet, Disc, Model, Skeleton, paths};
+use libpikmin_assets::{AnimSet, Assets, Model, Skeleton, paths};
 
-fn disc() -> Option<Disc> {
-    let path = libpikmin_assets::find_disc()?;
-    Some(Disc::open(&path).expect("disc opens"))
+fn disc() -> Option<Assets> {
+    Assets::discover(None)
 }
 
 fn bounds(model: &Model, skel: &Skeleton, anim: Option<(&libpikmin_assets::Anim, f32)>) -> (Vec3, Vec3) {
@@ -27,7 +27,6 @@ fn bounds(model: &Model, skel: &Skeleton, anim: Option<(&libpikmin_assets::Anim,
 #[test]
 fn every_model_and_animation_loads() {
     let Some(disc) = disc() else { return };
-    assert_eq!(disc.game_id, "GPIE01");
     let mut all = vec![paths::OLIMAR, paths::ONION];
     all.extend(paths::PIKMIN);
     all.extend(paths::HAPPA);
@@ -63,4 +62,31 @@ fn pikmin_stands_upright_at_sim_scale() {
         println!("{p}: {lo} .. {hi}");
         assert!(lo.y > -3.0 && (10.0..40.0).contains(&height), "{p}: {lo} .. {hi}");
     }
+}
+
+/// The Rust extractor reproduces the existing extraction byte for byte. Needs the disc.
+#[test]
+fn extractor_matches_existing_assets() {
+    let (Some(assets), Some(iso)) = (
+        disc(),
+        libpikmin_assets::extract::find_disc(&[
+            Assets::default_dir().join(".."),
+            Assets::default_dir().join("../../iso backups"),
+            Assets::default_dir().join("../../pikmin-main/orig/GPIE01_01"),
+        ]),
+    ) else {
+        return;
+    };
+    let out = std::env::temp_dir().join("libpikmin_extract_test");
+    let _ = std::fs::remove_dir_all(&out);
+    let report = libpikmin_assets::extract::extract_assets(&iso, &out, &mut |_| {}).unwrap();
+    assert!(report.files > 20);
+    for rel in libpikmin_assets::extract::REQUIRED {
+        assert_eq!(
+            std::fs::read(out.join(rel)).unwrap(),
+            std::fs::read(assets.root.join(rel)).unwrap(),
+            "{rel}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&out);
 }

@@ -19,3 +19,8 @@
 *.mod
 /extracted/
 /assets/
+*.anm
+*.dca
+*.dck
+*.txe
+*.dsk

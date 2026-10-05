@@ -1,5 +1,5 @@
-//! Reads files straight off the user's GameCube disc image, so nothing has to be extracted
-//! by hand. Supports plain `.iso`/`.gcm` and `.ciso` (compact ISO).
+//! Reads files off the user's GameCube disc image. Only the first-run extractor
+//! ([`crate::extract`]) uses it. Supports plain `.iso`/`.gcm` and `.ciso` (compact ISO).
 //!
 //! GCM layout: the disc header holds the FST offset and size at 0x424/0x428. FST entries are
 //! 12 bytes: `flags:u8 | name_offset:u24`, then `offset`, `size` (for a directory: parent
@@ -28,8 +28,10 @@ enum Layout {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Entry {
+    /// Path as spelled on the disc.
+    path: String,
     offset: u32,
     size: u32,
 }
@@ -112,7 +114,7 @@ impl Disc {
         let e = self
             .files
             .get(&key)
-            .ok_or_else(|| Error::NotFound(path.to_string()))?;
+            .ok_or_else(|| Error::NotFound(path.into()))?;
         self.read_at(e.offset as u64, e.size as usize)
     }
 
@@ -121,9 +123,9 @@ impl Disc {
             .contains_key(&normalize(path.strip_prefix("files/").unwrap_or(path)))
     }
 
-    /// All file paths on the disc, lowercase.
+    /// All file paths on the disc, spelled as on the disc.
     pub fn paths(&self) -> impl Iterator<Item = &str> {
-        self.files.keys().map(String::as_str)
+        self.files.values().map(|e| e.path.as_str())
     }
 }
 
@@ -164,6 +166,7 @@ fn parse_fst(fst: &[u8]) -> Result<HashMap<String, Entry>, Error> {
             files.insert(
                 path.to_ascii_lowercase(),
                 Entry {
+                    path: path.clone(),
                     offset: be(i * 12 + 4)?,
                     size: be(i * 12 + 8)?,
                 },
