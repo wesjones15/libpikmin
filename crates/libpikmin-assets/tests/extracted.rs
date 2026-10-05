@@ -159,3 +159,37 @@ fn enemy_animations_have_sound_events() {
         assert!(!sounds.is_empty(), "{name} has no sound events");
     }
 }
+
+#[test]
+fn every_particle_generator_parses_and_runs() {
+    use libpikmin_assets::particle::{Generator, Pcr, effects};
+    let Some(disc) = disc() else { return };
+    let dir = disc.root.join("effects/pcr");
+    let mut n = 0;
+    for e in std::fs::read_dir(&dir).unwrap() {
+        let path = e.unwrap().path();
+        if path.extension().is_none_or(|x| x != "pcr") {
+            continue;
+        }
+        let pcr = Pcr::parse(&std::fs::read(&path).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let mut g = Generator::new(std::sync::Arc::new(pcr), Vec3::ZERO, 7);
+        for _ in 0..90 {
+            g.update(1.0, &mut |_| {});
+            for q in g.quads(Vec3::X, Vec3::Y) {
+                assert!(q.corners.iter().all(|c| c.is_finite()), "{}", path.display());
+            }
+        }
+        n += 1;
+    }
+    assert!(n > 100, "{n} generators");
+    let curs = Pcr::parse(&disc.read(effects::WHISTLE_CIRCLE.pcr).unwrap()).unwrap();
+    // g_curs00: rising sparkles that live 8 frames, colours held over the life.
+    assert!(curs.billboard);
+    assert_eq!(curs.life, 8);
+    for e in effects::NAVI_WHISTLE.iter().chain([&effects::WHISTLE_CIRCLE]) {
+        libpikmin_assets::texture::decode_bti(&disc.read(e.tex).unwrap()).unwrap();
+    }
+    let olimar = disc.model(paths::OLIMAR).unwrap();
+    let ante = olimar.coll.iter().find(|c| c.id == "ante").expect("antenna sphere");
+    assert_eq!(ante.joint, 6);
+}

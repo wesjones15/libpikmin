@@ -392,6 +392,68 @@ pub struct Model {
     pub meshes: Vec<Mesh>,
     pub joints: Vec<Joint>,
     pub joint_names: Vec<String>,
+    /// Collision spheres from the INI text after the end chunk (`BaseShape::importIni`).
+    pub coll: Vec<CollSphere>,
+}
+
+/// An `ObjCollInfo` sphere (`OCT_Sphere`): `centre` is in joint `joint`'s space.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CollSphere {
+    pub joint: usize,
+    pub id: String,
+    pub radius: f32,
+    pub centre: Vec3,
+}
+
+/// `BaseShape::importIni` / `ObjCollInfo::loadini`: nested `collinfo <joint> { id .. type 1
+/// radius r centre x y z }` blocks; `//` starts a comment.
+fn parse_coll_ini(text: &str) -> Vec<CollSphere> {
+    let mut tokens = text
+        .lines()
+        .map(|l| l.split("//").next().unwrap_or(""))
+        .flat_map(str::split_whitespace);
+    let mut out = Vec::new();
+    // Open blocks: index into `out`, or None for blocks that aren't collinfo.
+    let mut stack: Vec<Option<usize>> = Vec::new();
+    let num = |t: Option<&str>| t.and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+    while let Some(t) = tokens.next() {
+        let top = stack.last().copied().flatten();
+        match t {
+            "collinfo" => {
+                let joint = num(tokens.next()) as usize;
+                out.push(CollSphere {
+                    joint,
+                    id: String::new(),
+                    radius: 0.0,
+                    centre: Vec3::ZERO,
+                });
+            }
+            "{" => stack.push(out.len().checked_sub(1)),
+            "}" => {
+                stack.pop();
+            }
+            "id" => {
+                if let (Some(i), Some(v)) = (top, tokens.next()) {
+                    out[i].id = v.to_string();
+                }
+            }
+            "radius" => {
+                let r = num(tokens.next());
+                if let Some(i) = top {
+                    out[i].radius = r;
+                }
+            }
+            "centre" => {
+                let c = Vec3::new(num(tokens.next()), num(tokens.next()), num(tokens.next()));
+                if let Some(i) = top {
+                    out[i].centre = c;
+                }
+            }
+            _ => {}
+        }
+    }
+    out.retain(|c| !c.id.is_empty());
+    out
 }
 
 fn read_colour(r: &mut Reader) -> Result<[u8; 4], Error> {
@@ -714,7 +776,12 @@ impl Model {
                     r.align(0x20);
                     m.joint_names = (0..n).map(|_| r.string()).collect::<Result<_, _>>()?;
                 }
-                chunk::END => break,
+                chunk::END => {
+                    if let Some(rest) = data.get(end.min(data.len())..) {
+                        m.coll = parse_coll_ini(&String::from_utf8_lossy(rest));
+                    }
+                    break;
+                }
                 _ => {}
             }
             if end > data.len() {

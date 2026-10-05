@@ -16,13 +16,15 @@
 //! - `SndData/`: sound banks, sequences and streamed music, plus `SndData/Seqs/pikiseq.hed`,
 //!   the sequence archive's index, which the game keeps inside `main.dol` (`HEAD_pikiseq`,
 //!   passed to `Jaf_InitSeqArchive2` in verysimple.c) and this extractor copies out.
+//! - `effects/`: particle generators (`pcr/`), their textures (`tex/`) and effect models
+//! - `shapes/cursor/`: the cursor and its marker (`GlobalShape::init`)
 
 use std::path::{Component, Path, PathBuf};
 
 use crate::{Disc, Error};
 
 /// Folders under `files/dataDir/` copied whole.
-pub const FOLDERS: [&str; 13] = [
+pub const FOLDERS: [&str; 15] = [
     "parms/",
     "pikis/",
     "objects/goal/",
@@ -36,10 +38,12 @@ pub const FOLDERS: [&str; 13] = [
     "tekikeys/",
     "tekipara/",
     "SndData/",
+    "effects/",
+    "shapes/cursor/",
 ];
 
 /// Files that must exist for the sim and viewer to work.
-pub const REQUIRED: [&str; 26] = [
+pub const REQUIRED: [&str; 28] = [
     "parms/naviMgr.bin",
     "parms/pikiMgr.bin",
     "parms/aiconst.bin",
@@ -62,6 +66,8 @@ pub const REQUIRED: [&str; 26] = [
     "tekikeys/swallow.key",
     "tekipara/swallow.bin",
     "SndData/Banks/pikibank.bx",
+    "effects/pcr/g_curs00.pcr",
+    "shapes/cursor/cursor.mod",
     "SndData/Seqs/pikiseq.arc",
     SEQ_HEADER,
     crate::sound::tables::TABLES,

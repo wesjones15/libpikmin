@@ -11,6 +11,7 @@ pub mod disc;
 pub mod extract;
 pub mod model;
 pub mod motion;
+pub mod particle;
 pub mod pose;
 pub mod sound;
 pub mod teki;
@@ -21,7 +22,7 @@ use std::fmt;
 
 pub use anim::{Anim, AnimInfo, AnimMgr};
 pub use disc::Disc;
-pub use model::{Batch, BatchVertex, Blend, Cull, Material, Model, Skin};
+pub use model::{Batch, BatchVertex, Blend, CollSphere, Cull, Material, Model, Skin};
 pub use pose::{Pose, Skeleton};
 pub use texture::Image;
 
@@ -96,6 +97,10 @@ pub mod paths {
     pub const FALL_WATER: &str = "objects/fl_water/fl_water.mod";
     pub const FALL_WATER_BUNDLE: &str = "objects/fl_water/fl_water.anm";
     pub const FALL_WATER_ANIM_MGR: &str = "objects/fl_water/anims.bin";
+    /// The cursor and the marker tinted with the next Pikmin's colour (`GlobalShape::init`,
+    /// drawn by `Navi::refresh`).
+    pub const CURSOR: &str = "shapes/cursor/cursor.mod";
+    pub const CURSOR_MARKER: &str = "shapes/cursor/marker.mod";
 }
 
 /// An animation set: the AnimMgr's infos with their data resolved from a bundle.

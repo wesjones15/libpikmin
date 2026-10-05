@@ -85,6 +85,31 @@ fn rgb5a3(c: u16) -> [u8; 4] {
     }
 }
 
+/// A `.bti` texture (`TexImg::importBti`, graphics.cpp): the 0x20-byte `BtiHeader`, then the
+/// image. Returns the image and whether S and T repeat (`!mWrapS` clamps).
+pub fn decode_bti(data: &[u8]) -> Result<(Image, bool, bool), Error> {
+    if data.len() < 0x20 {
+        return Err(Error::Truncated(data.len()));
+    }
+    // `TexImg::convFormat`: GX texture formats; paletted ones aren't used for these files.
+    let format = match data[0] {
+        0 => TexFormat::I4,
+        1 => TexFormat::I8,
+        2 => TexFormat::Ia4,
+        3 => TexFormat::Ia8,
+        4 => TexFormat::Rgb565,
+        5 => TexFormat::Rgb5a3,
+        6 => TexFormat::Rgba8,
+        14 => TexFormat::S3tc,
+        f => return Err(Error::Bad(format!("bti format {f} is not supported"))),
+    };
+    let width = u16::from_be_bytes([data[2], data[3]]) as u32;
+    let height = u16::from_be_bytes([data[4], data[5]]) as u32;
+    let offset = u32::from_be_bytes(data[0x1C..0x20].try_into().unwrap()) as usize;
+    let image = decode(format, width, height, data.get(offset..).unwrap_or(&[]))?;
+    Ok((image, data[6] != 0, data[7] != 0))
+}
+
 /// Decodes the first image level.
 pub fn decode(format: TexFormat, width: u32, height: u32, data: &[u8]) -> Result<Image, Error> {
     let (w, h) = (width as usize, height as usize);
