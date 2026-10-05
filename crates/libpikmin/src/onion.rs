@@ -158,6 +158,14 @@ impl Sim {
         self.sprouts.iter().flatten()
     }
 
+    /// Hands an Onion `seeds` seeds of `color` to launch, as if something had been delivered
+    /// (a host reward, or for testing). Plays the suction reaction first, like `suckMe`.
+    pub fn give_onion_seeds(&mut self, onion: OnionId, color: PikiColor, seeds: u32) {
+        if let Some(o) = self.onions.get_mut(onion.0 as usize) {
+            o.receive(color, seeds as i32);
+        }
+    }
+
     /// Plants a ready-to-pluck sprout directly (handy for hosts and tests).
     pub fn plant_sprout(&mut self, color: PikiColor, pos: Vec3) -> SproutId {
         let timer = self.params.piki.grow_up_time;

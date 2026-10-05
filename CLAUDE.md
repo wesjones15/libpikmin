@@ -45,8 +45,8 @@ Workspace:
 - Offline only. Never suggest running modded Elden Ring online.
 
 ## Decisions
-- **No libsm64/Mario for now.** The user will say when. Olimar uses the core's own kinematic
-  controller. Keep a seam (host-driven leader pose) so a host can drive him later.
+- Olimar uses the core's own kinematic controller. Keep a seam (host-driven leader pose)
+  so a host can drive him later.
 - Onion location = any active Site of Grace (ER host).
 - An Onion holds a set of colors, so one-per-color (P1 style) and a single shared Onion are
   both just configuration. The user leans P1 style but wants both possible.

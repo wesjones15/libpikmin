@@ -515,6 +515,21 @@ async fn main() {
             let at = g.sim.captain(active).cursor_world;
             g.world.spawn(Vec3::new(at.x, 0.0, at.z), 24.0, 600.0);
         }
+        // O: the nearest Onion gets 5 seeds of its colour (for watching seeds and sprouts).
+        let seed_now = frames == 1 && std::env::var("PIKMIN_SEEDS").is_ok();
+        if is_key_pressed(KeyCode::O) || seed_now {
+            let me = g.sim.captain(active).pos;
+            let n: u32 = std::env::var("PIKMIN_SEEDS").ok().and_then(|v| v.parse().ok()).unwrap_or(5);
+            if let Some(o) = g
+                .sim
+                .onions()
+                .iter()
+                .min_by(|a, b| (a.pos - me).length().total_cmp(&(b.pos - me).length()))
+                .map(|o| (o.id, o.colors[0]))
+            {
+                g.sim.give_onion_seeds(o.0, o.1, n);
+            }
+        }
         if is_key_pressed(KeyCode::H) {
             let c = g.sim.captain(active);
             if c.down {
@@ -854,7 +869,7 @@ fn draw_hud(g: &Game) {
             g.sim.pikis().iter().filter(|p| p.is_alive()).count(),
         ),
         format!("hits {}  stolen {}  tick {}  {} fps  |  {}", g.hits, g.stolen, g.sim.tick(), get_fps(), g.params_source),
-        "WASD move (Ctrl: aim only)  Space throw/pluck/punch  Shift/RMB whistle  IJKL swarm  X dismiss  Tab captain  H revive  C creature  G shake  V 2D/3D  Q/E camera  F1 slots  R reset".into(),
+        "WASD move (Ctrl: aim only)  Space throw/pluck/punch  Shift/RMB whistle  IJKL swarm  X dismiss  Tab captain  H revive  O seeds  C creature  G shake  V 2D/3D  Q/E camera  F1 slots  R reset".into(),
     ];
     for (i, l) in lines.iter().enumerate() {
         draw_text(l, 12.0, 22.0 + i as f32 * 20.0, 20.0, WHITE);

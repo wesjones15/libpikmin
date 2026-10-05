@@ -9,16 +9,35 @@
 //! - `pikis/`: Olimar and Pikmin models, the shared animation bundle, `animMgr.bin`, leaves
 //! - `objects/goal/`: the Onion model, animations and `anims.bin`
 //! - `objects/pellets/`: the numbered pellets (1, 5, 10, 20)
+//! - `objects/pikihead/`: the sprout / flying seed
+//! - `objects/water/`, `objects/fl_water/`: nectar puddle and falling drop
+//! - `tekis/<name>/`, `tekikeys/`, `tekipara/`: enemy models, animation keys and parameters
+//!   (Dwarf Bulborb = chappy, Spotty Bulborb = swallow, Honeywisp = qurione)
+//! - `SndData/`: sound banks, sequences and streamed music
 
 use std::path::{Component, Path, PathBuf};
 
 use crate::{Disc, Error};
 
 /// Folders under `files/dataDir/` copied whole.
-pub const FOLDERS: [&str; 4] = ["parms/", "pikis/", "objects/goal/", "objects/pellets/"];
+pub const FOLDERS: [&str; 13] = [
+    "parms/",
+    "pikis/",
+    "objects/goal/",
+    "objects/pellets/",
+    "objects/pikihead/",
+    "objects/water/",
+    "objects/fl_water/",
+    "tekis/chappy/",
+    "tekis/swallow/",
+    "tekis/qurione/",
+    "tekikeys/",
+    "tekipara/",
+    "SndData/",
+];
 
 /// Files that must exist for the sim and viewer to work.
-pub const REQUIRED: [&str; 14] = [
+pub const REQUIRED: [&str; 22] = [
     "parms/naviMgr.bin",
     "parms/pikiMgr.bin",
     "parms/aiconst.bin",
@@ -33,6 +52,14 @@ pub const REQUIRED: [&str; 14] = [
     "objects/goal/goal.anm",
     "objects/goal/anims.bin",
     "objects/pellets/white1.mod",
+    "objects/pikihead/pikihead.mod",
+    "objects/water/water.mod",
+    "objects/fl_water/fl_water.mod",
+    "tekis/chappy/chappy.mod",
+    "tekis/swallow/swallow.mod",
+    "tekikeys/swallow.key",
+    "tekipara/swallow.bin",
+    "SndData/Banks/pikibank.bx",
 ];
 
 pub const GAME_IDS: [(&str, &str); 3] = [

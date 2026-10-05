@@ -296,7 +296,8 @@ enum Clock {
 
 #[derive(Clone, Copy)]
 struct Player {
-    motion: Motion,
+    /// AnimMgr index being played.
+    anim: usize,
     frame: f32,
 }
 
@@ -308,16 +309,29 @@ fn advance<'a>(
     clock: Clock,
     dt: f32,
 ) -> Option<(&'a Anim, f32)> {
-    let (info, anim) = set.get(motion.anim_index()?)?;
+    advance_index(players, key, set, motion.anim_index()?, clock, dt)
+}
+
+/// Like [`advance`] for sets without a motion table (items, tekis): `index` is the AnimMgr
+/// entry itself.
+fn advance_index<'a>(
+    players: &mut HashMap<u64, Player>,
+    key: u64,
+    set: &'a AnimSet,
+    index: usize,
+    clock: Clock,
+    dt: f32,
+) -> Option<(&'a Anim, f32)> {
+    let (info, anim) = set.get(index)?;
     let start = *info.keys.first().unwrap_or(&0) as f32;
     let end = (*info.keys.last().unwrap_or(&0) as f32).max(start);
     let p = players.entry(key).or_insert(Player {
-        motion,
+        anim: index,
         frame: start,
     });
-    if p.motion != motion {
+    if p.anim != index {
         *p = Player {
-            motion,
+            anim: index,
             frame: start,
         };
     }
@@ -361,6 +375,25 @@ fn piki_rgb(c: PikiColor) -> [u8; 4] {
     }
 }
 
+/// `PikiHeadMotion` (PikiHeadItem.h): indices into `objects/pikihead/anims.bin`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PikiHeadMotion {
+    TaneFall = 0,
+    TaneUp = 1,
+    Hatuga = 2,
+    UgWait = 3,
+    UgGrow = 4,
+    Sioreru = 5,
+    TaneDown = 6,
+}
+
+/// What the viewer remembers about a sprout to pick its motion.
+struct SproutTrack {
+    state: std::mem::Discriminant<SproutState>,
+    happa: libpikmin::Happa,
+    motion: PikiHeadMotion,
+}
+
 /// Text or a bar to draw in screen space after the 3D pass.
 pub enum Overlay {
     Text { at: Vec3, text: String, color: Color, size: f32 },
@@ -373,6 +406,9 @@ pub struct Scene3d {
     happa: [GpuModel; 3],
     onion: GpuModel,
     pellets: [GpuModel; 4],
+    pikihead: GpuModel,
+    pikihead_anims: AnimSet,
+    sprouts: HashMap<libpikmin::onion::SproutId, SproutTrack>,
     piki_anims: AnimSet,
     onion_anims: AnimSet,
     tev: Tev,
@@ -425,6 +461,9 @@ impl Scene3d {
                 m(paths::PELLETS[2])?,
                 m(paths::PELLETS[3])?,
             ],
+            pikihead: m(paths::PIKIHEAD)?,
+            pikihead_anims: AnimSet::load(assets, paths::PIKIHEAD_ANIM_MGR, paths::PIKIHEAD_BUNDLE)?,
+            sprouts: HashMap::new(),
             piki_anims: AnimSet::load(assets, paths::PIKI_ANIM_MGR, paths::PIKI_BUNDLE)?,
             onion_anims: AnimSet::load(assets, paths::ONION_ANIM_MGR, paths::ONION_BUNDLE)?,
             tev: Tev::new(),
@@ -536,7 +575,7 @@ impl Scene3d {
             let anim = self.onion_anims.get(motion_idx).map(|(info, a)| {
                 let key = (3u64 << 40) | i as u64;
                 let p = self.players.entry(key).or_insert(Player {
-                    motion: Motion::Wait,
+                    anim: motion_idx,
                     frame: 0.0,
                 });
                 let end = *info.keys.last().unwrap_or(&0) as f32;
@@ -603,22 +642,77 @@ impl Scene3d {
             }
         }
 
-        // Sprouts.
+        // Sprouts and flying seeds: the pikihead item (`PikiHeadItem::refresh`,
+        // pikiheadItem.cpp), its motion picked like `PikiHeadAI` does, with the leaf, bud or
+        // flower on joint 3.
+        let mut live = Vec::new();
         for sp in sim.sprouts() {
-            let col = piki_rgb(sp.color);
-            let c = Color::from_rgba(col[0], col[1], col[2], 255);
-            match sp.state {
-                SproutState::Flying => draw_sphere(mq(sp.pos), 2.5, None, c),
-                SproutState::Buried { .. } => {}
-                SproutState::Tane { .. } => {
-                    draw_sphere(mq(sp.pos), 1.5, None, Color::from_rgba(110, 80, 40, 255))
-                }
-                SproutState::Ready { .. } | SproutState::Wilted { .. } => {
-                    let root = srt_matrix(GVec3::ONE, GVec3::ZERO, sp.pos);
-                    draw_model(&self.happa[sp.happa as usize], root, None, Look::default(), &mut ctx);
-                }
+            live.push(sp.id);
+            let track = self.sprouts.entry(sp.id).or_insert(SproutTrack {
+                state: std::mem::discriminant(&sp.state),
+                happa: sp.happa,
+                motion: PikiHeadMotion::TaneFall,
+            });
+            let state = std::mem::discriminant(&sp.state);
+            let entered = track.state != state;
+            let grew = track.happa != sp.happa;
+            track.motion = match sp.state {
+                SproutState::Flying => PikiHeadMotion::TaneFall,
+                SproutState::Buried { .. } => PikiHeadMotion::TaneDown,
+                SproutState::Tane { .. } => PikiHeadMotion::TaneUp,
+                SproutState::Ready { .. } if entered => PikiHeadMotion::Hatuga,
+                SproutState::Ready { .. } if grew => PikiHeadMotion::UgGrow,
+                SproutState::Ready { .. } => track.motion,
+                SproutState::Wilted { .. } => PikiHeadMotion::Sioreru,
+            };
+            track.state = state;
+            track.happa = sp.happa;
+            let key = (4u64 << 40) | sp.id.0 as u64;
+            // HATUGA and UGGROW play once, then UGWAIT loops.
+            let mut motion = track.motion;
+            if matches!(motion, PikiHeadMotion::Hatuga | PikiHeadMotion::UgGrow)
+                && self.players.get(&key).is_some_and(|p| {
+                    p.anim == motion as usize
+                        && self
+                            .pikihead_anims
+                            .get(motion as usize)
+                            .is_some_and(|(i, a)| {
+                                p.frame >= (*i.keys.last().unwrap_or(&0) as f32).min(a.frames as f32 - 1.0)
+                            })
+                })
+            {
+                motion = PikiHeadMotion::UgWait;
+                track.motion = motion;
+            }
+            let clock = match motion {
+                PikiHeadMotion::TaneFall | PikiHeadMotion::UgWait => Clock::Loop(30.0),
+                _ => Clock::Once(30.0),
+            };
+            let anim = advance_index(&mut self.players, key, &self.pikihead_anims, motion as usize, clock, dt);
+            let root = if matches!(sp.state, SproutState::Flying) && sp.vel.length() > 0.0 {
+                // Flying seeds point their Y axis against their velocity.
+                let y = -sp.vel.normalize();
+                let x = y.cross(GVec3::Z).normalize_or(GVec3::X);
+                let z = x.cross(y).normalize();
+                Mat4::from_cols(x.extend(0.0), y.extend(0.0), z.extend(0.0), sp.pos.extend(1.0))
+            } else {
+                srt_matrix(GVec3::ONE, GVec3::ZERO, sp.pos)
+            };
+            let joints = draw_model(
+                &self.pikihead,
+                root,
+                anim,
+                Look {
+                    tint0: Some(piki_rgb(sp.color)),
+                    ..Default::default()
+                },
+                &mut ctx,
+            );
+            if let Some(&j) = joints.get(3) {
+                draw_model(&self.happa[sp.happa as usize], j, None, Look::default(), &mut ctx);
             }
         }
+        self.sprouts.retain(|id, _| live.contains(id));
 
         // Creatures (host-side dummies).
         for &(pos, yaw, radius, height, hp, flash) in creatures {

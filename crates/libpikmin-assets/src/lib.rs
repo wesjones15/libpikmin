@@ -12,6 +12,7 @@ pub mod extract;
 pub mod model;
 pub mod motion;
 pub mod pose;
+pub mod teki;
 mod reader;
 pub mod texture;
 
@@ -83,6 +84,17 @@ pub mod paths {
         "objects/pellets/white3.mod",
         "objects/pellets/white4.mod",
     ];
+    /// The sprout / flying seed (`ItemMgr`, itemMgr.cpp); its leaf goes on joint 3.
+    pub const PIKIHEAD: &str = "objects/pikihead/pikihead.mod";
+    pub const PIKIHEAD_BUNDLE: &str = "objects/pikihead/pikihead.anm";
+    pub const PIKIHEAD_ANIM_MGR: &str = "objects/pikihead/anims.bin";
+    /// Nectar puddle (`OBJTYPE_Water`) and falling drop (`OBJTYPE_FallWater`).
+    pub const WATER: &str = "objects/water/water.mod";
+    pub const WATER_BUNDLE: &str = "objects/water/water.anm";
+    pub const WATER_ANIM_MGR: &str = "objects/water/anims.bin";
+    pub const FALL_WATER: &str = "objects/fl_water/fl_water.mod";
+    pub const FALL_WATER_BUNDLE: &str = "objects/fl_water/fl_water.anm";
+    pub const FALL_WATER_ANIM_MGR: &str = "objects/fl_water/anims.bin";
 }
 
 /// An animation set: the AnimMgr's infos with their data resolved from a bundle.
