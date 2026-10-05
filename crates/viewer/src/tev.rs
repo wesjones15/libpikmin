@@ -10,11 +10,11 @@
 //! the rasterized colour (channel 0 = diffuse, channel 1 = specular).
 
 use libpikmin_assets::model::{TevCombiner, TevStage, mat_flags};
-use libpikmin_assets::{Blend, Model};
+use libpikmin_assets::{Blend, Cull, Model};
 use macroquad::math::{Mat4, Vec4, vec4};
 use macroquad::miniquad::{
-    BlendFactor, BlendState, BlendValue, Comparison, Equation, PipelineParams, TextureId,
-    UniformDesc, UniformType,
+    BlendFactor, BlendState, BlendValue, Comparison, CullFace, Equation, FrontFaceOrder,
+    PipelineParams, TextureId, UniformDesc, UniformType,
 };
 use macroquad::prelude::{
     Material, MaterialParams, Mesh, ShaderSource, Texture2D, draw_mesh, gl_use_default_material,
@@ -281,14 +281,16 @@ pub struct DrawParams {
     pub gens: [(u8, Option<[[f32; 3]; 2]>); 4],
     pub textures: [Option<Texture2D>; 4],
     pub blend: Blend,
+    pub cull: Cull,
     /// Multiplies the output colour and alpha.
     pub brightness: f32,
     pub alpha: f32,
 }
 
 pub struct Tev {
-    pipes: [Material; 3],
-    bound: [[Option<TextureId>; 4]; 3],
+    /// By cull mode, then opaque / alpha test / blended.
+    pipes: [[Material; 3]; 3],
+    bound: [[[Option<TextureId>; 4]; 3]; 3],
     white: Texture2D,
     pub view_rot: Mat4,
 }
@@ -300,7 +302,7 @@ impl Tev {
             BlendFactor::Value(BlendValue::SourceAlpha),
             BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
         ));
-        let make = |blend: Option<BlendState>, depth_write: bool| {
+        let make = |blend: Option<BlendState>, depth_write: bool, cull: Cull| {
             load_material(
                 ShaderSource::Glsl {
                     vertex: VERTEX,
@@ -311,6 +313,13 @@ impl Tev {
                         depth_test: Comparison::LessOrEqual,
                         depth_write,
                         color_blend: blend,
+                        // GX faces are front when clockwise on screen.
+                        front_face_order: FrontFaceOrder::Clockwise,
+                        cull_face: match cull {
+                            Cull::Back => CullFace::Back,
+                            Cull::Front => CullFace::Front,
+                            Cull::None => CullFace::Nothing,
+                        },
                         ..Default::default()
                     },
                     uniforms: uniforms(),
@@ -321,8 +330,9 @@ impl Tev {
         };
         Tev {
             // opaque, alpha test, blended
-            pipes: [make(None, true), make(alpha, true), make(alpha, false)],
-            bound: [[None; 4]; 3],
+            pipes: [Cull::Back, Cull::Front, Cull::None]
+                .map(|c| [make(None, true, c), make(alpha, true, c), make(alpha, false, c)]),
+            bound: [[[None; 4]; 3]; 3],
             white: Texture2D::from_rgba8(1, 1, &[255, 255, 255, 255]),
             view_rot: Mat4::IDENTITY,
         }
@@ -338,16 +348,17 @@ impl Tev {
         // batched before rebinding them.
         let want: [Option<TextureId>; 4] =
             std::array::from_fn(|i| p.textures[i].as_ref().map(|t| t.raw_miniquad_id()));
-        if want != self.bound[pi] {
+        let ci = p.cull as usize;
+        if want != self.bound[ci][pi] {
             // SAFETY: main thread, between draws.
             unsafe { macroquad::window::get_internal_gl() }.flush();
-            let mat = &self.pipes[pi];
+            let mat = &self.pipes[ci][pi];
             for (i, name) in ["Tex0", "Tex1", "Tex2", "Tex3"].iter().enumerate() {
                 mat.set_texture(name, p.textures[i].clone().unwrap_or_else(|| self.white.clone()));
             }
-            self.bound[pi] = want;
+            self.bound[ci][pi] = want;
         }
-        let mat = &self.pipes[pi];
+        let mat = &self.pipes[ci][pi];
         mat.set_uniform_array("StageColor", &program.color[..]);
         mat.set_uniform_array("StageColorOp", &program.color_op[..]);
         mat.set_uniform_array("StageAlpha", &program.alpha[..]);

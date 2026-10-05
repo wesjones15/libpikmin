@@ -21,7 +21,7 @@ use std::fmt;
 
 pub use anim::{Anim, AnimInfo, AnimMgr};
 pub use disc::Disc;
-pub use model::{Batch, BatchVertex, Blend, Material, Model, Skin};
+pub use model::{Batch, BatchVertex, Blend, Cull, Material, Model, Skin};
 pub use pose::{Pose, Skeleton};
 pub use texture::Image;
 

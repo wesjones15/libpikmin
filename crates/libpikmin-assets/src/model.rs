@@ -744,15 +744,14 @@ impl Model {
                 if material.flags & mat_flags::SKIP != 0 {
                     continue;
                 }
-                let mut batch = Batch {
+                let mut batches: [Batch; 3] = std::array::from_fn(|i| Batch {
                     material: mat as usize,
+                    cull: [Cull::Back, Cull::Front, Cull::None][i],
                     vertices: Vec::new(),
                     indices: Vec::new(),
-                };
-                self.decode_mesh(m, material, &mut batch)?;
-                if !batch.indices.is_empty() {
-                    out.push(batch);
-                }
+                });
+                self.decode_mesh(m, material, &mut batches)?;
+                out.extend(batches.into_iter().filter(|b| !b.indices.is_empty()));
             }
         }
         let rank = |b: &Batch| match self.materials[b.material].blend() {
@@ -764,7 +763,8 @@ impl Model {
         Ok(out)
     }
 
-    fn decode_mesh(&self, mesh: &Mesh, material: &Material, batch: &mut Batch) -> Result<(), Error> {
+    /// Decodes a mesh into `batches` by each display list's cull mode.
+    fn decode_mesh(&self, mesh: &Mesh, material: &Material, batches: &mut [Batch; 3]) -> Result<(), Error> {
         use mesh_flags::*;
         let use_nbt = mesh.flags & VTX_NBT != 0;
         let mut slots = [Skin::Root; 10];
@@ -779,6 +779,7 @@ impl Model {
                 }
             }
             for list in &group.lists {
+                let batch = &mut batches[Cull::from_flags(list.flags) as usize];
                 let mut r = Reader::new(&list.data);
                 while r.remaining() > 0 {
                     let cmd = r.u8()?;
@@ -890,9 +891,30 @@ pub struct BatchVertex {
     pub skin: Skin,
 }
 
+/// Which faces a display list hides: `DispList::mFlags & 3` through
+/// `DGXGraphics::setCullFront` (0 back, 1 front, anything else neither).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cull {
+    Back = 0,
+    Front = 1,
+    None = 2,
+}
+
+impl Cull {
+    pub fn from_flags(flags: u32) -> Cull {
+        match flags & 3 {
+            0 => Cull::Back,
+            1 => Cull::Front,
+            _ => Cull::None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Batch {
     pub material: usize,
+    /// Faces are wound like GX's (clockwise = front).
+    pub cull: Cull,
     pub vertices: Vec<BatchVertex>,
     pub indices: Vec<u32>,
 }

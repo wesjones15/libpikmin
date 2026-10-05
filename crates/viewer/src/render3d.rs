@@ -267,6 +267,7 @@ fn draw_model(
                 gens: tev::gen_params(&gm.model, b.material, ctx.time),
                 textures: gmat.textures.clone(),
                 blend: gmat.blend,
+                cull: b.cull,
                 brightness: look.brightness.unwrap_or(1.0),
                 alpha: look.alpha.unwrap_or(1.0),
             };
