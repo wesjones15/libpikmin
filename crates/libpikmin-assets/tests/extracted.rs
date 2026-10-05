@@ -142,3 +142,20 @@ fn sound_bank_decodes() {
     let s = Stream::decode(&disc.read("SndData/piki.stx").unwrap()).unwrap();
     assert_eq!(s.stereo.len(), s.header.samples as usize * 2);
 }
+
+/// Enemy animations carry their sound cues as event keys (`ANIMEVENT_Notify`).
+#[test]
+fn enemy_animations_have_sound_events() {
+    let Some(disc) = disc() else { return };
+    for name in ["chappy", "swallow"] {
+        let mgr = libpikmin_assets::AnimMgr::parse(&disc.read(&format!("tekikeys/{name}.key")).unwrap()).unwrap();
+        let sounds: Vec<_> = mgr
+            .infos
+            .iter()
+            .enumerate()
+            .flat_map(|(i, info)| info.event_keys.iter().filter(|e| e.event == 0).map(move |e| (i, e.frame, e.value)))
+            .collect();
+        println!("{name}: {sounds:?}");
+        assert!(!sounds.is_empty(), "{name} has no sound events");
+    }
+}
