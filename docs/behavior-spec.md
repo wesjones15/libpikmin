@@ -222,7 +222,9 @@ aiTransport.cpp:
   the pellet starts moving (`doLift`).
 - **Goal (`decideGoal`).** The majority colour among carriers (ties at random) picks the Onion.
   With several Onions accepting that colour we take the nearest. If none accepts it, we take the
-  nearest Onion and use its colour.
+  nearest Onion and use its colour. Pikmin 1 decides only at lift time. We also re-decide (and
+  re-path) whenever carriers join or leave and the goal no longer takes a majority colour, the
+  way Pikmin 2 keeps live colour counts (`Pellet::onSlotStickStart`/`End`, `getPelletGoal`).
 - **Speed.** Carriers count 1 + 0.5·leaf stage, so leaf 1, bud 1.5, flower 2 (`getCarriers`).
   - max = 0.7·`mMaxLeafMoveSpeed`, min = 0.5·max
   - speed = min + (carriers + 1 − minCarry) / maxCarry · (max − min)

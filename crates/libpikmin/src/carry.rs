@@ -255,6 +255,23 @@ impl Sim {
         Some((onion, color))
     }
 
+    /// Whether the Onion still suits the carriers: it takes one of their majority colours.
+    /// Pikmin 1 only decides at lift time (`ActTransport::doLift`); like Pikmin 2, whose
+    /// `Pellet::onSlotStickStart` / `onSlotStickEnd` keep the colour counts that
+    /// `Pellet::getPelletGoal` reads, we re-pick when Pikmin join or leave on the way.
+    fn goal_still_majority(&self, pi: usize, onion: OnionId) -> bool {
+        let mut counts = [0u32; 3];
+        for id in &self.pellets[pi].carriers {
+            counts[self.pikis[id.0 as usize].color.index()] += 1;
+        }
+        let max = counts.iter().copied().max().unwrap_or(0);
+        let o = &self.onions[onion.0 as usize];
+        (0..3).any(|c| counts[c] == max && o.accepts(PikiColor::from_index(c)))
+            || !self.onions.iter().any(|other| {
+                (0..3).any(|c| counts[c] == max && other.accepts(PikiColor::from_index(c)))
+            })
+    }
+
     pub(crate) fn update_pellets(&mut self, host: &mut dyn Host, dt: f32) {
         for i in 0..self.pellets.len() {
             match self.pellets[i].state.clone() {
@@ -288,11 +305,32 @@ impl Sim {
                     }
                 }
                 PelletState::Carried {
-                    onion,
-                    color,
-                    path,
+                    mut onion,
+                    mut color,
+                    mut path,
                     mut next,
-                } => self.carry_step(i, host, dt, onion, color, &path, &mut next),
+                } => {
+                    if !self.goal_still_majority(i, onion)
+                        && let Some((o, c)) = self.decide_goal(i)
+                    {
+                        let mut route = Vec::new();
+                        let to = self.onions[o.0 as usize].pos;
+                        if host.carry_path(self.pellets[i].pos, to, &mut route) && !route.is_empty() {
+                            (onion, color, path, next) = (o, c, route, 0);
+                            self.pellets[i].state = PelletState::Carried {
+                                onion,
+                                color,
+                                path: path.clone(),
+                                next,
+                            };
+                            self.events.push(Event::PelletRerouted {
+                                pellet: self.pellets[i].id,
+                                onion,
+                            });
+                        }
+                    }
+                    self.carry_step(i, host, dt, onion, color, &path, &mut next)
+                }
                 PelletState::Sucking {
                     onion,
                     color,
@@ -581,5 +619,64 @@ impl Sim {
             .map(|p| (p.id, dist_xz(pos, p.pos)))
             .filter(|&(id, d)| d <= self.pellets[id.0 as usize].desc.radius + range + size)
             .min_by(|a, b| a.1.total_cmp(&b.1))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::FlatHost;
+    use crate::{Params, Sim};
+
+    /// Grabs `pellet` at its next free slot as if it had walked there and lifted.
+    fn attach(sim: &mut Sim, color: PikiColor, pellet: PelletId) {
+        let pos = sim.pellet(pellet).pos;
+        let id = sim.spawn_piki(color, pos).unwrap();
+        let p = &mut sim.pellets[pellet.0 as usize];
+        let slot = p.slots.iter().position(Option::is_none).unwrap();
+        p.slots[slot] = Some(id);
+        p.carriers.push(id);
+        let phase = if matches!(p.state, PelletState::Carried { .. }) {
+            CarryPhase::Move
+        } else {
+            CarryPhase::Lift { frame: 30.0, lifted: true }
+        };
+        sim.pikis[id.0 as usize].state = PikiState::Carry(Carry { pellet, slot: slot as u32, phase });
+    }
+
+    #[test]
+    fn carriers_joining_on_the_way_reroute_to_the_new_majority() {
+        let mut sim = Sim::new(Params::default(), 3);
+        let mut host = FlatHost;
+        let red = sim.add_onion(Vec3::new(2000.0, 0.0, 2000.0), &[PikiColor::Red]);
+        let blue = sim.add_onion(Vec3::new(2000.0, 0.0, -2000.0), &[PikiColor::Blue]);
+        let pel = sim.spawn_pellet(PelletDesc {
+            pos: Vec3::ZERO,
+            yaw: 0.0,
+            radius: 10.0,
+            height: 10.0,
+            min_carriers: 1,
+            max_carriers: 4,
+            seeds_matching: 1,
+            seeds_other: 1,
+            color: None,
+            creature: None,
+        });
+        let goal = |sim: &Sim| match sim.pellet(pel).state {
+            PelletState::Carried { onion, .. } => Some(onion),
+            _ => None,
+        };
+        attach(&mut sim, PikiColor::Blue, pel);
+        sim.step(&mut host);
+        assert_eq!(goal(&sim), Some(blue), "one blue carrier: blue Onion");
+
+        attach(&mut sim, PikiColor::Red, pel);
+        sim.step(&mut host);
+        assert_eq!(goal(&sim), Some(blue), "a tie keeps the current goal");
+
+        attach(&mut sim, PikiColor::Red, pel);
+        sim.step(&mut host);
+        assert_eq!(goal(&sim), Some(red), "two reds to one blue: red Onion");
+        assert!(sim.drain_events().any(|e| matches!(e, Event::PelletRerouted { onion, .. } if onion == red)));
     }
 }

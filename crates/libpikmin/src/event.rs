@@ -97,6 +97,11 @@ pub enum Event {
         pellet: PelletId,
         onion: OnionId,
     },
+    /// Pikmin joined or left on the way and the majority colour now wants another Onion.
+    PelletRerouted {
+        pellet: PelletId,
+        onion: OnionId,
+    },
     /// Carriers fell below the minimum and put it down.
     PelletDropped {
         pellet: PelletId,
