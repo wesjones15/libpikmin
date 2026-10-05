@@ -18,7 +18,7 @@ use libpikmin::host::{CreatureFrame, CreatureId, CreaturePart};
 use libpikmin::pellet_config::{self, PelletConfig};
 use libpikmin::{PelletDesc, PelletId, PelletState, PikiState, Sim, Vec3};
 use libpikmin_assets::teki::{TekiParams, teki_paths, tpf, tpi};
-use libpikmin_assets::{AnimMgr, Assets};
+use libpikmin_assets::{AnimMgr, AnimSet, Assets, Skeleton};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TekiKind {
@@ -174,6 +174,32 @@ pub struct TekiSpec {
     /// Sound events (frame, sound table index) per motion.
     pub sound_keys: Vec<Vec<(f32, u8)>>,
     pub corpse: Option<PelletConfig>,
+    /// `TPF_CorpseSize` / `TPF_CorpseHeight` (`BTeki::viewGetBottomRadius` / `viewGetHeight`).
+    pub corpse_size: f32,
+    pub corpse_height: f32,
+    /// Where the body lies in the last frame of the death motion, in the local frame and
+    /// scaled. The game puts the corpse pellet on the body (its 'carc' sphere, else the
+    /// centre: `BTeki::dieSoon`), so the slots ring the body rather than the feet.
+    pub corpse_offset: Vec3,
+}
+
+/// The horizontal centre of the model's bounds at the end of motion `index`, local and unscaled.
+fn pose_centre(assets: &Assets, kind: TekiKind, index: usize) -> Option<Vec3> {
+    let [model, anm, key, _] = teki_paths(kind.name());
+    let model = assets.model(&model).ok()?;
+    let set = AnimSet::load(assets, &key, &anm).ok()?;
+    let (info, anim) = set.get(index)?;
+    let end = (*info.keys.last()? as f32).min(anim.frames.saturating_sub(1) as f32);
+    let pose = Skeleton::new(&model).pose(glam::Mat4::IDENTITY, Some((anim, end)));
+    let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+    for b in model.batches().ok()? {
+        for v in &b.vertices {
+            let p = pose.skin(v).0;
+            lo = lo.min(p);
+            hi = hi.max(p);
+        }
+    }
+    (lo.x <= hi.x).then(|| ((lo + hi) * 0.5).with_y(0.0))
 }
 
 impl TekiSpec {
@@ -239,6 +265,9 @@ impl TekiSpec {
             keys,
             sound_keys,
             corpse: kind.corpse_id().and_then(|id| pellet_config::find(pellets, id)).cloned(),
+            corpse_size: p.f(tpf::CORPSE_SIZE),
+            corpse_height: p.f(tpf::CORPSE_HEIGHT),
+            corpse_offset: pose_centre(assets, kind, Motions::of(kind).dead).unwrap_or_default() * p.f(tpf::SCALE),
         })
     }
 
@@ -594,19 +623,21 @@ fn update_bulborb(t: &mut Teki, spec: &TekiSpec, sim: &mut Sim, dt: f32, force_s
     match t.ai {
         Ai::Corpse(p) => {
             let pel = sim.pellet(p);
-            t.pos = pel.pos;
             t.yaw = pel.yaw;
+            t.pos = local_to_world(pel.pos, pel.yaw, -spec.corpse_offset).with_y(pel.pos.y);
             return None;
         }
         Ai::Dead => {
             if t.animate(spec, dt, false) {
                 // `BTeki::dieSoon`: leave a corpse the Pikmin can carry.
                 let c = spec.corpse.as_ref();
+                // On the body, ringed at the corpse size scaled like the pellet's world matrix
+                // (`Pellet::getSlotLocalPos`).
                 let id = sim.spawn_pellet(PelletDesc {
-                    pos: t.pos,
+                    pos: local_to_world(t.pos, t.yaw, spec.corpse_offset).with_y(t.pos.y),
                     yaw: t.yaw,
-                    radius: spec.collision_radius.max(10.0) * if t.kind == TekiKind::Spotty { 0.75 } else { 1.0 },
-                    height: c.map_or(20.0, |c| c.carry_info_height),
+                    radius: (spec.corpse_size * spec.scale).max(5.0),
+                    height: spec.corpse_height,
                     min_carriers: c.map_or(3, |c| c.min_carriers.max(1) as u32),
                     max_carriers: c.map_or(6, |c| c.max_carriers.max(1) as u32),
                     seeds_matching: c.map_or(4, |c| c.seeds_matching),

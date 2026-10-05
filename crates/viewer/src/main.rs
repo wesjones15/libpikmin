@@ -15,8 +15,9 @@
 //! Debug env vars: `PIKMIN_SHOT=out.png` (+ `PIKMIN_SHOT_FRAME=n`) saves a frame and exits,
 //! `PIKMIN_CAM=yaw,dist,pitch` and `PIKMIN_FOCUS=x,y,z` set the 3D camera, `PIKMIN_AUTOPLAY=1`
 //! walks the active captain at the nearest creature and keeps throwing, `PIKMIN_TRACE=1` prints
-//! enemy AI states once a second, `PIKMIN_MENU=1` opens an Onion window and `PIKMIN_PUTAWAY=n`
-//! sends n squad Pikmin of each colour home.
+//! enemy AI states once a second, `PIKMIN_MENU=1` opens an Onion window, `PIKMIN_PUTAWAY=n`
+//! sends n squad Pikmin of each colour home and `PIKMIN_KILL=1` kills every creature at the
+//! start (autoplay then throws at the corpses).
 
 use std::path::PathBuf;
 
@@ -351,7 +352,9 @@ async fn main() {
                 .tekis
                 .list
                 .iter()
-                .filter(|t| t.alive() && t.kind != teki::TekiKind::Honeywisp)
+                .filter(|t| {
+                    (t.alive() || matches!(t.ai, teki::Ai::Corpse(_))) && t.kind != teki::TekiKind::Honeywisp
+                })
                 .min_by(|a, b| (a.pos - me).length().total_cmp(&(b.pos - me).length()))
             {
                 let to = (c.pos - me).with_y(0.0);
@@ -448,6 +451,12 @@ async fn main() {
         if is_key_pressed(KeyCode::N) {
             let at = g.sim.captain(active).cursor_world;
             g.sim.spawn_nectar(Vec3::new(at.x, 150.0, at.z));
+        }
+        if frames == 1 && std::env::var_os("PIKMIN_KILL").is_some() {
+            let ids: Vec<_> = g.world.tekis.list.iter().map(|t| t.id).collect();
+            for id in ids {
+                g.world.tekis.damage(id, 1e9);
+            }
         }
         if frames == 1 && std::env::var_os("PIKMIN_NECTAR").is_some() {
             let at = g.sim.captain(active).pos + Vec3::new(0.0, 0.0, -45.0);
