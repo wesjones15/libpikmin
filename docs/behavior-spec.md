@@ -275,9 +275,58 @@ goalItem.cpp, pelletState.cpp, itemAI.cpp `GoalAI`:
   colour and leaf stage, and joins the squad. The captain is locked until frame 39.
   Pressing again during the pull chains to the next sprout.
 
+## 14. Pikmin dying — implemented (host-triggered)
+
+Enemies are host AI, so the host calls the interaction. These follow interactBattle.cpp and
+pikiState.cpp:
+- **Attack** (`InteractAttack::actPiki`, `Sim::attack_piki` / `attack_pikis_in_sphere`).
+  - Subtracts health, which starts at `mPikiMaxHealth` (retail 30, code 100).
+  - Pikmin that are dying, dead or knocked down can't be hit.
+  - At ≤ 0 health the Pikmin enters `PikiDyingState`: one of three random death animations
+    (DEAD/DEAD2/DEAD3 → AnimInfo 20/42/48, 104/114/129 frames).
+  - Then comes `PikiDeadState`, a 1.5 s shrink, and then it's gone.
+- **Crush** (`InteractPress::actPiki`, `PikiPressedState`, `Sim::crush_pikis_in_sphere`).
+  - Subtracts health, then the Pikmin is flattened with a 1.5 s invincible stun.
+  - The death check (`deathTimer > mPressDeathFactor − mNormalPikiPressFactor && health ≤ 0`)
+    passes on the first tick, so a crush that empties health kills at once.
+  - Otherwise the Pikmin stays flat for the stun plus `mPressDeathFactor` (retail 1.5 + 2.5 s),
+    then gets up.
+- **Flick** (`InteractFlick::actPiki`, `Sim::flick_pikis_in_sphere`).
+  - Subtracts health and knocks the Pikmin away like a shake-off.
+  - A Pikmin at ≤ 0 health dies when it gets up.
+  - Knocked-down Pikmin with health left can be whistled awake.
+- **Swallow** (`InteractSwallow::actPiki`, `PikiSwallowedState`, `Sim::swallow_pikis`).
+  - Up to `max` Pikmin near the mouth stick to the given creature part and ride along.
+  - `Sim::chew` kills them; the enemy's AI decides when, through `InteractKill` in the original.
+  - `Sim::spit_out` frees them, and so does the creature dying.
+- **Kill** (`InteractKill`, `Sim::kill_piki`): no animation, straight to the fade.
+- **Seed left behind** (`Piki::doKill`): a dying *flower* that wasn't eaten leaves a seed when
+  `rand ≥ mPikiLeaveSeedChance`, so 20% at the retail 0.8. The original stores it for the next
+  day (`BPikiInfMgr`); we bury it on the spot.
+- **Leaving.** Dying, crushed and swallowed Pikmin leave their squad, carry slot or latch first.
+- **Field limit.** Dying and fading Pikmin still count toward the field limit until gone
+  (`Piki::on_field`).
+
+## 15. Captain damage — implemented
+
+navi.cpp (`InteractAttack/Press/Swallow/Bomb/Flick::actNavi`, `Navi::finishDamage`) and
+naviState.cpp (`NaviDeadState`):
+- **Damage** (`Sim::damage_captain`). A hit subtracts health (`NaviParams::health`, 100).
+  - The captain is then invulnerable while "DAMAGE" plays (`isDamaged()`): AnimInfo 21,
+    19 frames.
+  - When it ends (`Navi::finishDamage`), a captain at ≤ 1 health goes down.
+  - Swallow attacks on captains always take 10 (`InteractSwallow::actNavi`); hosts pass that
+    as the damage.
+- **Down** (`NaviDeadState::init` → `Navi::releasePikis`). The squad is released and the
+  captain stops responding.
+  - Pikmin 1 ends the day here. We emit `Event::CaptainDown` and let the host decide
+    (`Sim::revive_captain`).
+  - `Sim::down_captain` does this directly, for hosts whose player character has its own health.
+- **Healing.** The ship refills health completely (`NaviUfoState::cleanup`): `Sim::heal_captain`.
+- **Not yet:** knockback and flattening of the captain himself (`NaviFlickState`, `NaviPressedState`).
+
 ## Planned
 
 - Pikmin 2 types (Purple, White, Bulbmin), Candypop Buds, hazards.
-- Pikmin death (eaten, crushed), captain damage.
 - Onion menu (calling stored Pikmin out, putting them away), sunset.
 - Free-mode AI (`ActFree`: wandering and the periodic work search).

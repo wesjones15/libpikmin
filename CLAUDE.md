@@ -47,7 +47,8 @@ Workspace:
 - Target the full swarm of 100 (`aiconst.bin` p15 = 100).
 - Full Onion loop: suck → seeds → sprouts → pluck.
 - Corpses are pellets (`BTeki::dieSoon` → `becomePellet`). In ER: pin kinematic and drive the
-  transform from the sim; fallback is a proxy object.
+  transform from the sim; fallback is a proxy object: a Pikmin 1 numbered pellet
+  (1, 5, 10, 20) sized to the corpse.
 - Carry pathing goes through `Host` (Pikmin's own route graphs don't exist in other games).
 - **Multiple captains.** The sim supports N captains (one per player). Each Pikmin follows
   the captain it's currently assigned to. Any captain's whistle recruits every Pikmin inside
