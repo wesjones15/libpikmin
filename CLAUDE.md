@@ -5,7 +5,7 @@ game-agnostic Rust library. Hosts: Elden Ring (via a fork of er-mario) and Minec
 
 ## Layout
 This folder is the repo root. All work happens here. Sibling folders are read-only references:
-- `../pikmin-main/pikmin-main/`: projectPiki decomp, GPIE01_01. READ-ONLY spec. It builds
+- `../pikmin-main/`: projectPiki decomp, GPIE01_01. READ-ONLY spec. It builds
   100% matching against the user's disc (`orig/GPIE01_01/*.ciso`).
 - `../er-mario-master/`: reference for the later Elden Ring host (me3 DLL, libsm64, fromsoftware-rs @ 59fbd3b).
 - `../pikmin2-main/`: projectPiki Pikmin 2 decomp, GPVE01. READ-ONLY secondary spec. Builds
@@ -15,6 +15,8 @@ This folder is the repo root. All work happens here. Sibling folders are read-on
 
 Workspace:
 - `crates/libpikmin/`: core sim. No Elden Ring or libsm64 types.
+- `crates/libpikmin-assets/`: reads models, textures and animations straight off the user's disc
+  image (.iso/.ciso). Renderer-agnostic: triangle batches, RGBA images, posed joint matrices.
 - `crates/libpikmin-ffi/`: C ABI (cdylib/staticlib) for hosts.
 - `crates/viewer/`: top-down 2D test host (macroquad) for play-testing without a game.
 - `docs/`: behavior spec written from the decomp.
