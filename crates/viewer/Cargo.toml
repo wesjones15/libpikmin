@@ -8,4 +8,6 @@ publish.workspace = true
 libpikmin.workspace = true
 macroquad = "0.4"
 libpikmin-assets.workspace = true
+libpikmin-audio.workspace = true
 glam.workspace = true
+cpal = "0.15"

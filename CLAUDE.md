@@ -21,6 +21,12 @@ Workspace:
 - `crates/libpikmin-assets/`: first-run extractor (pure Rust: .iso/.gcm/.ciso → `assets/`, no
   Python or dtk) and loaders for models, textures and animations. Renderer-agnostic: triangle
   batches, RGBA images, posed joint matrices. Hosts call `Assets::discover_or_extract` at startup.
+- `crates/libpikmin-audio/`: Pikmin 1's sound system (JAudio 1) ported from `src/jaudio/`: the BMS
+  sequencer, instruments/envelopes, 64 DSP voices and a resampling mixer, plus the game layer
+  (system/Olimar SE, positional events, BGM mixes, `SeSystem`). Renders PCM; hosts own the audio
+  device. Banks, sequences and the game's sound tables come from `assets/SndData/` (the extractor
+  copies `pikiseq.hed`, `jaudio_tables.bin` and `sound_table.txt` out of `main.dol` by per-release
+  symbol addresses). The DSP's reverb and filters aren't emulated.
 - `crates/libpikmin-ffi/`: C ABI (cdylib/staticlib) for hosts.
 - `crates/viewer/`: test host (macroquad) for play-testing without a game. Its enemies (Dwarf/Spotty
   Bulborbs, Honeywisps) are host-side ports of the Pikmin 1 strategies in `viewer/src/teki.rs`. 3D with the disc's

@@ -59,6 +59,17 @@ impl TekiKind {
     pub fn index(self) -> usize {
         self as usize
     }
+
+    /// First `SE_*` id of the kind's sound table; animation sound events index from it
+    /// (`TaiChappySoundTable`: `SE_MINIC_WALK`, `TaiSwallowSoundTable`: `SE_CHAPPY_WALK`,
+    /// `TaiMizinkoSoundTable`: `SE_KURIONE_HIT`).
+    pub fn sound_base(self) -> &'static str {
+        match self {
+            TekiKind::Dwarf => "SE_MINIC_WALK",
+            TekiKind::Spotty => "SE_CHAPPY_WALK",
+            TekiKind::Honeywisp => "SE_KURIONE_HIT",
+        }
+    }
 }
 
 /// AnimMgr entries the strategies use for each kind (indices into `tekikeys/<name>.key`).
@@ -160,6 +171,8 @@ pub struct TekiSpec {
     pub crying_period: f32,
     pub motions: Motions,
     pub keys: Vec<Keys>,
+    /// Sound events (frame, sound table index) per motion.
+    pub sound_keys: Vec<Vec<(f32, u8)>>,
     pub corpse: Option<PelletConfig>,
 }
 
@@ -183,6 +196,11 @@ impl TekiSpec {
                     action1: of(3),
                 }
             })
+            .collect();
+        let sound_keys = mgr
+            .infos
+            .iter()
+            .map(|i| i.event_keys.iter().filter(|e| e.event == 0).map(|e| (e.frame as f32, e.value)).collect())
             .collect();
         let crying_period = if kind == TekiKind::Dwarf {
             p.f(tpf::SPECIFIC + 1)
@@ -219,6 +237,7 @@ impl TekiSpec {
             crying_period,
             motions: Motions::of(kind),
             keys,
+            sound_keys,
             corpse: kind.corpse_id().and_then(|id| pellet_config::find(pellets, id)).cloned(),
         })
     }
@@ -297,6 +316,8 @@ pub struct Teki {
     pub frame: f32,
     pub target: Option<Target>,
     pub flash: f32,
+    /// Sound table indices whose animation frames passed this update, for the host to play.
+    pub sounds: Vec<u8>,
     /// Hits taken since the last shake (`TaiFlickAction` counts damage events).
     pub hits: u32,
     cry_timer: f32,
@@ -337,6 +358,7 @@ impl Teki {
             frame: 0.0,
             target: None,
             flash: 0.0,
+            sounds: Vec::new(),
             hits: 0,
             cry_timer: spec.crying_period,
             phase: (id as f32) * 1.7,
@@ -370,13 +392,29 @@ impl Teki {
         let k = spec.keys(self.motion);
         let before = self.frame;
         self.frame += 30.0 * dt;
+        // `PaniAnimator::checkEventKeys`: events in [previous frame, current frame).
+        let mut crossed = |from: f32, to: f32| {
+            if let Some(keys) = spec.sound_keys.get(self.motion) {
+                for &(f, v) in keys {
+                    if from <= f && f < to {
+                        self.sounds.push(v);
+                    }
+                }
+            }
+        };
         if looping {
             let (a, b) = k.looping.unwrap_or((k.start, k.end));
             if b > a && self.frame >= b {
-                self.frame = a + (self.frame - a) % (b - a);
+                let wrapped = a + (self.frame - a) % (b - a);
+                crossed(before, b);
+                crossed(a, wrapped);
+                self.frame = wrapped;
+            } else {
+                crossed(before, self.frame);
             }
             false
         } else {
+            crossed(before, self.frame.min(k.end + 1.0));
             let done = self.frame >= k.end;
             if done {
                 self.frame = k.end;

@@ -525,6 +525,12 @@ impl Scene3d {
         };
     }
 
+    /// The camera's world-to-view matrix, for positional sound.
+    pub fn view_matrix(&self) -> Mat4 {
+        let (e, t) = (self.camera.position, self.camera.target);
+        Mat4::look_at_rh(GVec3::new(e.x, e.y, e.z), GVec3::new(t.x, t.y, t.z), GVec3::Y)
+    }
+
     pub fn world_to_screen(&self, p: Vec3) -> Option<macroquad::math::Vec2> {
         let clip = self.camera.matrix() * vec4(p.x, p.y, p.z, 1.0);
         if clip.w <= 0.0 {

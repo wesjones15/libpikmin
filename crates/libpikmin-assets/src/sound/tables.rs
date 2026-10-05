@@ -250,6 +250,11 @@ impl JaudioTables {
         })
     }
 
+    /// A sound by its `SE_*` id (`PikiSoundID`).
+    pub fn sound_by_id(&self, se_id: i32) -> Option<&SoundEntry> {
+        self.sounds.iter().find(|s| s.se_id == se_id)
+    }
+
     /// A sound by its `SE_*` name.
     pub fn sound(&self, name: &str) -> Option<&SoundEntry> {
         self.sounds.iter().find(|s| s.name == name)

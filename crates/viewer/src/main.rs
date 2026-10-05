@@ -5,7 +5,8 @@
 //! Controls: WASD/arrows move (hold Ctrl for a light tilt that only moves the cursor),
 //! Space = throw (hold, release to throw), Shift / right mouse = whistle, X = dismiss,
 //! Tab = switch captain, C / B / U = spawn a Dwarf Bulborb / Spotty Bulborb / Honeywisp at the cursor, G = make creatures shake, IJKL = C-stick swarm,
-//! F1 = formation debug, R = reset, mouse wheel = zoom. Space next to a sprout plucks it.
+//! F1 = formation debug, R = reset, mouse wheel = zoom, M = next stage's music. Space next to a
+//! sprout plucks it. Sound is the game's own (`libpikmin-audio`); `PIKMIN_MUTE=1` turns it off.
 //!
 //! Dead creatures become corpses the Pikmin can carry to the Onions (red, yellow, blue).
 //! Creatures fight back: they chase, bite (eating up to 3 Pikmin, hurting captains) and the big
@@ -30,6 +31,7 @@ use libpikmin::{
 use macroquad::prelude::*;
 
 mod onion_menu;
+mod sound;
 mod render3d;
 mod teki;
 mod tev;
@@ -228,6 +230,19 @@ async fn main() {
         }
     };
     let mut view3d = scene.is_some();
+    // Sound: the game's own sequences and banks. `PIKMIN_MUTE=1` turns it off,
+    // `PIKMIN_BGM=n` picks the song (0 = none; default Forest of Hope).
+    let mut audio = assets
+        .as_ref()
+        .ok()
+        .filter(|_| std::env::var_os("PIKMIN_MUTE").is_none())
+        .and_then(sound::Audio::start);
+    if let Some(a) = audio.as_mut() {
+        let bgm = std::env::var("PIKMIN_BGM").ok().and_then(|v| v.parse().ok()).unwrap_or(sound::STAGE_BGM[1]);
+        if bgm != 0 {
+            a.play_bgm(bgm);
+        }
+    }
     let mut menu: Option<onion_menu::OnionMenu> = None;
     // Space that opened the Onion window doesn't also throw.
     let mut space_held_for_menu = false;
@@ -255,6 +270,17 @@ async fn main() {
         }
         if is_key_pressed(KeyCode::V) && scene.is_some() {
             view3d = !view3d;
+        }
+        // M: next stage's music, then silence.
+        if is_key_pressed(KeyCode::M)
+            && let Some(a) = audio.as_mut()
+        {
+            let songs = sound::STAGE_BGM;
+            match songs.iter().position(|&s| s == a.bgm()) {
+                Some(i) if i + 1 == songs.len() => a.stop_bgm(),
+                Some(i) => a.play_bgm(songs[i + 1]),
+                None => a.play_bgm(songs[0]),
+            }
         }
         if let Some(sc) = scene.as_mut().filter(|_| view3d) {
             if is_key_down(KeyCode::Q) {
@@ -346,6 +372,10 @@ async fn main() {
         {
             menu = Some(onion_menu::OnionMenu::new(o, active_id));
             space_held_for_menu = true;
+            // `NaviContainerState::init`: `SYSSE_CMENU_ON` pauses the field's sounds.
+            if let Some(a) = audio.as_ref() {
+                a.play("SYSSE_CMENU_ON");
+            }
         }
         if !is_key_down(KeyCode::Space) {
             space_held_for_menu = false;
@@ -374,6 +404,9 @@ async fn main() {
             Some(onion_menu::MenuResult::Closed) => {
                 menu = None;
                 space_held_for_menu = true;
+                if let Some(a) = audio.as_ref() {
+                    a.play("SYSSE_CMENU_OFF");
+                }
                 false
             }
             Some(onion_menu::MenuResult::Open) => true,
@@ -455,9 +488,13 @@ async fn main() {
             }
         }
         g.sim.advance(&mut g.world, sim_dt);
-        for e in g.sim.drain_events() {
+        let events: Vec<_> = g.sim.drain_events().collect();
+        for e in events {
             if let Some(sc) = scene.as_mut() {
                 sc.on_event(&e);
+            }
+            if let Some(a) = audio.as_mut() {
+                a.on_event(&e, &g.sim, &g.world.tekis);
             }
             match e {
                 Event::Hit { .. } => g.hits += 1,
@@ -466,6 +503,24 @@ async fn main() {
                     ..
                 } => g.stolen += 1,
                 _ => {}
+            }
+        }
+
+        match audio.as_mut() {
+            Some(a) => {
+                let me = g.sim.captain(active);
+                let view = match scene.as_ref().filter(|_| view3d) {
+                    Some(sc) => sc.view_matrix(),
+                    // Top-down: x right, north up.
+                    None => ::glam::Mat4::look_at_rh(me.pos + ::glam::Vec3::Y * 500.0, me.pos, -::glam::Vec3::Z),
+                };
+                let whistling = matches!(me.whistle, libpikmin::captain::WhistleState::Calling { .. });
+                a.frame(view, me.pos, &g.sim, &mut g.world.tekis, whistling);
+            }
+            None => {
+                for t in g.world.tekis.list.iter_mut() {
+                    t.sounds.clear();
+                }
             }
         }
 
@@ -776,7 +831,7 @@ fn draw_hud(g: &Game) {
             g.sim.pikis().iter().filter(|p| p.is_alive()).count(),
         ),
         format!("hits {}  stolen {}  tick {}  {} fps  |  {}", g.hits, g.stolen, g.sim.tick(), get_fps(), g.params_source),
-        "WASD move (Ctrl: aim only)  Space throw/pluck/punch  Shift/RMB whistle  IJKL swarm  X dismiss  Tab captain  H revive  N nectar  O seeds  C dwarf  B bulborb  U honeywisp  G shake  V 2D/3D  Q/E camera  F1 slots  R reset".into(),
+        "WASD move (Ctrl: aim only)  Space throw/pluck/punch  Shift/RMB whistle  IJKL swarm  X dismiss  Tab captain  H revive  N nectar  O seeds  C dwarf  B bulborb  U honeywisp  G shake  V 2D/3D  Q/E camera  M music  F1 slots  R reset".into(),
     ];
     for (i, l) in lines.iter().enumerate() {
         draw_text(l, 12.0, 22.0 + i as f32 * 20.0, 20.0, WHITE);

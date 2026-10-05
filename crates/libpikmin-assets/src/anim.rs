@@ -190,6 +190,18 @@ pub struct AnimInfo {
     pub keys: Vec<i32>,
     /// (anim key index, key type): 0/1 = loop start/end, 2..5 = `KEY_Action0..3`.
     pub info_keys: Vec<(i32, u8)>,
+    /// Frame events (`AnimInfo::mEventKeys`, animMgr.cpp).
+    pub event_keys: Vec<EventKey>,
+}
+
+/// An event at an animation frame. `PaniAnimator::checkEventKeys` (panianimator.cpp) fires
+/// it when playback passes `frame`: `event` 0 (`ANIMEVENT_Notify`) plays sound `value` from
+/// the creature's sound table (`KEY_PlaySound`), 1 (`ANIMEVENT_Action`) an effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventKey {
+    pub frame: i32,
+    pub event: i16,
+    pub value: u8,
 }
 
 impl AnimInfo {
@@ -274,14 +286,25 @@ impl AnimMgr {
                     info_keys.push((frame, rest[3]));
                 }
             }
-            let events = r.count()?;
-            r.skip(events * 8)?;
+            let mut event_keys = Vec::new();
+            for _ in 0..r.count()? {
+                let frame = r.i32()?;
+                let mut event = r.i16()?;
+                let _cmd = r.u8()?;
+                let value = r.u8()?;
+                // `AnimInfo::read`: unknown event types become `ANIMEVENT_Notify`.
+                if event >= 3 {
+                    event = 0;
+                }
+                event_keys.push(EventKey { frame, event, value });
+            }
             infos.push(AnimInfo {
                 name,
                 flags,
                 speed,
                 keys,
                 info_keys,
+                event_keys,
             });
         }
         Ok(AnimMgr { base_path, infos })

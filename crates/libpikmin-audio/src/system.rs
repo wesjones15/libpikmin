@@ -100,6 +100,8 @@ struct Bgm {
 /// A sound context (`SeContext`, soundMgr.cpp): an emitter the game plays sounds through.
 #[derive(Debug, Clone, Default)]
 struct Context {
+    /// The creature that owns it, for [`SoundSystem::play_from`]; `None` for one-off sounds.
+    owner: Option<u64>,
     handle: Option<usize>,
     event_type: i32,
     position: Vec3,
@@ -830,12 +832,77 @@ impl SoundSystem {
         }
     }
 
+    /// Plays a sound from a creature's own emitter (`Creature::playEventSound` on its
+    /// `SeContext`): its sounds share one event that follows the creature. `owner` is any id the
+    /// host keeps stable for that creature.
+    pub fn play_from(&mut self, owner: u64, name: &str, pos: Vec3) -> bool {
+        let Some(s) = self.tables.sound(name).cloned() else {
+            return false;
+        };
+        if s.event < 1 {
+            return self.play(name, pos);
+        }
+        let i = match self.contexts.iter().position(|c| c.owner == Some(owner)) {
+            Some(i) => i,
+            None => {
+                let i = self.next_context;
+                self.next_context = (i + 1) % self.contexts.len();
+                if let Some(h) = self.contexts[i].handle.take() {
+                    self.destroy_event(h);
+                }
+                self.contexts[i] = Context {
+                    owner: Some(owner),
+                    event_type: s.event,
+                    ..Context::default()
+                };
+                i
+            }
+        };
+        self.contexts[i].position = pos;
+        if self.contexts[i].handle.is_none() {
+            let off = self.camera_offset(pos);
+            self.contexts[i].offset = off;
+            self.contexts[i].handle = self.create_event(self.contexts[i].event_type, off);
+        }
+        if let Some(h) = self.contexts[i].handle {
+            self.play_event_action(h, s.jac_id);
+        }
+        true
+    }
+
+    /// Moves a creature's emitter.
+    pub fn move_emitter(&mut self, owner: u64, pos: Vec3) {
+        if let Some(c) = self.contexts.iter_mut().find(|c| c.owner == Some(owner)) {
+            c.position = pos;
+        }
+    }
+
+    /// Stops a sound on a creature's emitter (`Creature::stopEventSound`).
+    pub fn stop_from(&mut self, owner: u64, name: &str) {
+        let Some(s) = self.tables.sound(name).cloned() else {
+            return;
+        };
+        if let Some(h) = self.contexts.iter().find(|c| c.owner == Some(owner)).and_then(|c| c.handle) {
+            self.stop_event_action(h, s.jac_id);
+        }
+    }
+
+    /// The creature is gone (`SeContext::releaseEvent`).
+    pub fn release_emitter(&mut self, owner: u64) {
+        if let Some(i) = self.contexts.iter().position(|c| c.owner == Some(owner)) {
+            if let Some(h) = self.contexts[i].handle.take() {
+                self.destroy_event(h);
+            }
+            self.contexts[i].owner = None;
+        }
+    }
+
     /// `SeSystem::playSoundDirect`: reuse a nearby emitter of the same type, else a new one.
     fn play_sound_direct(&mut self, event_type: i32, jac_id: i32, pos: Vec3) {
         let mut best = None;
         let mut min = 200.0;
         for (i, c) in self.contexts.iter().enumerate() {
-            if c.handle.is_some() && c.event_type == event_type {
+            if c.handle.is_some() && c.owner.is_none() && c.event_type == event_type {
                 let d = (c.position - pos).length();
                 if d <= min {
                     min = d;
@@ -852,6 +919,7 @@ impl SoundSystem {
                     self.destroy_event(h);
                 }
                 self.contexts[i] = Context {
+                    owner: None,
                     handle: None,
                     event_type,
                     position: pos,
