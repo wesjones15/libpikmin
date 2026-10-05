@@ -1,4 +1,6 @@
-//! Top-down 2D test host. World X → screen right, world Z → screen up.
+//! Test host. Starts in 3D with Olimar, the Pikmin, Onions and pellets from the user's disc
+//! (extracted to `assets/` on first run); V switches to the top-down 2D debug view (world X →
+//! screen right, world Z → screen up). In 3D, movement is camera-relative and Q/E turn the camera.
 //!
 //! Controls: WASD/arrows move (hold Ctrl for a light tilt that only moves the cursor),
 //! Space = throw (hold, release to throw), Shift / right mouse = whistle, X = dismiss,
@@ -8,6 +10,10 @@
 //! Dead creatures become corpses the Pikmin can carry to the Onions (red, yellow, blue).
 //! Creatures fight back: they chase, bite (eating up to 3 Pikmin, hurting captains) and the big
 //! one stomps. H revives (or heals) the active captain.
+//!
+//! Debug env vars: `PIKMIN_SHOT=out.png` (+ `PIKMIN_SHOT_FRAME=n`) saves a frame and exits,
+//! `PIKMIN_CAM=yaw,dist,pitch` and `PIKMIN_FOCUS=x,y,z` set the 3D camera, `PIKMIN_AUTOPLAY=1`
+//! walks the active captain at the nearest creature and keeps throwing.
 
 use std::path::PathBuf;
 
@@ -20,6 +26,9 @@ use libpikmin::{
     PikiColor, PikiState, Sim, SproutState, Vec2, Vec3,
 };
 use macroquad::prelude::*;
+
+mod render3d;
+mod tev;
 
 struct Dummy {
     id: CreatureId,
@@ -231,8 +240,8 @@ impl Host for World {
 }
 
 /// Finds the extracted `assets/` folder, extracting it from the user's disc on first run
-/// (`PIKMIN_DISC`, or an image next to the repo), then loads the tuning parms from it.
-fn load_params() -> (Params, String) {
+/// (`PIKMIN_DISC`, or an image next to the repo).
+fn find_assets() -> Result<libpikmin_assets::Assets, String> {
     let ws = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let disc_dirs = [
         ws.clone(),
@@ -240,10 +249,14 @@ fn load_params() -> (Params, String) {
         ws.join("../pikmin-main/orig/GPIE01_01"),
         std::env::current_dir().unwrap_or_default(),
     ];
+    libpikmin_assets::Assets::discover_or_extract(&disc_dirs, &mut |m| println!("{m}"))
+        .map_err(|e| e.to_string())
+}
+
+/// Tuning parms from the assets folder, else code defaults.
+fn load_params(assets: &Result<libpikmin_assets::Assets, String>) -> (Params, String) {
     let mut params = Params::default();
-    let assets = match libpikmin_assets::Assets::discover_or_extract(&disc_dirs, &mut |m| {
-        println!("{m}")
-    }) {
+    let assets = match assets {
         Ok(a) => a,
         Err(e) => return (params, format!("code defaults ({e})")),
     };
@@ -266,8 +279,8 @@ struct Game {
     params_source: String,
 }
 
-fn new_game() -> Game {
-    let (params, params_source) = load_params();
+fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
+    let (params, params_source) = load_params(assets);
     let mut sim = Sim::new(params, 0x5eed);
     let olimar = sim.add_captain(Vec3::ZERO);
     let louie = sim.add_captain(Vec3::new(-250.0, 0.0, 150.0));
@@ -303,6 +316,30 @@ fn new_game() -> Game {
     world.spawn(Vec3::new(200.0, 0.0, 150.0), 26.0, 750.0);
     world.spawn(Vec3::new(-100.0, 0.0, 300.0), 18.0, 300.0);
     world.spawn(Vec3::new(350.0, 0.0, -50.0), 40.0, 2000.0);
+    // Numbered pellets 1, 5, 10, 20 to carry. Carrier counts and seeds follow Pikmin 1's
+    // pellets; sizes are this host's choice (the real ones live in the disc's pelMgr.bin).
+    for (i, (n, seeds, radius, color)) in [
+        (1u32, (2, 1), 7.0, PikiColor::Red),
+        (5, (5, 3), 13.0, PikiColor::Yellow),
+        (10, (10, 5), 19.0, PikiColor::Blue),
+        (20, (20, 10), 27.0, PikiColor::Red),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        sim.spawn_pellet(PelletDesc {
+            pos: Vec3::new(-150.0 + i as f32 * 90.0, 0.0, -130.0),
+            yaw: 0.0,
+            radius,
+            height: radius * 0.6,
+            min_carriers: n,
+            max_carriers: n * 2,
+            seeds_matching: seeds.0,
+            seeds_other: seeds.1,
+            color: Some(color),
+            creature: None,
+        });
+    }
     sim.add_onion(Vec3::new(-220.0, 0.0, -260.0), &[PikiColor::Red]);
     sim.add_onion(Vec3::new(0.0, 0.0, -340.0), &[PikiColor::Yellow]);
     sim.add_onion(Vec3::new(220.0, 0.0, -260.0), &[PikiColor::Blue]);
@@ -336,14 +373,57 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let mut g = new_game();
+    let assets = find_assets();
+    let mut g = new_game(&assets);
     let mut zoom = 1.4f32;
     let mut show_plate = false;
+    let mut scene = match &assets {
+        Ok(a) => match render3d::Scene3d::load(a) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                eprintln!("3D view unavailable: {e}");
+                None
+            }
+        },
+        Err(e) => {
+            eprintln!("3D view unavailable: {e}");
+            None
+        }
+    };
+    let mut view3d = scene.is_some();
+    // `PIKMIN_SHOT=out.png`: save a frame after ~2 s of play and exit (for checking visuals).
+    let shot = std::env::var_os("PIKMIN_SHOT").map(PathBuf::from);
+    let mut frames = 0u32;
+    let shot_frame: u32 = std::env::var("PIKMIN_SHOT_FRAME").ok().and_then(|v| v.parse().ok()).unwrap_or(120);
+    // `PIKMIN_AUTOPLAY=1`: the active captain walks at the nearest creature and keeps throwing.
+    let autoplay = std::env::var_os("PIKMIN_AUTOPLAY").is_some();
+    // `PIKMIN_CAM=yaw,dist,pitch` sets the starting 3D camera.
+    if let (Some(sc), Some(cam)) = (scene.as_mut(), std::env::var("PIKMIN_CAM").ok()) {
+        let v: Vec<f32> = cam.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        if let [yaw, dist, pitch] = v[..] {
+            (sc.yaw, sc.dist, sc.pitch) = (yaw, dist, pitch);
+        }
+    }
 
     loop {
         let dt = get_frame_time();
         if is_key_pressed(KeyCode::R) {
-            g = new_game();
+            g = new_game(&assets);
+        }
+        if is_key_pressed(KeyCode::V) && scene.is_some() {
+            view3d = !view3d;
+        }
+        if let Some(sc) = scene.as_mut().filter(|_| view3d) {
+            if is_key_down(KeyCode::Q) {
+                sc.yaw += 1.6 * dt;
+            }
+            if is_key_down(KeyCode::E) {
+                sc.yaw -= 1.6 * dt;
+            }
+            let wheel = mouse_wheel().1;
+            if wheel != 0.0 {
+                sc.dist = (sc.dist * 1.1f32.powf(-wheel.signum())).clamp(80.0, 2000.0);
+            }
         }
         if is_key_pressed(KeyCode::Tab) {
             g.active = (g.active + 1) % g.captains.len();
@@ -351,7 +431,12 @@ async fn main() {
         if is_key_pressed(KeyCode::F1) {
             show_plate = !show_plate;
         }
-        zoom = (zoom * 1.1f32.powf(mouse_wheel().1.signum())).clamp(0.3, 5.0);
+        if !view3d {
+            let wheel = mouse_wheel().1;
+            if wheel != 0.0 {
+                zoom = (zoom * 1.1f32.powf(wheel.signum())).clamp(0.3, 5.0);
+            }
+        }
 
         // Input for the active captain; the other one stands still.
         let mut stick = Vec2::ZERO;
@@ -384,14 +469,37 @@ async fn main() {
         if is_key_down(KeyCode::J) {
             swarm.x -= 1.0;
         }
-        let swarm = swarm.normalize_or_zero();
+        let mut swarm = swarm.normalize_or_zero();
+        if let Some(sc) = scene.as_ref().filter(|_| view3d) {
+            stick = sc.camera_stick(stick);
+            swarm = sc.camera_stick(swarm);
+        }
+        let mut auto_throw = false;
+        if autoplay {
+            let me = g.sim.captain(g.captains[g.active]).pos;
+            if let Some(c) = g
+                .world
+                .creatures
+                .iter()
+                .filter(|c| c.hp > 0.0)
+                .min_by(|a, b| (a.pos - me).length().total_cmp(&(b.pos - me).length()))
+            {
+                let to = (c.pos - me).with_y(0.0);
+                stick = if to.length() > 160.0 {
+                    Vec2::new(to.x, to.z).normalize()
+                } else {
+                    Vec2::new(to.x, to.z).normalize() * 0.3
+                };
+                auto_throw = to.length() < 220.0 && (frames / 8).is_multiple_of(2);
+            }
+        }
         for (i, &cid) in g.captains.iter().enumerate() {
             let input = if i == g.active {
                 CaptainInput {
                     stick,
                     whistle: is_key_down(KeyCode::LeftShift)
                         || is_mouse_button_down(MouseButton::Right),
-                    throw: is_key_down(KeyCode::Space),
+                    throw: is_key_down(KeyCode::Space) || auto_throw,
                     dismiss: is_key_down(KeyCode::X),
                     swarm,
                     pose: None,
@@ -419,6 +527,9 @@ async fn main() {
         g.world.update(dt, &mut g.sim, is_key_pressed(KeyCode::G));
         g.sim.advance(&mut g.world, dt);
         for e in g.sim.drain_events() {
+            if let Some(sc) = scene.as_mut() {
+                sc.on_event(&e);
+            }
             match e {
                 Event::Hit { .. } => g.hits += 1,
                 Event::Recruited {
@@ -430,6 +541,42 @@ async fn main() {
         }
 
         // ---- draw ----
+        if let Some(sc) = scene.as_mut().filter(|_| view3d) {
+            clear_background(Color::from_rgba(150, 190, 225, 255));
+            let creatures: Vec<_> = g
+                .world
+                .creatures
+                .iter()
+                .filter(|c| c.hp > 0.0)
+                .map(|c| (c.pos, c.yaw, c.radius, c.height, c.hp / c.max_hp, c.flash > 0.0))
+                .collect();
+            let overlays = sc.draw(&g.sim, active, &creatures, dt);
+            for o in overlays {
+                match o {
+                    render3d::Overlay::Text { at, text, color, size } => {
+                        if let Some(s) = sc.world_to_screen(at) {
+                            let w = measure_text(&text, None, size as u16, 1.0).width;
+                            draw_text(&text, s.x - w / 2.0, s.y, size, color);
+                        }
+                    }
+                    render3d::Overlay::Bar { at, width, frac, color } => {
+                        if let Some(s) = sc.world_to_screen(at) {
+                            let w = width.clamp(24.0, 80.0);
+                            draw_rectangle(s.x - w / 2.0, s.y, w, 5.0, DARKGRAY);
+                            draw_rectangle(s.x - w / 2.0, s.y, w * frac.clamp(0.0, 1.0), 5.0, color);
+                        }
+                    }
+                }
+            }
+            draw_hud(&g);
+            frames += 1;
+            if let Some(path) = shot.as_ref().filter(|_| frames == shot_frame) {
+                get_screen_data().export_png(&path.to_string_lossy());
+                return;
+            }
+            next_frame().await;
+            continue;
+        }
         clear_background(Color::from_rgba(58, 86, 50, 255));
         let cam = g.sim.captain(active).pos;
         let (cx, cy) = (screen_width() / 2.0, screen_height() / 2.0);
@@ -679,36 +826,40 @@ async fn main() {
             }
         }
 
-        // HUD
-        let count =
-            |f: &dyn Fn(&PikiState) -> bool| g.sim.pikis().iter().filter(|p| f(&p.state)).count();
-        let lines = [
-            format!(
-                "{}  squad {} | Louie squad {} | idle {} | attacking {} | latched {} | knocked {}",
-                if g.active == 0 { "Olimar" } else { "Louie" },
-                g.sim.captain(g.captains[0]).plate.len(),
-                g.sim.captain(g.captains[1]).plate.len(),
-                count(&|s| matches!(s, PikiState::Idle)),
-                count(&|s| matches!(s, PikiState::Attack(_))),
-                count(&|s| s.latched_to().is_some()),
-                count(&|s| matches!(s, PikiState::Knocked { .. })),
-            ),
-            format!(
-                "carrying {} | sprouts {} (pluckable {}) | Pikmin {}",
-                count(&|s| matches!(s, PikiState::Carry(_))),
-                g.sim.sprouts().count(),
-                g.sim.sprouts().filter(|s| s.pluckable()).count(),
-                g.sim.pikis().iter().filter(|p| p.is_alive()).count(),
-            ),
-            format!("hits {}  stolen {}  tick {}  {} fps  |  {}", g.hits, g.stolen, g.sim.tick(), get_fps(), g.params_source),
-            "WASD move (Ctrl: aim only)  Space throw/pluck  Shift/RMB whistle  H revive/heal  IJKL swarm  X dismiss  Tab captain  C creature  G shake  F1 slots  R reset".into(),
-        ];
-        for (i, l) in lines.iter().enumerate() {
-            draw_text(l, 12.0, 22.0 + i as f32 * 20.0, 20.0, WHITE);
-        }
+        draw_hud(&g);
 
         next_frame().await;
     }
+}
+
+fn draw_hud(g: &Game) {
+    let count =
+        |f: &dyn Fn(&PikiState) -> bool| g.sim.pikis().iter().filter(|p| f(&p.state)).count();
+    let lines = [
+        format!(
+            "{}  squad {} | Louie squad {} | idle {} | attacking {} | latched {} | knocked {}",
+            if g.active == 0 { "Olimar" } else { "Louie" },
+            g.sim.captain(g.captains[0]).plate.len(),
+            g.sim.captain(g.captains[1]).plate.len(),
+            count(&|s| matches!(s, PikiState::Idle)),
+            count(&|s| matches!(s, PikiState::Attack(_))),
+            count(&|s| s.latched_to().is_some()),
+            count(&|s| matches!(s, PikiState::Knocked { .. })),
+        ),
+        format!(
+            "carrying {} | sprouts {} (pluckable {}) | Pikmin {}",
+            count(&|s| matches!(s, PikiState::Carry(_))),
+            g.sim.sprouts().count(),
+            g.sim.sprouts().filter(|s| s.pluckable()).count(),
+            g.sim.pikis().iter().filter(|p| p.is_alive()).count(),
+        ),
+        format!("hits {}  stolen {}  tick {}  {} fps  |  {}", g.hits, g.stolen, g.sim.tick(), get_fps(), g.params_source),
+        "WASD move (Ctrl: aim only)  Space throw/pluck/punch  Shift/RMB whistle  IJKL swarm  X dismiss  Tab captain  H revive  C creature  G shake  V 2D/3D  Q/E camera  F1 slots  R reset".into(),
+    ];
+    for (i, l) in lines.iter().enumerate() {
+        draw_text(l, 12.0, 22.0 + i as f32 * 20.0, 20.0, WHITE);
+    }
+
 }
 
 fn draw_grid(to_screen: &dyn Fn(Vec3) -> macroquad::math::Vec2, zoom: f32, cam: Vec3) {

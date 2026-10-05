@@ -26,6 +26,7 @@ pub enum Motion {
     Throw = 27,
     Hang = 28,
     Fall = 29,
+    JKoke = 30,
     JHit = 31,
     GetUp = 32,
     RollJmp = 34,

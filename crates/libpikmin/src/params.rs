@@ -163,6 +163,17 @@ parms! {
         /// `NaviAttackState`: punch damage and extra reach. Retail damage 10.
         punch_damage: f32 = 1.0, b"p51";
         punch_radius: f32 = 10.0, b"p52";
+        /// `Navi::updateWalkAnimation` (navi.cpp): speeds that pick WAIT → ASIBUMI → WALK →
+        /// RUN → NIGERU, and the walk/run playback rates (frames per second) between them.
+        asibumi_start_speed: f32 = 5.0, b"p14";
+        walk_start_speed: f32 = 35.0, b"p15";
+        run_start_speed: f32 = 70.0, b"p16";
+        escape_start_speed: f32 = 160.0, b"p17";
+        walk_anim_min_frames: f32 = 30.0, b"p18";
+        walk_anim_max_frames: f32 = 60.0, b"p19";
+        run_anim_min_frames: f32 = 30.0, b"p27";
+        run_anim_max_frames: f32 = 60.0, b"p28";
+        escape_anim_min_frames: f32 = 30.0, b"p29";
     }
 }
 
@@ -202,6 +213,16 @@ parms! {
         post_work_join_party_range: f32 = 250.0, b"p61";
         /// A dying flower leaves a seed when rand >= this (`Piki::doKill`).
         piki_leave_seed_chance: f32 = 0.8, b"p56";
+        /// `Piki::updateWalkAnimation` (piki.cpp), same scheme as the captain's.
+        step_speed_threshold: f32 = 5.0, b"p17";
+        walk_speed_threshold: f32 = 35.0, b"p18";
+        run_speed_threshold: f32 = 70.0, b"p19";
+        escape_speed_threshold: f32 = 160.0, b"p20";
+        min_walk_anim_speed: f32 = 30.0, b"p21";
+        max_walk_anim_speed: f32 = 60.0, b"p22";
+        min_run_anim_speed: f32 = 30.0, b"p23";
+        max_run_anim_speed: f32 = 60.0, b"p24";
+        escape_anim_speed: f32 = 30.0, b"p25";
     }
 }
 

@@ -21,7 +21,9 @@ Workspace:
   Python or dtk) and loaders for models, textures and animations. Renderer-agnostic: triangle
   batches, RGBA images, posed joint matrices. Hosts call `Assets::discover_or_extract` at startup.
 - `crates/libpikmin-ffi/`: C ABI (cdylib/staticlib) for hosts.
-- `crates/viewer/`: top-down 2D test host (macroquad) for play-testing without a game.
+- `crates/viewer/`: test host (macroquad) for play-testing without a game. 3D with the disc's
+  models and animations (CPU skinning, a GLSL TEV interpreter for PVW materials); V switches to
+  the 2D top-down debug view.
 - `docs/`: behavior spec written from the decomp.
 
 ## Rules
