@@ -40,6 +40,7 @@ pub enum Motion {
     Fue = 49,
     Press1 = 53,
     SPress = 55,
+    HNoboru = 62,
     Noboru = 63,
     NukuFast = 82,
     NukareFast = 83,

@@ -159,6 +159,7 @@ impl Sim {
             self.update_piki(pi, host, dt);
         }
         self.update_onions(dt);
+        self.update_onion_exits(dt);
         self.update_sprouts(host, dt);
         self.separate();
         self.tick += 1;

@@ -14,7 +14,8 @@
 //! Debug env vars: `PIKMIN_SHOT=out.png` (+ `PIKMIN_SHOT_FRAME=n`) saves a frame and exits,
 //! `PIKMIN_CAM=yaw,dist,pitch` and `PIKMIN_FOCUS=x,y,z` set the 3D camera, `PIKMIN_AUTOPLAY=1`
 //! walks the active captain at the nearest creature and keeps throwing, `PIKMIN_TRACE=1` prints
-//! enemy AI states once a second.
+//! enemy AI states once a second, `PIKMIN_MENU=1` opens an Onion window and `PIKMIN_PUTAWAY=n`
+//! sends n squad Pikmin of each colour home.
 
 use std::path::PathBuf;
 
@@ -28,6 +29,7 @@ use libpikmin::{
 };
 use macroquad::prelude::*;
 
+mod onion_menu;
 mod render3d;
 mod teki;
 mod tev;
@@ -226,6 +228,9 @@ async fn main() {
         }
     };
     let mut view3d = scene.is_some();
+    let mut menu: Option<onion_menu::OnionMenu> = None;
+    // Space that opened the Onion window doesn't also throw.
+    let mut space_held_for_menu = false;
     // `PIKMIN_SHOT=out.png`: save a frame after ~2 s of play and exit (for checking visuals).
     let shot = std::env::var_os("PIKMIN_SHOT").map(PathBuf::from);
     let mut frames = 0u32;
@@ -332,13 +337,55 @@ async fn main() {
                 auto_throw = to.length() < 220.0 && (frames / 8).is_multiple_of(2);
             }
         }
+        // Space under an Onion opens its window (`NaviWalkState::exec` checks the Onion
+        // before the action button does anything else).
+        let active_id = g.captains[g.active];
+        if menu.is_none()
+            && is_key_pressed(KeyCode::Space)
+            && let Some(o) = g.sim.onion_in_reach(active_id)
+        {
+            menu = Some(onion_menu::OnionMenu::new(o, active_id));
+            space_held_for_menu = true;
+        }
+        if !is_key_down(KeyCode::Space) {
+            space_held_for_menu = false;
+        }
+        if frames == 1 {
+            // `PIKMIN_MENU`: open the nearest Onion's window; `PIKMIN_PUTAWAY=n`: send n squad
+            // Pikmin of each colour into their Onions (both for screenshots).
+            let me = g.sim.captain(active_id).pos;
+            let nearest = g
+                .sim
+                .onions()
+                .iter()
+                .min_by(|a, b| (a.pos - me).length().total_cmp(&(b.pos - me).length()))
+                .map(|o| o.id);
+            if let (Some(o), true) = (nearest, std::env::var_os("PIKMIN_MENU").is_some()) {
+                menu = Some(onion_menu::OnionMenu::new(o, active_id));
+            }
+            if let Some(n) = std::env::var("PIKMIN_PUTAWAY").ok().and_then(|v| v.parse().ok()) {
+                let onions: Vec<_> = g.sim.onions().iter().map(|o| (o.id, o.colors[0])).collect();
+                for (o, c) in onions {
+                    g.sim.onion_put_away(active_id, o, c, n);
+                }
+            }
+        }
+        let paused = match menu.as_mut().map(|m| m.update(&mut g.sim, dt)) {
+            Some(onion_menu::MenuResult::Closed) => {
+                menu = None;
+                space_held_for_menu = true;
+                false
+            }
+            Some(onion_menu::MenuResult::Open) => true,
+            None => false,
+        };
         for (i, &cid) in g.captains.iter().enumerate() {
-            let input = if i == g.active {
+            let input = if i == g.active && !paused {
                 CaptainInput {
                     stick,
                     whistle: is_key_down(KeyCode::LeftShift)
                         || is_mouse_button_down(MouseButton::Right),
-                    throw: is_key_down(KeyCode::Space) || auto_throw,
+                    throw: (is_key_down(KeyCode::Space) && !space_held_for_menu) || auto_throw,
                     dismiss: is_key_down(KeyCode::X),
                     swarm,
                     pose: None,
@@ -394,7 +441,10 @@ async fn main() {
                 g.sim.heal_captain(active, None);
             }
         }
-        g.world.tekis.update(dt, &mut g.sim, is_key_pressed(KeyCode::G));
+        let sim_dt = if paused { 0.0 } else { dt };
+        if !paused {
+            g.world.tekis.update(dt, &mut g.sim, is_key_pressed(KeyCode::G));
+        }
         if trace && g.sim.tick() / 30 != last_trace {
             last_trace = g.sim.tick() / 30;
             for t in &g.world.tekis.list {
@@ -404,7 +454,7 @@ async fn main() {
                 );
             }
         }
-        g.sim.advance(&mut g.world, dt);
+        g.sim.advance(&mut g.world, sim_dt);
         for e in g.sim.drain_events() {
             if let Some(sc) = scene.as_mut() {
                 sc.on_event(&e);
@@ -441,6 +491,7 @@ async fn main() {
                 }
             }
             draw_hud(&g);
+            draw_onion_prompt(&g, menu.as_ref());
             frames += 1;
             if let Some(path) = shot.as_ref().filter(|_| frames == shot_frame) {
                 get_screen_data().export_png(&path.to_string_lossy());
@@ -468,7 +519,7 @@ async fn main() {
                 OnionAnim::Suction { .. } => "slurp",
                 OnionAnim::Emitting { .. } => "seeds!",
             };
-            let stored: u32 = o.stored.iter().sum();
+            let stored: u32 = o.stored_total();
             draw_text(
                 format!("Onion {state}"),
                 s.x - 30.0,
@@ -686,8 +737,20 @@ async fn main() {
         }
 
         draw_hud(&g);
+        draw_onion_prompt(&g, menu.as_ref());
 
         next_frame().await;
+    }
+}
+
+/// The Onion window, or a hint when standing under an Onion.
+fn draw_onion_prompt(g: &Game, menu: Option<&onion_menu::OnionMenu>) {
+    if let Some(m) = menu {
+        m.draw(&g.sim);
+    } else if g.sim.onion_in_reach(g.captains[g.active]).is_some() {
+        let t = "Space: Onion";
+        let w = measure_text(t, None, 24, 1.0).width;
+        draw_text(t, (screen_width() - w) / 2.0, screen_height() - 40.0, 24.0, WHITE);
     }
 }
 

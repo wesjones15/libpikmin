@@ -40,8 +40,11 @@ pub struct Onion {
     pub id: OnionId,
     pub pos: Vec3,
     pub colors: Vec<PikiColor>,
-    /// Pikmin kept inside because the field was full (`mHeldPikis`), by colour index.
-    pub stored: [u32; 3],
+    /// Pikmin inside (`mHeldPikis`), by colour index then leaf stage (`Happa as usize`).
+    pub stored: [[u32; 3]; 3],
+    /// Pikmin waiting to come out for a captain (`mPikisToExit`), in order.
+    pub exits: VecDeque<(PikiColor, crate::CaptainId)>,
+    pub(crate) exit_timer: f32,
     pub anim: OnionAnim,
     /// Seeds waiting to be launched (`mSAICtx.mCurrAnimId`).
     pub queue: VecDeque<PikiColor>,
@@ -52,6 +55,15 @@ pub struct Onion {
 impl Onion {
     pub fn accepts(&self, color: PikiColor) -> bool {
         self.colors.contains(&color)
+    }
+
+    /// Pikmin of `color` inside, all leaf stages.
+    pub fn stored_of(&self, color: PikiColor) -> u32 {
+        self.stored[color.index()].iter().sum()
+    }
+
+    pub fn stored_total(&self) -> u32 {
+        self.stored.iter().flatten().sum()
     }
 
     /// `GoalItem::getSuckPos`
@@ -142,7 +154,9 @@ impl Sim {
             id,
             pos,
             colors: colors.to_vec(),
-            stored: [0; 3],
+            stored: [[0; 3]; 3],
+            exits: VecDeque::new(),
+            exit_timer: 0.0,
             anim: OnionAnim::Idle,
             queue: VecDeque::new(),
             fireworks: 0,
@@ -206,7 +220,9 @@ impl Sim {
 
     /// Pikmin plus sprouts, against `aiconst` p15 ("ピキ＋芽 リミット").
     pub(crate) fn field_count(&self) -> usize {
-        self.pikis.iter().filter(|p| p.on_field()).count() + self.sprouts.iter().flatten().count()
+        self.pikis.iter().filter(|p| p.on_field()).count()
+            + self.sprouts.iter().flatten().count()
+            + self.onions.iter().map(|o| o.exits.len()).sum::<usize>()
     }
 
     pub(crate) fn update_onions(&mut self, dt: f32) {
@@ -255,7 +271,7 @@ impl Sim {
     fn emit_seed(&mut self, oi: usize, color: PikiColor) {
         let onion = self.onions[oi].id;
         if self.field_count() >= self.params.ai.max_pikis_on_field.max(0) as usize {
-            self.onions[oi].stored[color.index()] += 1;
+            self.onions[oi].stored[color.index()][Happa::Leaf as usize] += 1;
             self.events.push(Event::SeedStored { onion, color });
             return;
         }

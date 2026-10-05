@@ -463,6 +463,8 @@ impl Sim {
                 }
                 // `Navi::callPikis` (navi.cpp) skips drinking and blooming Pikmin.
                 PikiState::Absorb { .. } | PikiState::GrowUp { .. } => false,
+                // `Navi::callPikis` skips `EnterMode` / `ExitMode`.
+                PikiState::Enter { .. } | PikiState::Exit { .. } => false,
                 PikiState::Dead => false,
             };
             if !eligible {

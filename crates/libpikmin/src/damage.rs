@@ -36,6 +36,10 @@ impl Sim {
                 | PikiState::Fading { .. }
                 | PikiState::Dead
                 | PikiState::Swallowed { .. }
+                // `InteractAttack` leaves Pikmin going into or out of an Onion alone
+                // (interactBattle.cpp).
+                | PikiState::Enter { .. }
+                | PikiState::Exit { .. }
         )
     }
 

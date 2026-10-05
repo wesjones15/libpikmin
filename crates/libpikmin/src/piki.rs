@@ -132,6 +132,21 @@ pub enum PikiState {
         second: bool,
         bloomed: bool,
     },
+    /// Going into an Onion (`ActEnter`): walking to leg `leg`, then climbing it. `ratio` is
+    /// how far up the leg.
+    Enter {
+        onion: crate::onion::OnionId,
+        leg: u8,
+        climbing: bool,
+        ratio: f32,
+    },
+    /// Sliding down an Onion leg after being called out (`ActExit`); joins its captain at the
+    /// bottom.
+    Exit {
+        onion: crate::onion::OnionId,
+        leg: u8,
+        ratio: f32,
+    },
     /// Gone.
     Dead,
 }
@@ -243,6 +258,7 @@ impl Sim {
             PikiState::Flying { .. } => self.piki_flying(pi, host, dt),
             PikiState::Attack(a) => self.piki_attack(pi, a, host, dt),
             PikiState::Absorb { .. } | PikiState::GrowUp { .. } => self.piki_nectar(pi, host, dt),
+            PikiState::Enter { .. } | PikiState::Exit { .. } => self.piki_onion_travel(pi, host, dt),
             PikiState::Knocked { timer } => {
                 let t = timer - dt;
                 self.physics(pi, host, dt);

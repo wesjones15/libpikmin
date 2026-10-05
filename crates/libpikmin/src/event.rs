@@ -10,6 +10,10 @@ use crate::{CaptainId, PikiId};
 /// Drain with [`crate::Sim::drain_events`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Event {
+    /// A Pikmin climbed into an Onion and is stored.
+    PikiEnteredOnion { piki: PikiId, onion: OnionId },
+    /// A Pikmin started sliding out of an Onion (`SE_PIKI_OUTHOME`).
+    PikiLeftOnion { piki: PikiId, onion: OnionId },
     /// A nectar drop hit the ground; its puddle appears shortly.
     NectarSplash { pos: Vec3 },
     /// A nectar puddle finished draining.

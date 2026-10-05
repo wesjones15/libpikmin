@@ -405,6 +405,33 @@ from `objects/fl_water/anims.bin` and `objects/water/anims.bin` (retail values i
 - **What this means in play.** Everyone who touches the puddle while it is still forming will
   drink, so nectar landing inside a packed squad blooms most of it.
 
+## 19. Onion menu — implemented
+
+`NaviWalkState::exec`, `NaviContainerState` (naviState.cpp); `ActEnter` (aiEnter.cpp),
+`ActExit` (aiExit.cpp); `GoalItem::exitPikis` / `exitPiki` (goalItem.cpp).
+
+- **Opening.** A captain standing within reach of the Onion's `cont` sphere opens the window by
+  pressing the action button. The walk state checks this before the button does anything
+  else. The game pauses while the window is open.
+- **The window** shows three numbers:
+  - Pikmin of that colour in the Onion, minus those already waiting to come out.
+  - The squad's Pikmin of that colour.
+  - The field count (Pikmin and sprouts on the map plus pending exits) against `aiconst`
+    p15 (100).
+- **Putting away.** That many squad Pikmin of the colour switch to `EnterMode`:
+  - Each walks at half speed to a random leg's foot.
+  - It climbs at 15 units/s, shrinks from 72% of the way up, and is stored at 90%.
+  - Pikmin are stored by leaf stage.
+- **Calling out.** The count is limited by the Onion's stock and the field limit. Pikmin come
+  out one every (0.2 + 0.1·rand)·0.2 s, the highest leaf stage first:
+  - Each appears at the top of a random leg and slides down it at 70 units/s, growing back
+    from 72%.
+  - At the bottom it joins its captain's squad (`mActionState` 0 → `joinParty`).
+- **Safety.** The whistle and enemy attacks leave Pikmin in either mode alone.
+- **Geometry.** Legs are measured on `goal.mod`: feet about 115 out at 180° and ±60°, tops at
+  height 88. The `cont` reach is 70 from the Onion's centre. The real sphere is in the
+  Onion's collision data, which isn't loaded.
+
 ## Planned
 
 - Pikmin 2 types (Purple, White, Bulbmin), Candypop Buds, hazards.

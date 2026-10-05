@@ -15,6 +15,7 @@ pub mod host;
 pub mod math;
 pub mod nectar;
 pub mod onion;
+pub mod onion_menu;
 pub mod params;
 pub mod pellet_config;
 pub mod piki;

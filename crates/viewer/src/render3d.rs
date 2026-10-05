@@ -855,6 +855,15 @@ impl Scene3d {
                     (m, Clock::Sim(frame))
                 }
                 PikiState::Absorb { frame, .. } => (Motion::Mizunomi, Clock::Sim(frame)),
+                // `ActEnter` / `ActExit`: climbing a leg, shrinking into the pod near the top.
+                PikiState::Enter { climbing: false, .. } => walk,
+                PikiState::Enter { ratio, .. } | PikiState::Exit { ratio, .. } => {
+                    let k = libpikmin::onion_menu::SHRINK_FROM;
+                    if ratio > k {
+                        scale = GVec3::splat(((1.0 - ratio) / (1.0 - k)).clamp(0.0, 1.0));
+                    }
+                    (Motion::HNoboru, Clock::Loop(30.0))
+                }
                 PikiState::GrowUp { frame, second, .. } => (
                     if second { Motion::GrowUp2 } else { Motion::GrowUp1 },
                     Clock::Sim(frame),

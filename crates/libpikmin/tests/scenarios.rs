@@ -810,7 +810,7 @@ fn full_field_keeps_seeds_in_the_onion() {
         2
     );
     assert_eq!(
-        sim.onions()[onion.0 as usize].stored[PikiColor::Red.index()],
+        sim.onions()[onion.0 as usize].stored_of(PikiColor::Red),
         2
     );
 }
@@ -1394,4 +1394,75 @@ fn a_draining_puddle_takes_no_new_drinkers() {
     run(&mut sim, &mut host, 5.0, &mut ev);
     assert_eq!(sim.piki(first).happa, Happa::Flower);
     assert_eq!(sim.piki(late).happa, Happa::Leaf);
+}
+
+// ---- Onion menu ----
+
+#[test]
+fn captain_under_the_onion_can_open_its_menu() {
+    let mut sim = Sim::new(retail_params(), 70);
+    let c = sim.add_captain(Vec3::new(30.0, 0.0, 0.0));
+    let onion = sim.add_onion(Vec3::ZERO, &[PikiColor::Red]);
+    assert_eq!(sim.onion_in_reach(c), Some(onion));
+    let far = sim.add_captain(Vec3::new(400.0, 0.0, 0.0));
+    assert_eq!(sim.onion_in_reach(far), None);
+}
+
+#[test]
+fn putting_pikmin_away_stores_them_in_the_onion() {
+    let mut sim = Sim::new(retail_params(), 71);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::new(30.0, 0.0, 0.0));
+    let onion = sim.add_onion(Vec3::ZERO, &[PikiColor::Red]);
+    squad(&mut sim, c, 5, Vec3::new(30.0, 0.0, 0.0));
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 1.0, &mut ev);
+    let before = sim.onion_counts(onion, c, PikiColor::Red);
+    assert_eq!(before.in_squad, 5);
+    assert_eq!(sim.onion_put_away(c, onion, PikiColor::Red, 3), 3);
+    assert_eq!(sim.captain(c).plate.len(), 2);
+    run(&mut sim, &mut host, 15.0, &mut ev);
+    assert_eq!(sim.onions()[0].stored_of(PikiColor::Red), 3);
+    assert_eq!(ev.iter().filter(|e| matches!(e, Event::PikiEnteredOnion { .. })).count(), 3);
+    assert_eq!(sim.pikis().iter().filter(|p| p.on_field()).count(), 2);
+}
+
+#[test]
+fn calling_out_brings_stored_pikmin_to_the_squad_flowers_first() {
+    let mut sim = Sim::new(retail_params(), 72);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::new(30.0, 0.0, 0.0));
+    let onion = sim.add_onion(Vec3::ZERO, &[PikiColor::Blue]);
+    sim.store_in_onion(onion, PikiColor::Blue, Happa::Leaf, 4);
+    sim.store_in_onion(onion, PikiColor::Blue, Happa::Flower, 1);
+    assert_eq!(sim.onion_call_out(c, onion, PikiColor::Blue, 3), 3);
+    assert_eq!(sim.onion_counts(onion, c, PikiColor::Blue).in_onion, 2, "pending exits are spoken for");
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 4.0, &mut ev);
+    assert_eq!(sim.captain(c).plate.len(), 3);
+    assert_eq!(sim.onions()[0].stored_of(PikiColor::Blue), 2);
+    let first = ev
+        .iter()
+        .find_map(|e| match e {
+            Event::PikiLeftOnion { piki, .. } => Some(*piki),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(sim.piki(first).happa, Happa::Flower, "highest leaf stage comes out first");
+}
+
+#[test]
+fn calling_out_respects_the_field_limit() {
+    let mut params = retail_params();
+    params.ai.max_pikis_on_field = 10;
+    let mut sim = Sim::new(params, 73);
+    let c = sim.add_captain(Vec3::new(30.0, 0.0, 0.0));
+    let onion = sim.add_onion(Vec3::ZERO, &[PikiColor::Yellow]);
+    for i in 0..8 {
+        sim.spawn_piki(PikiColor::Red, Vec3::new(200.0 + i as f32 * 10.0, 0.0, 0.0));
+    }
+    sim.store_in_onion(onion, PikiColor::Yellow, Happa::Leaf, 20);
+    assert_eq!(sim.onion_counts(onion, c, PikiColor::Yellow).can_call_out(), 2);
+    assert_eq!(sim.onion_call_out(c, onion, PikiColor::Yellow, 20), 2);
+    assert_eq!(sim.onion_call_out(c, onion, PikiColor::Yellow, 20), 0);
 }
