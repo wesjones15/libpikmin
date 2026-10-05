@@ -123,6 +123,22 @@ impl Disc {
             .contains_key(&normalize(path.strip_prefix("files/").unwrap_or(path)))
     }
 
+    /// The game executable (`sys/main.dol`): its offset is at 0x420 in the disc header and
+    /// its size is the end of its furthest section (DOL header: 7 text + 11 data section
+    /// offsets at 0x00, sizes at 0x90).
+    pub fn read_dol(&self) -> Result<Vec<u8>, Error> {
+        let header = self.read_at(0x420, 4)?;
+        let off = u32::from_be_bytes(header[..4].try_into().unwrap()) as u64;
+        let dol = self.read_at(off, 0x100)?;
+        let be = |o: usize| u32::from_be_bytes(dol[o..o + 4].try_into().unwrap());
+        let size = (0..18)
+            .map(|i| be(i * 4).saturating_add(be(0x90 + i * 4)))
+            .max()
+            .unwrap_or(0)
+            .clamp(0x100, 64 << 20);
+        self.read_at(off, size as usize)
+    }
+
     /// All file paths on the disc, spelled as on the disc.
     pub fn paths(&self) -> impl Iterator<Item = &str> {
         self.files.values().map(|e| e.path.as_str())

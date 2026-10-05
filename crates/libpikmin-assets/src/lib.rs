@@ -12,6 +12,7 @@ pub mod extract;
 pub mod model;
 pub mod motion;
 pub mod pose;
+pub mod sound;
 pub mod teki;
 mod reader;
 pub mod texture;

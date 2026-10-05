@@ -13,7 +13,9 @@
 //! - `objects/water/`, `objects/fl_water/`: nectar puddle and falling drop
 //! - `tekis/<name>/`, `tekikeys/`, `tekipara/`: enemy models, animation keys and parameters
 //!   (Dwarf Bulborb = chappy, Spotty Bulborb = swallow, Honeywisp = qurione)
-//! - `SndData/`: sound banks, sequences and streamed music
+//! - `SndData/`: sound banks, sequences and streamed music, plus `SndData/Seqs/pikiseq.hed`,
+//!   the sequence archive's index, which the game keeps inside `main.dol` (`HEAD_pikiseq`,
+//!   passed to `Jaf_InitSeqArchive2` in verysimple.c) and this extractor copies out.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -37,7 +39,7 @@ pub const FOLDERS: [&str; 13] = [
 ];
 
 /// Files that must exist for the sim and viewer to work.
-pub const REQUIRED: [&str; 22] = [
+pub const REQUIRED: [&str; 24] = [
     "parms/naviMgr.bin",
     "parms/pikiMgr.bin",
     "parms/aiconst.bin",
@@ -60,7 +62,29 @@ pub const REQUIRED: [&str; 22] = [
     "tekikeys/swallow.key",
     "tekipara/swallow.bin",
     "SndData/Banks/pikibank.bx",
+    "SndData/Seqs/pikiseq.arc",
+    SEQ_HEADER,
 ];
+
+/// The sequence archive index copied out of `main.dol`.
+pub const SEQ_HEADER: &str = "SndData/Seqs/pikiseq.hed";
+
+/// Finds the `BARC` index for `pikiseq.arc` in the executable: `"BARC----"`, the entry count
+/// at 0x0C and the archive name at 0x10, then 32 bytes per entry (virload.c `JV_InitHeader_M`).
+fn find_seq_header(dol: &[u8]) -> Option<&[u8]> {
+    let mut at = 0;
+    while let Some(i) = dol[at..].windows(8).position(|w| w == b"BARC----") {
+        let start = at + i;
+        let h = &dol[start..];
+        if h.len() >= 0x20 && h[0x10..].starts_with(b"pikiseq.arc\0") {
+            let count = u32::from_be_bytes(h[0xC..0x10].try_into().unwrap()) as usize;
+            let len = 0x20 * (count + 1);
+            return (count < 0x100 && h.len() >= len).then(|| &h[..len]);
+        }
+        at = start + 8;
+    }
+    None
+}
 
 pub const GAME_IDS: [(&str, &str); 3] = [
     ("GPIJ01", "Japan"),
@@ -133,6 +157,13 @@ pub fn extract_assets(iso: &Path, out: &Path, log: &mut dyn FnMut(&str)) -> Resu
         log(&format!("dataDir/{folder} ({n} files)"));
         total += n;
     }
+
+    let dol = disc.read_dol()?;
+    let hed = find_seq_header(&dol).ok_or_else(|| Error::Bad("no pikiseq BARC header in main.dol".into()))?;
+    std::fs::create_dir_all(out.join("SndData/Seqs"))?;
+    std::fs::write(out.join(SEQ_HEADER), hed)?;
+    log(&format!("{SEQ_HEADER} from main.dol ({} sequences)", hed.len() / 0x20 - 1));
+    total += 1;
 
     if let Some(missing) = REQUIRED.iter().find(|r| !out.join(r).is_file()) {
         return Err(Error::NotFound(out.join(missing)));

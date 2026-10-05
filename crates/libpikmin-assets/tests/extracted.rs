@@ -90,3 +90,44 @@ fn extractor_matches_existing_assets() {
     }
     let _ = std::fs::remove_dir_all(&out);
 }
+
+/// Every wave in every WSYS decodes to its stated length, every instrument's waves resolve in
+/// scene 0 of its wave system, and the sequences the game preloads exist.
+#[test]
+fn sound_bank_decodes() {
+    use libpikmin_assets::sound::{SoundData, Stream};
+    let Some(disc) = disc() else { return };
+    let snd = SoundData::load(&disc).unwrap();
+    for (wi, ws) in snd.bank.wsys.iter().enumerate() {
+        let Some(ws) = ws else { continue };
+        for (ai, arc) in ws.archives.iter().enumerate() {
+            if arc.file.is_empty() {
+                continue;
+            }
+            for (i, w) in arc.waves.iter().enumerate() {
+                let pcm = snd.pcm(wi, ai, i).unwrap();
+                assert_eq!(pcm.len(), w.end as usize, "{} wave {i}", arc.file);
+            }
+        }
+    }
+    // The sound effect bank (bank 0) against the SE wave system (0): `WaveScene_Set(0, 0)`
+    // in `Jac_PlayInit` loads scene 0, whose dependencies pull in the rest.
+    let se = snd.bank.banks[0].as_ref().unwrap();
+    let ws = snd.bank.wsys[0].as_ref().unwrap();
+    let mut found = 0;
+    for p in 0..0x80u8 {
+        let Some(inst) = se.inst(p) else { continue };
+        for k in &inst.keys {
+            for v in &k.vels {
+                assert!(ws.find_wave(0, v.wave_id as u16).is_some(), "inst {p} wave {:#x}", v.wave_id);
+                found += 1;
+            }
+        }
+    }
+    assert!(found > 20);
+    for id in [0, 1, 11, 13, 16] {
+        assert!(snd.seqs.seq(id).is_some(), "sequence {id}");
+    }
+    let s = Stream::decode(&disc.read("SndData/piki.stx").unwrap()).unwrap();
+    assert_eq!(s.stereo.len(), s.header.samples as usize * 2);
+}
