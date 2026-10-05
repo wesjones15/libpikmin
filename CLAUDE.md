@@ -12,8 +12,9 @@ This folder is the repo root. All work happens here. Sibling folders are read-on
   against the user's disc (game code 99.82% matched; gameplay code is in `src/plugProjectKandoU/`).
 - `../extracted/p2/`: Pikmin 2 text parms copied off the user's disc with dtk (reference only).
 - `assets/` (git-ignored, never commit): Pikmin 1 files extracted from the user's disc on first
-  run, same layout as `files/dataDir/` (`parms/`, `pikis/`, `objects/goal/`, `objects/pellets/`).
-  Everything at runtime loads from here; the disc is only read to build it.
+  run, same layout as `files/dataDir/`: `parms/`, `pikis/`, `objects/{goal,pellets,pikihead,water,
+  fl_water}/`, `tekis/{chappy,swallow,qurione}/`, `tekikeys/`, `tekipara/`, `SndData/`. Everything at
+  runtime loads from here; the disc is only read to build it.
 
 Workspace:
 - `crates/libpikmin/`: core sim. No Elden Ring or libsm64 types.
@@ -21,7 +22,8 @@ Workspace:
   Python or dtk) and loaders for models, textures and animations. Renderer-agnostic: triangle
   batches, RGBA images, posed joint matrices. Hosts call `Assets::discover_or_extract` at startup.
 - `crates/libpikmin-ffi/`: C ABI (cdylib/staticlib) for hosts.
-- `crates/viewer/`: test host (macroquad) for play-testing without a game. 3D with the disc's
+- `crates/viewer/`: test host (macroquad) for play-testing without a game. Its enemies (Dwarf/Spotty
+  Bulborbs, Honeywisps) are host-side ports of the Pikmin 1 strategies in `viewer/src/teki.rs`. 3D with the disc's
   models and animations (CPU skinning, a GLSL TEV interpreter for PVW materials); V switches to
   the 2D top-down debug view.
 - `docs/`: behavior spec written from the decomp.
