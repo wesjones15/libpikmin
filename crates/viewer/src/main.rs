@@ -366,12 +366,14 @@ async fn main() {
         // Space under an Onion opens its window (`NaviWalkState::exec` checks the Onion
         // before the action button does anything else).
         let active_id = g.captains[g.active];
+        let mut opened_now = false;
         if menu.is_none()
             && is_key_pressed(KeyCode::Space)
             && let Some(o) = g.sim.onion_in_reach(active_id)
         {
             menu = Some(onion_menu::OnionMenu::new(o, active_id));
             space_held_for_menu = true;
+            opened_now = true;
             // `NaviContainerState::init`: `SYSSE_CMENU_ON` pauses the field's sounds.
             if let Some(a) = audio.as_ref() {
                 a.play("SYSSE_CMENU_ON");
@@ -400,7 +402,8 @@ async fn main() {
                 }
             }
         }
-        let paused = match menu.as_mut().map(|m| m.update(&mut g.sim, dt)) {
+        // The press that opened the window isn't also its confirm.
+        let paused = match menu.as_mut().filter(|_| !opened_now).map(|m| m.update(&mut g.sim, dt)) {
             Some(onion_menu::MenuResult::Closed) => {
                 menu = None;
                 space_held_for_menu = true;
@@ -410,7 +413,7 @@ async fn main() {
                 false
             }
             Some(onion_menu::MenuResult::Open) => true,
-            None => false,
+            None => menu.is_some(),
         };
         for (i, &cid) in g.captains.iter().enumerate() {
             let input = if i == g.active && !paused {
