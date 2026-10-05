@@ -37,7 +37,12 @@ impl SeqArchive {
             let name = &hed[e..e + 14];
             let end = name.iter().position(|&b| b == 0).unwrap_or(14);
             let redirect = u16::from_be_bytes([hed[e + 0xE], hed[e + 0xF]]);
-            (String::from_utf8_lossy(&name[..end]).into_owned(), redirect, u32_at(e + 0x18), u32_at(e + 0x1C))
+            (
+                String::from_utf8_lossy(&name[..end]).into_owned(),
+                redirect,
+                u32_at(e + 0x18),
+                u32_at(e + 0x1C),
+            )
         };
         let entries = (0..count)
             .map(|n| {
@@ -46,7 +51,9 @@ impl SeqArchive {
                 for _ in 0..count {
                     let (name, redirect, offset, size) = raw(at);
                     if redirect == 0xFFFF {
-                        let ok = (offset as usize).checked_add(size as usize).is_some_and(|e| e <= arc.len());
+                        let ok = (offset as usize)
+                            .checked_add(size as usize)
+                            .is_some_and(|e| e <= arc.len());
                         return ok.then_some(SeqEntry { name, offset, size });
                     }
                     if redirect as usize >= count {
@@ -71,7 +78,8 @@ impl SeqArchive {
     /// The sequence's bytes.
     pub fn seq(&self, id: usize) -> Option<&[u8]> {
         let e = self.entries.get(id)?.as_ref()?;
-        self.data.get(e.offset as usize..(e.offset + e.size) as usize)
+        self.data
+            .get(e.offset as usize..(e.offset + e.size) as usize)
     }
 
     pub fn name(&self, id: usize) -> Option<&str> {

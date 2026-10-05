@@ -39,7 +39,7 @@ pub const FOLDERS: [&str; 13] = [
 ];
 
 /// Files that must exist for the sim and viewer to work.
-pub const REQUIRED: [&str; 24] = [
+pub const REQUIRED: [&str; 26] = [
     "parms/naviMgr.bin",
     "parms/pikiMgr.bin",
     "parms/aiconst.bin",
@@ -64,6 +64,8 @@ pub const REQUIRED: [&str; 24] = [
     "SndData/Banks/pikibank.bx",
     "SndData/Seqs/pikiseq.arc",
     SEQ_HEADER,
+    crate::sound::tables::TABLES,
+    crate::sound::tables::SOUND_TABLE,
 ];
 
 /// The sequence archive index copied out of `main.dol`.
@@ -101,7 +103,9 @@ pub fn is_complete(dir: &Path) -> bool {
 fn safe_join(base: &Path, rel: &str) -> Result<PathBuf, Error> {
     let p = Path::new(rel);
     if p.components().any(|c| !matches!(c, Component::Normal(_))) {
-        return Err(Error::Bad(format!("disc path {rel:?} escapes the output folder")));
+        return Err(Error::Bad(format!(
+            "disc path {rel:?} escapes the output folder"
+        )));
     }
     Ok(base.join(p))
 }
@@ -159,11 +163,23 @@ pub fn extract_assets(iso: &Path, out: &Path, log: &mut dyn FnMut(&str)) -> Resu
     }
 
     let dol = disc.read_dol()?;
-    let hed = find_seq_header(&dol).ok_or_else(|| Error::Bad("no pikiseq BARC header in main.dol".into()))?;
+    let hed = find_seq_header(&dol)
+        .ok_or_else(|| Error::Bad("no pikiseq BARC header in main.dol".into()))?;
     std::fs::create_dir_all(out.join("SndData/Seqs"))?;
     std::fs::write(out.join(SEQ_HEADER), hed)?;
-    log(&format!("{SEQ_HEADER} from main.dol ({} sequences)", hed.len() / 0x20 - 1));
-    total += 1;
+    log(&format!(
+        "{SEQ_HEADER} from main.dol ({} sequences)",
+        hed.len() / 0x20 - 1
+    ));
+    let (tables, names) = crate::sound::tables::extract(&dol, &disc.game_id, disc.version)?;
+    std::fs::write(out.join(crate::sound::tables::TABLES), tables)?;
+    std::fs::write(out.join(crate::sound::tables::SOUND_TABLE), names)?;
+    log(&format!(
+        "{} and {} from main.dol",
+        crate::sound::tables::TABLES,
+        crate::sound::tables::SOUND_TABLE
+    ));
+    total += 3;
 
     if let Some(missing) = REQUIRED.iter().find(|r| !out.join(r).is_file()) {
         return Err(Error::NotFound(out.join(missing)));
@@ -201,13 +217,17 @@ pub fn find_disc(dirs: &[PathBuf]) -> Option<PathBuf> {
         })
         .collect();
     let score = |p: &PathBuf| {
-        let n = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+        let n = p
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
         !(n.contains("pikmin") && !n.contains('2'))
     };
     found.sort_by_key(score);
-    found.into_iter().find(|p| {
-        Disc::open(p).is_ok_and(|d| GAME_IDS.iter().any(|(id, _)| *id == d.game_id))
-    })
+    found
+        .into_iter()
+        .find(|p| Disc::open(p).is_ok_and(|d| GAME_IDS.iter().any(|(id, _)| *id == d.game_id)))
 }
 
 #[cfg(test)]

@@ -41,6 +41,8 @@ pub struct Disc {
     layout: Layout,
     /// Game ID from the disc header, e.g. `GPIE01`.
     pub game_id: String,
+    /// Disc revision (header byte 7), e.g. 1 for "Rev 1".
+    pub version: u8,
     files: HashMap<String, Entry>,
 }
 
@@ -71,10 +73,12 @@ impl Disc {
             file: Mutex::new(file),
             layout,
             game_id: String::new(),
+            version: 0,
             files: HashMap::new(),
         };
         let header = disc.read_at(0, 0x440)?;
         disc.game_id = String::from_utf8_lossy(&header[..6]).into_owned();
+        disc.version = header[7];
         let be = |o: usize| u32::from_be_bytes(header[o..o + 4].try_into().unwrap());
         let (fst_off, fst_size) = (be(0x424), be(0x428));
         let fst = disc.read_at(fst_off as u64, fst_size as usize)?;
@@ -146,7 +150,9 @@ impl Disc {
 }
 
 fn normalize(p: &str) -> String {
-    p.replace('\\', "/").trim_start_matches('/').to_ascii_lowercase()
+    p.replace('\\', "/")
+        .trim_start_matches('/')
+        .to_ascii_lowercase()
 }
 
 fn parse_fst(fst: &[u8]) -> Result<HashMap<String, Entry>, Error> {

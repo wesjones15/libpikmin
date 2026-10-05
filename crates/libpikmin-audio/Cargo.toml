@@ -1,0 +1,10 @@
+[package]
+name = "libpikmin-audio"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+libpikmin-assets.workspace = true
+
+glam.workspace = true

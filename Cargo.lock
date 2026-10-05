@@ -173,6 +173,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "libpikmin-audio"
+version = "0.1.0"
+dependencies = [
+ "glam 0.30.10",
+ "libpikmin-assets",
+]
+
+[[package]]
 name = "libpikmin-ffi"
 version = "0.1.0"
 dependencies = [

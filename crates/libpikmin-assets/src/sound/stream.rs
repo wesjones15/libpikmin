@@ -6,7 +6,7 @@
 //! two stereo pairs per 36 bytes that are mixed at `mixLevel` (0x5FFF each by default).
 //! Decoder state resets only at the start of the stream.
 
-use super::adpcm::{decode_frame4, History};
+use super::adpcm::{History, decode_frame4};
 use crate::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,7 +72,8 @@ impl Stream {
                     decode_frame4(&f[18..27], &mut h[2], &mut l2);
                     decode_frame4(&f[27..], &mut h[3], &mut r2);
                     let mix = |a: i16, b: i16| {
-                        (((a as i32 * MIX) >> 15) + ((b as i32 * MIX) >> 15)).clamp(-0x8000, 0x7FFF) as i16
+                        (((a as i32 * MIX) >> 15) + ((b as i32 * MIX) >> 15)).clamp(-0x8000, 0x7FFF)
+                            as i16
                     };
                     for i in 0..16 {
                         stereo.extend_from_slice(&[mix(l[i], l2[i]), mix(r[i], r2[i])]);

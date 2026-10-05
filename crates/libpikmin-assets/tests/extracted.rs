@@ -9,7 +9,11 @@ fn disc() -> Option<Assets> {
     Assets::discover(None)
 }
 
-fn bounds(model: &Model, skel: &Skeleton, anim: Option<(&libpikmin_assets::Anim, f32)>) -> (Vec3, Vec3) {
+fn bounds(
+    model: &Model,
+    skel: &Skeleton,
+    anim: Option<(&libpikmin_assets::Anim, f32)>,
+) -> (Vec3, Vec3) {
     let pose = skel.pose(Mat4::IDENTITY, anim);
     let mut lo = Vec3::splat(f32::MAX);
     let mut hi = Vec3::splat(f32::MIN);
@@ -60,7 +64,10 @@ fn pikmin_stands_upright_at_sim_scale() {
         let (lo, hi) = bounds(&m, &skel, Some((wait, 0.0)));
         let height = hi.y - lo.y;
         println!("{p}: {lo} .. {hi}");
-        assert!(lo.y > -3.0 && (10.0..40.0).contains(&height), "{p}: {lo} .. {hi}");
+        assert!(
+            lo.y > -3.0 && (10.0..40.0).contains(&height),
+            "{p}: {lo} .. {hi}"
+        );
     }
 }
 
@@ -119,7 +126,11 @@ fn sound_bank_decodes() {
         let Some(inst) = se.inst(p) else { continue };
         for k in &inst.keys {
             for v in &k.vels {
-                assert!(ws.find_wave(0, v.wave_id as u16).is_some(), "inst {p} wave {:#x}", v.wave_id);
+                assert!(
+                    ws.find_wave(0, v.wave_id as u16).is_some(),
+                    "inst {p} wave {:#x}",
+                    v.wave_id
+                );
                 found += 1;
             }
         }

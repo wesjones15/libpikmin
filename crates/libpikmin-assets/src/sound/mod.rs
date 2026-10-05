@@ -6,6 +6,7 @@ pub mod adpcm;
 pub mod bank;
 pub mod barc;
 pub mod stream;
+pub mod tables;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -48,9 +49,20 @@ impl SoundData {
         if let Some(p) = self.pcm.lock().unwrap().get(&(wsys, archive, wave)) {
             return Ok(p.clone());
         }
-        let ws = self.bank.wsys.get(wsys).and_then(Option::as_ref).ok_or(Error::Bad(format!("no wsys {wsys}")))?;
-        let arc = ws.archives.get(archive).ok_or(Error::Bad(format!("no archive {archive}")))?;
-        let w = arc.waves.get(wave).ok_or(Error::Bad(format!("no wave {wave}")))?;
+        let ws = self
+            .bank
+            .wsys
+            .get(wsys)
+            .and_then(Option::as_ref)
+            .ok_or(Error::Bad(format!("no wsys {wsys}")))?;
+        let arc = ws
+            .archives
+            .get(archive)
+            .ok_or(Error::Bad(format!("no archive {archive}")))?;
+        let w = arc
+            .waves
+            .get(wave)
+            .ok_or(Error::Bad(format!("no wave {wave}")))?;
         let file = {
             let mut files = self.files.lock().unwrap();
             match files.get(&arc.file) {
@@ -67,7 +79,10 @@ impl SoundData {
             .get(start..start + w.length as usize)
             .ok_or(Error::Truncated(start))?;
         let pcm = Arc::new(adpcm::decode_wave(w.format, bytes, w.end as usize));
-        self.pcm.lock().unwrap().insert((wsys, archive, wave), pcm.clone());
+        self.pcm
+            .lock()
+            .unwrap()
+            .insert((wsys, archive, wave), pcm.clone());
         Ok(pcm)
     }
 }

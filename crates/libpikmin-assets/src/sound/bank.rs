@@ -34,7 +34,9 @@ fn ptr_at(d: &[u8], at: usize) -> Result<Option<usize>, Error> {
         return Ok(None);
     }
     if p >= d.len() {
-        return Err(Error::Bad(format!("pointer {p:#x} at {at:#x} outside chunk")));
+        return Err(Error::Bad(format!(
+            "pointer {p:#x} at {at:#x} outside chunk"
+        )));
     }
     Ok(Some(p))
 }
@@ -66,7 +68,9 @@ impl SoundBank {
                     if size == 0 {
                         return Ok(None);
                     }
-                    data.get(addr..addr + size).map(Some).ok_or(Error::Truncated(addr))
+                    data.get(addr..addr + size)
+                        .map(Some)
+                        .ok_or(Error::Truncated(addr))
                 })
                 .collect()
         };
@@ -83,16 +87,18 @@ impl SoundBank {
 
     /// `Jac_WsVirtualToPhysical`: the first slot registered with that virtual id.
     pub fn wsys_physical(&self, virtual_id: u16) -> Option<usize> {
-        self.wsys
-            .iter()
-            .position(|w| w.as_ref().is_some_and(|w| w.virtual_id == virtual_id as u32))
+        self.wsys.iter().position(|w| {
+            w.as_ref()
+                .is_some_and(|w| w.virtual_id == virtual_id as u32)
+        })
     }
 
     /// `Jac_BnkVirtualToPhysical`.
     pub fn bank_physical(&self, virtual_id: u16) -> Option<usize> {
-        self.banks
-            .iter()
-            .position(|b| b.as_ref().is_some_and(|b| b.virtual_id == virtual_id as u32))
+        self.banks.iter().position(|b| {
+            b.as_ref()
+                .is_some_and(|b| b.virtual_id == virtual_id as u32)
+        })
     }
 }
 
@@ -201,7 +207,9 @@ impl Wsys {
             let deps = u32_at(d, s + 8)? as usize;
             scenes.push(Scene {
                 external: u32_at(d, s + 4)? != 0,
-                dependencies: (0..deps).map(|k| u32_at(d, s + 0x18 + k * 4)).collect::<Result<_, _>>()?,
+                dependencies: (0..deps)
+                    .map(|k| u32_at(d, s + 0x18 + k * 4))
+                    .collect::<Result<_, _>>()?,
                 cdf: ctrl(ptr_at(d, s + 0xC)?)?,
                 cex: ctrl(ptr_at(d, s + 0x10)?)?,
                 cst: ctrl(ptr_at(d, s + 0x14)?)?,
@@ -231,7 +239,12 @@ impl Wsys {
                 // `UpdateWave_Extern`: `scene << 16 | wave`, found in that scene's cdf.
                 let w = s.cex[i];
                 let (other, wid) = ((w >> 16) as usize, w as u16);
-                let k = self.scenes.get(other)?.cdf.iter().position(|&c| c as u16 == wid)?;
+                let k = self
+                    .scenes
+                    .get(other)?
+                    .cdf
+                    .iter()
+                    .position(|&c| c as u16 == wid)?;
                 return self.wave_ref(other, k);
             }
             return self.wave_ref(scene, s.cdf.len() + i);
@@ -349,6 +362,8 @@ pub struct PercKey {
     pub volume: f32,
     /// `+0x04`, used as the pitch.
     pub pitch: f32,
+    /// `+0x08`, `+0x0C`: random effects applied at note-on (`EffecterInit_Perc`).
+    pub rands: [Option<Rand>; 2],
     pub vels: Vec<Vmap>,
 }
 
@@ -374,6 +389,16 @@ impl Ibnk {
                 .filter_map(|k| ptr_at(d, list_at + k * 4).transpose())
                 .map(|p| vmap(p?))
                 .collect()
+        };
+        let rand_at = |at: Option<usize>| -> Result<Option<Rand>, Error> {
+            let Some(r) = at else {
+                return Ok(None);
+            };
+            Ok(Some(Rand {
+                id: u8_at(d, r)?,
+                value: f32_at(d, r + 4)?,
+                range: f32_at(d, r + 8)?,
+            }))
         };
         let table = |at: Option<usize>| -> Result<Option<Vec<[i16; 3]>>, Error> {
             let Some(mut at) = at else {
@@ -415,16 +440,7 @@ impl Ibnk {
                         vertex: f32_at(d, o + 0x14)?,
                     }))
                 };
-                let rand = |k: usize| -> Result<Option<Rand>, Error> {
-                    let Some(r) = ptr_at(d, p + 0x18 + k * 4)? else {
-                        return Ok(None);
-                    };
-                    Ok(Some(Rand {
-                        id: u8_at(d, r)?,
-                        value: f32_at(d, r + 4)?,
-                        range: f32_at(d, r + 8)?,
-                    }))
-                };
+                let rand = |k: usize| rand_at(ptr_at(d, p + 0x18 + k * 4)?);
                 let sense = |k: usize| -> Result<Option<Sense>, Error> {
                     let Some(s) = ptr_at(d, p + 0x20 + k * 4)? else {
                         return Ok(None);
@@ -469,6 +485,7 @@ impl Ibnk {
                         Ok(Some(PercKey {
                             volume: f32_at(d, pk)?,
                             pitch: f32_at(d, pk + 4)?,
+                            rands: [rand_at(ptr_at(d, pk + 8)?)?, rand_at(ptr_at(d, pk + 0xC)?)?],
                             vels: vels(pk + 0x10, pk + 0x14)?,
                         }))
                     })
@@ -485,7 +502,10 @@ impl Ibnk {
                 programs.push(None);
             }
         }
-        Ok(Ibnk { virtual_id, programs })
+        Ok(Ibnk {
+            virtual_id,
+            programs,
+        })
     }
 
     pub fn inst(&self, program: u8) -> Option<&Inst> {

@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/libpikmin", "crates/libpikmin-assets", "crates/libpikmin-ffi", "crates/viewer"]
-default-members = ["crates/libpikmin", "crates/libpikmin-assets", "crates/libpikmin-ffi"]
+members = ["crates/libpikmin", "crates/libpikmin-assets", "crates/libpikmin-audio", "crates/libpikmin-ffi", "crates/viewer"]
+default-members = ["crates/libpikmin", "crates/libpikmin-assets", "crates/libpikmin-audio", "crates/libpikmin-ffi"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,4 +11,5 @@ publish = false
 [workspace.dependencies]
 libpikmin = { path = "crates/libpikmin" }
 libpikmin-assets = { path = "crates/libpikmin-assets" }
+libpikmin-audio = { path = "crates/libpikmin-audio" }
 glam = "0.30"
