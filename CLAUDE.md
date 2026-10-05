@@ -13,13 +13,15 @@ This folder is the repo root. All work happens here. Sibling folders are read-on
 - `../extracted/p2/`: Pikmin 2 text parms copied off the user's disc with dtk (reference only).
 - `assets/` (git-ignored, never commit): Pikmin 1 files extracted from the user's disc on first
   run, same layout as `files/dataDir/`: `parms/`, `pikis/`, `objects/{goal,pellets,pikihead,water,
-  fl_water}/`, `tekis/{chappy,swallow,qurione}/`, `tekikeys/`, `tekipara/`, `SndData/`. Everything at
+  fl_water}/`, `tekis/{chappy,swallow,qurione}/`, `tekikeys/`, `tekipara/`, `SndData/`, `effects/`,
+  `shapes/cursor/`. Everything at
   runtime loads from here; the disc is only read to build it.
 
 Workspace:
 - `crates/libpikmin/`: core sim. No Elden Ring or libsm64 types.
 - `crates/libpikmin-assets/`: first-run extractor (pure Rust: .iso/.gcm/.ciso → `assets/`, no
-  Python or dtk) and loaders for models, textures and animations. Renderer-agnostic: triangle
+  Python or dtk) and loaders for models, textures, animations and particle effects (`.pcr`, run
+  by a port of `zen::particleGenerator`). Renderer-agnostic: triangle
   batches, RGBA images, posed joint matrices. Hosts call `Assets::discover_or_extract` at startup.
 - `crates/libpikmin-audio/`: Pikmin 1's sound system (JAudio 1) ported from `src/jaudio/`: the BMS
   sequencer, instruments/envelopes, 64 DSP voices and a resampling mixer, plus the game layer

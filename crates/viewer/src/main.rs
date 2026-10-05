@@ -17,7 +17,7 @@
 //! walks the active captain at the nearest creature and keeps throwing, `PIKMIN_TRACE=1` prints
 //! enemy AI states once a second, `PIKMIN_MENU=1` opens an Onion window, `PIKMIN_PUTAWAY=n`
 //! sends n squad Pikmin of each colour home and `PIKMIN_KILL=1` kills every creature at the
-//! start (autoplay then throws at the corpses).
+//! start (autoplay then throws at the corpses), `PIKMIN_WHISTLE=1` holds the whistle.
 
 use std::path::PathBuf;
 
@@ -31,6 +31,7 @@ use libpikmin::{
 };
 use macroquad::prelude::*;
 
+mod effects;
 mod onion_menu;
 mod sound;
 mod render3d;
@@ -428,7 +429,8 @@ async fn main() {
                 CaptainInput {
                     stick,
                     whistle: is_key_down(KeyCode::LeftShift)
-                        || is_mouse_button_down(MouseButton::Right),
+                        || is_mouse_button_down(MouseButton::Right)
+                        || std::env::var_os("PIKMIN_WHISTLE").is_some(),
                     throw: (is_key_down(KeyCode::Space) && !space_held_for_menu) || auto_throw,
                     dismiss: is_key_down(KeyCode::X),
                     swarm,

@@ -183,12 +183,18 @@ pub fn decode(format: TexFormat, width: u32, height: u32, data: &[u8]) -> Result
                         let px = match format {
                             TexFormat::Rgb565 => rgb565(be16(base + i * 2)),
                             TexFormat::Rgb5a3 => rgb5a3(be16(base + i * 2)),
+                            // GX samples intensity formats as I in all four channels (the
+                            // decomp's PC path, `Texture::decodeData`, forces alpha to 255).
                             TexFormat::I4 => {
                                 let byte = data[base + i / 2];
                                 let v = if i % 2 == 0 { byte >> 4 } else { byte & 0xF } * 0x11;
-                                [v, v, v, 255]
+                                [v, v, v, v]
                             }
-                            TexFormat::I8 | TexFormat::Z8 => {
+                            TexFormat::I8 => {
+                                let v = data[base + i];
+                                [v, v, v, v]
+                            }
+                            TexFormat::Z8 => {
                                 let v = data[base + i];
                                 [v, v, v, 255]
                             }

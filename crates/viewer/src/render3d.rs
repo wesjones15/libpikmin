@@ -28,6 +28,7 @@ use macroquad::prelude::{
     screen_height, screen_width, set_camera, set_default_camera, vec2, vec3, vec4,
 };
 
+use crate::effects::{Effects, WhistleFrame};
 use crate::teki::{Ai, TekiKind, Tekis};
 use crate::tev::{self, DrawParams, Program, Tev};
 
@@ -165,6 +166,8 @@ struct Look {
     brightness: Option<f32>,
     /// Multiplies alpha (fading out).
     alpha: Option<f32>,
+    /// Draw with lighting off (`gfx.setLighting(false)`).
+    unlit: bool,
 }
 
 /// Scene-wide state for drawing models.
@@ -179,10 +182,10 @@ const LIGHT: GVec3 = GVec3::new(0.35, 0.85, 0.40);
 const AMBIENT: f32 = 0.45;
 
 /// Rasterized colour channel 0 (diffuse) and channel 1's specular term.
-fn light(c: [u8; 4], normal: GVec3, gm: &GpuMaterial, to_eye: GVec3) -> ([u8; 4], f32) {
+fn light(c: [u8; 4], normal: GVec3, gm: &GpuMaterial, to_eye: GVec3, unlit: bool) -> ([u8; 4], f32) {
     let n = normal.normalize_or_zero();
     let l = LIGHT.normalize();
-    let k = if gm.lit {
+    let k = if gm.lit && !unlit {
         AMBIENT + (1.0 - AMBIENT) * n.dot(l).max(0.0)
     } else {
         1.0
@@ -243,7 +246,7 @@ fn draw_model(
                     } else {
                         colors[b.material]
                     };
-                    let (c, spec) = light(base, n, gmat, ctx.to_eye);
+                    let (c, spec) = light(base, n, gmat, ctx.to_eye, look.unlit);
                     Vertex {
                         position: mq(p),
                         uv: vec2(v.uv.x, v.uv.y),
@@ -407,6 +410,10 @@ pub struct Scene3d {
     pikmin: [GpuModel; 3],
     happa: [GpuModel; 3],
     onion: GpuModel,
+    /// `shapes/cursor/`: the cursor and the marker under it (`Navi::refresh`).
+    cursor: Option<(GpuModel, GpuModel)>,
+    /// The whistle's particles.
+    effects: Option<Effects>,
     pellets: [GpuModel; 4],
     pikihead: GpuModel,
     pikihead_anims: AnimSet,
@@ -463,6 +470,8 @@ impl Scene3d {
             pikmin: [m(paths::PIKMIN[0])?, m(paths::PIKMIN[1])?, m(paths::PIKMIN[2])?],
             happa: [m(paths::HAPPA[0])?, m(paths::HAPPA[1])?, m(paths::HAPPA[2])?],
             onion: m(paths::ONION)?,
+            cursor: m(paths::CURSOR).ok().zip(m(paths::CURSOR_MARKER).ok()),
+            effects: Effects::load(assets),
             pellets: [
                 m(paths::PELLETS[0])?,
                 m(paths::PELLETS[1])?,
@@ -925,6 +934,8 @@ impl Scene3d {
             nv.escape_anim_min_frames,
         ];
         let damage_end = params.anim.damage.end;
+        let ante = self.olimar.model.coll.iter().find(|c| c.id == "ante").cloned();
+        let mut whistles = Vec::new();
         for (i, c) in sim.captains().iter().enumerate() {
             let speed = c.vel.with_y(0.0).length();
             let throwing = self.throw_timer.get(&c.id).is_some_and(|t| *t > 0.0);
@@ -953,7 +964,7 @@ impl Scene3d {
             let anim = advance(&mut self.players, key, &self.piki_anims, motion, clock, dt);
             let root = srt_matrix(GVec3::ONE, GVec3::new(0.0, c.face, 0.0), c.pos);
             let flash = c.damage_frames > 0.0 && (c.damage_frames as i32 / 2) % 2 == 0;
-            draw_model(
+            let joints = draw_model(
                 &self.olimar,
                 root,
                 anim,
@@ -969,9 +980,62 @@ impl Scene3d {
             } else {
                 Color::from_rgba(120, 200, 255, 255)
             };
-            Self::ring(c.cursor_world, 8.0, col);
+            // The antenna's 'ante' sphere, where the whistle's beam starts (`Navi::demoDraw`).
+            let antenna = ante
+                .as_ref()
+                .and_then(|a| Some(joints.get(a.joint)?.transform_point3(a.centre)))
+                .unwrap_or(c.pos + GVec3::Y * 30.0);
             let wr = c.whistle_radius(&params);
-            if wr > 0.0 {
+            whistles.push(WhistleFrame {
+                captain: c.id,
+                state: c.whistle,
+                antenna,
+                cursor: c.cursor_world,
+                captain_pos: c.pos,
+                radius: wr,
+            });
+            if let Some((cursor, marker)) = self.cursor.as_ref() {
+                // `Navi::refresh`: on the ground 1 above, Z pointing away from the captain.
+                let at = c.cursor_world.with_y(c.cursor_world.y + 1.0);
+                let z = (at - c.pos).with_y(0.0).normalize_or(GVec3::Z);
+                let x = GVec3::Y.cross(z).normalize_or(GVec3::X);
+                let root = Mat4::from_cols(x.extend(0.0), GVec3::Y.extend(0.0), z.extend(0.0), at.extend(1.0));
+                draw_model(
+                    cursor,
+                    root,
+                    None,
+                    Look {
+                        color_frame: Some(self.time * 30.0),
+                        ..Default::default()
+                    },
+                    &mut ctx,
+                );
+                // The marker takes the next Pikmin to throw's colour (`findNextThrowPiki`:
+                // the nearest squad Pikmin within 200), else white, unlit.
+                let next = c.held_piki().map(|id| sim.piki(id).color).or_else(|| {
+                    sim.pikis()
+                        .iter()
+                        .filter(|p| p.captain == Some(c.id) && matches!(p.state, PikiState::Squad { .. }))
+                        .map(|p| (p, (p.pos - c.pos).length()))
+                        .filter(|(_, d)| *d < 200.0)
+                        .min_by(|a, b| a.1.total_cmp(&b.1))
+                        .map(|(p, _)| p.color)
+                });
+                draw_model(
+                    marker,
+                    root,
+                    None,
+                    Look {
+                        tint0: Some(next.map(piki_rgb).unwrap_or([255; 4])),
+                        unlit: true,
+                        ..Default::default()
+                    },
+                    &mut ctx,
+                );
+            } else {
+                Self::ring(c.cursor_world, 8.0, col);
+            }
+            if wr > 0.0 && self.effects.is_none() {
                 let a = if matches!(c.whistle, WhistleState::Calling { .. }) { 0.9 } else { 0.4 };
                 Self::ring(c.cursor_world, wr, Color::new(1.0, 0.94, 0.47, a));
             }
@@ -999,6 +1063,15 @@ impl Scene3d {
                     size: 18.0,
                 });
             }
+        }
+
+        // Particles last: blended, without depth writes.
+        let v = self.view_matrix();
+        if let Some(fx) = self.effects.as_mut() {
+            fx.update(&whistles, nv.whistle_hold_time, dt);
+            let right = GVec3::new(v.x_axis.x, v.y_axis.x, v.z_axis.x);
+            let up = GVec3::new(v.x_axis.y, v.y_axis.y, v.z_axis.y);
+            fx.draw(right, up);
         }
 
         set_default_camera();
