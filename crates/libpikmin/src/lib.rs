@@ -16,6 +16,7 @@ pub mod math;
 pub mod nectar;
 pub mod onion;
 pub mod params;
+pub mod pellet_config;
 pub mod piki;
 mod sim;
 

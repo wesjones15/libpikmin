@@ -25,9 +25,10 @@ use libpikmin_assets::{Anim, AnimSet, Assets, Batch, Blend, Model, Skeleton, pat
 use macroquad::miniquad::TextureWrap;
 use macroquad::prelude::{
     Camera, Camera3D, Color, FilterMode, Mesh, Texture2D, Vertex, draw_line_3d, draw_mesh,
-    draw_sphere, screen_height, screen_width, set_camera, set_default_camera, vec2, vec3, vec4,
+    screen_height, screen_width, set_camera, set_default_camera, vec2, vec3, vec4,
 };
 
+use crate::teki::{Ai, TekiKind, Tekis};
 use crate::tev::{self, DrawParams, Program, Tev};
 
 fn mq(v: GVec3) -> macroquad::math::Vec3 {
@@ -408,6 +409,8 @@ pub struct Scene3d {
     pellets: [GpuModel; 4],
     pikihead: GpuModel,
     pikihead_anims: AnimSet,
+    /// Enemy model and animations by `TekiKind::index`, if present on the disc.
+    tekis: Vec<Option<(GpuModel, AnimSet)>>,
     puddle: GpuModel,
     puddle_anims: AnimSet,
     drop: GpuModel,
@@ -466,6 +469,13 @@ impl Scene3d {
                 m(paths::PELLETS[3])?,
             ],
             pikihead: m(paths::PIKIHEAD)?,
+            tekis: TekiKind::ALL
+                .iter()
+                .map(|k| {
+                    let [model, anm, key, _] = libpikmin_assets::teki::teki_paths(k.name());
+                    Some((m(&model).ok()?, AnimSet::load(assets, &key, &anm).ok()?))
+                })
+                .collect(),
             puddle: m(paths::WATER)?,
             puddle_anims: AnimSet::load(assets, paths::WATER_ANIM_MGR, paths::WATER_BUNDLE)?,
             drop: m(paths::FALL_WATER)?,
@@ -537,13 +547,12 @@ impl Scene3d {
         }
     }
 
-    /// Draws the whole scene in 3D. `creatures` are (pos, yaw, radius, height, hp fraction,
-    /// flashing); the viewer's dummies have no models.
+    /// Draws the whole scene in 3D, including the host's enemies.
     pub fn draw(
         &mut self,
         sim: &Sim,
         focus: CaptainId,
-        creatures: &[(Vec3, f32, f32, f32, f32, bool)],
+        tekis: &Tekis,
         dt: f32,
     ) -> Vec<Overlay> {
         let params: Params = sim.params().clone();
@@ -614,6 +623,17 @@ impl Scene3d {
         // Pellets and corpses: the numbered pellets, sized to the thing being carried.
         for pel in sim.pellets() {
             if pel.state == PelletState::Gone {
+                continue;
+            }
+            if pel.desc.creature.is_some() {
+                if !matches!(pel.state, PelletState::Sucking { .. }) {
+                    overlays.push(Overlay::Text {
+                        at: pel.pos + GVec3::new(0.0, pel.desc.height + 20.0, 0.0),
+                        text: format!("{}/{}", pel.carriers.len(), pel.desc.min_carriers),
+                        color: Color::new(1.0, 1.0, 1.0, 1.0),
+                        size: 18.0,
+                    });
+                }
                 continue;
             }
             let idx = match pel.desc.min_carriers {
@@ -746,27 +766,37 @@ impl Scene3d {
             draw_model(&self.puddle, root, anim, Look::default(), &mut ctx);
         }
 
-        // Creatures (host-side dummies).
-        for &(pos, yaw, radius, height, hp, flash) in creatures {
-            let body = pos + GVec3::new(0.0, height, 0.0);
-            let col = if flash {
-                Color::new(1.0, 1.0, 1.0, 1.0)
-            } else {
-                Color::from_rgba(200, 120, 150, 255)
+        // Enemies: their own models and `.key` animations at the disc scale. Corpses keep
+        // their death pose wherever the sim carries the pellet.
+        for t in &tekis.list {
+            let (Some(spec), Some(gm)) = (tekis.spec(t.kind), self.tekis.get(t.kind.index()).and_then(Option::as_ref))
+            else {
+                continue;
             };
-            draw_sphere(mq(body), radius, None, col);
-            let fwd = GVec3::new(yaw.sin(), 0.0, yaw.cos());
-            let side = GVec3::new(fwd.z, 0.0, -fwd.x);
-            for s in [-1.0, 1.0] {
-                let eye = body + fwd * radius * 0.85 + side * s * radius * 0.35 + GVec3::Y * radius * 0.3;
-                draw_sphere(mq(eye), radius * 0.15, None, Color::from_rgba(20, 20, 20, 255));
+            let (motion, frame) = match t.ai {
+                Ai::Corpse(_) => (spec.motions.dead, spec.keys(spec.motions.dead).end),
+                _ => (t.motion, t.frame),
+            };
+            let anim = gm.1.get(motion).map(|(_, a)| (a, frame.clamp(0.0, a.frames as f32 - 1.0)));
+            let root = srt_matrix(GVec3::splat(spec.scale), GVec3::new(0.0, t.yaw, 0.0), t.pos);
+            draw_model(
+                &gm.0,
+                root,
+                anim,
+                Look {
+                    brightness: (t.flash > 0.0).then_some(1.8),
+                    ..Default::default()
+                },
+                &mut ctx,
+            );
+            if t.alive() && t.kind != TekiKind::Honeywisp {
+                overlays.push(Overlay::Bar {
+                    at: t.pos + GVec3::Y * (gm.0.hi.y * spec.scale + 10.0),
+                    width: 50.0,
+                    frac: (t.hp / spec.life).clamp(0.0, 1.0),
+                    color: Color::from_rgba(80, 220, 80, 255),
+                });
             }
-            overlays.push(Overlay::Bar {
-                at: body + GVec3::Y * (radius + 10.0),
-                width: radius * 2.0,
-                frac: hp,
-                color: Color::from_rgba(80, 220, 80, 255),
-            });
         }
 
         // Pikmin.

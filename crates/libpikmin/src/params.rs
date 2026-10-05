@@ -264,6 +264,8 @@ pub struct Params {
     pub anim: AnimTimings,
     /// Nectar drop and puddle animation timings (`objects/water`, `objects/fl_water`).
     pub nectar: crate::nectar::NectarTimings,
+    /// Pellet, corpse and ship-part configs from `parms/pelMgr.bin` (empty without the disc).
+    pub pellets: Vec<crate::pellet_config::PelletConfig>,
     pub extras: Extras,
 }
 
@@ -304,6 +306,7 @@ impl Default for Params {
             ai: AiParams::default(),
             anim: AnimTimings::default(),
             nectar: Default::default(),
+            pellets: Vec::new(),
             extras: Extras::default(),
         }
     }
@@ -380,6 +383,11 @@ impl Params {
         if goal.exists() {
             self.anim.apply_goal_anims(&std::fs::read(goal)?)?;
             applied.push("goal/anims.bin");
+        }
+        let pel = root.join("parms/pelMgr.bin");
+        if pel.exists() {
+            self.pellets = crate::pellet_config::parse_pellet_configs(&std::fs::read(pel)?)?;
+            applied.push("pelMgr.bin");
         }
         let (water, fall) = (
             root.join("objects/water/anims.bin"),

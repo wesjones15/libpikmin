@@ -4,7 +4,7 @@
 //!
 //! Controls: WASD/arrows move (hold Ctrl for a light tilt that only moves the cursor),
 //! Space = throw (hold, release to throw), Shift / right mouse = whistle, X = dismiss,
-//! Tab = switch captain, C = spawn a creature at the cursor, G = make creatures shake, IJKL = C-stick swarm,
+//! Tab = switch captain, C / B / U = spawn a Dwarf Bulborb / Spotty Bulborb / Honeywisp at the cursor, G = make creatures shake, IJKL = C-stick swarm,
 //! F1 = formation debug, R = reset, mouse wheel = zoom. Space next to a sprout plucks it.
 //!
 //! Dead creatures become corpses the Pikmin can carry to the Onions (red, yellow, blue).
@@ -13,194 +13,28 @@
 //!
 //! Debug env vars: `PIKMIN_SHOT=out.png` (+ `PIKMIN_SHOT_FRAME=n`) saves a frame and exits,
 //! `PIKMIN_CAM=yaw,dist,pitch` and `PIKMIN_FOCUS=x,y,z` set the 3D camera, `PIKMIN_AUTOPLAY=1`
-//! walks the active captain at the nearest creature and keeps throwing.
+//! walks the active captain at the nearest creature and keeps throwing, `PIKMIN_TRACE=1` prints
+//! enemy AI states once a second.
 
 use std::path::PathBuf;
 
 use libpikmin::captain::WhistleState;
-use libpikmin::host::{CreatureFrame, CreatureId, CreaturePart};
+use libpikmin::host::{CreatureFrame, CreatureId};
 use libpikmin::onion::OnionAnim;
 use libpikmin::piki::AttackMode;
 use libpikmin::{
-    CaptainId, CaptainInput, Event, Happa, Host, Params, PelletDesc, PelletId, PelletState,
+    CaptainId, CaptainInput, Event, Happa, Host, Params, PelletDesc, PelletState,
     PikiColor, PikiState, Sim, SproutState, Vec2, Vec3,
 };
 use macroquad::prelude::*;
 
 mod render3d;
+mod teki;
 mod tev;
 
-struct Dummy {
-    id: CreatureId,
-    pos: Vec3,
-    yaw: f32,
-    radius: f32,
-    height: f32,
-    hp: f32,
-    max_hp: f32,
-    wander: Vec3,
-    shake_timer: f32,
-    flash: f32,
-    corpse: Option<PelletId>,
-    bite_timer: f32,
-    chew_timer: f32,
-    stomp_timer: f32,
-}
-
-#[derive(Default)]
+/// The host's world: its enemies (see `teki.rs`) on flat ground.
 struct World {
-    creatures: Vec<Dummy>,
-    next_id: CreatureId,
-    seed: u32,
-}
-
-impl World {
-    fn rand(&mut self) -> f32 {
-        self.seed ^= self.seed << 13;
-        self.seed ^= self.seed >> 17;
-        self.seed ^= self.seed << 5;
-        (self.seed % 10_000) as f32 / 10_000.0
-    }
-
-    fn spawn(&mut self, pos: Vec3, radius: f32, hp: f32) {
-        self.next_id += 1;
-        self.creatures.push(Dummy {
-            id: self.next_id,
-            pos,
-            yaw: 0.0,
-            radius,
-            height: radius * 0.8,
-            hp,
-            max_hp: hp,
-            wander: pos,
-            shake_timer: 3.0,
-            flash: 0.0,
-            corpse: None,
-            bite_timer: 2.0,
-            chew_timer: 0.0,
-            stomp_timer: 5.0,
-        });
-    }
-
-    fn update(&mut self, dt: f32, sim: &mut Sim, force_shake: bool) {
-        for i in 0..self.creatures.len() {
-            let (r1, r2) = (self.rand(), self.rand());
-            let c = &mut self.creatures[i];
-            c.flash = (c.flash - dt).max(0.0);
-            if c.hp <= 0.0 {
-                // Dead: becomes a corpse the Pikmin can carry. Carry weights and seeds are this
-                // host's choice (Pikmin 1's own per-enemy table lives in the disc's pelMgr.bin).
-                if c.corpse.is_none() {
-                    let min = (c.radius / 6.0).round().max(1.0) as u32;
-                    c.corpse = Some(sim.spawn_pellet(PelletDesc {
-                        pos: c.pos,
-                        yaw: c.yaw,
-                        radius: c.radius * 0.8,
-                        height: c.height,
-                        min_carriers: min,
-                        max_carriers: min * 2,
-                        seeds_matching: min as i32 + 1,
-                        seeds_other: min as i32 + 1,
-                        color: None,
-                        creature: Some(c.id),
-                    }));
-                }
-                continue;
-            }
-            // A simple enemy AI (this host's, not Pikmin's): chase the nearest Pikmin or
-            // captain on the ground, bite, chew. The sim only gets told what happened.
-            c.bite_timer -= dt;
-            c.stomp_timer -= dt;
-            let id = c.id;
-            if c.chew_timer > 0.0 {
-                c.chew_timer -= dt;
-                if c.chew_timer <= 0.0 {
-                    sim.chew(id);
-                }
-            } else {
-                let mut target = None;
-                let mut best = 200.0f32;
-                for cap in sim.captains().iter().filter(|k| !k.down) {
-                    let d = (cap.pos - c.pos).with_y(0.0).length();
-                    if d < best {
-                        best = d;
-                        target = Some(cap.pos);
-                    }
-                }
-                for pk in sim.pikis() {
-                    let free = pk.is_alive()
-                        && pk.on_ground
-                        && pk.state.latched_to().is_none()
-                        && !matches!(
-                            pk.state,
-                            PikiState::Swallowed { .. } | PikiState::Pressed { .. }
-                        );
-                    let d = (pk.pos - c.pos).with_y(0.0).length();
-                    if free && d < best {
-                        best = d;
-                        target = Some(pk.pos);
-                    }
-                }
-                let fwd = Vec3::new(c.yaw.sin(), 0.0, c.yaw.cos());
-                let mouth = c.pos + fwd * (c.radius + 6.0) + Vec3::new(0.0, 6.0, 0.0);
-                match target {
-                    Some(t) if best < c.radius + 24.0 && c.bite_timer <= 0.0 => {
-                        let eaten = sim.swallow_pikis(id, 0, mouth, 20.0, 3);
-                        let caps: Vec<_> = sim
-                            .captains()
-                            .iter()
-                            .filter(|k| !k.down && (k.pos - mouth).with_y(0.0).length() < 26.0)
-                            .map(|k| k.id)
-                            .collect();
-                        for k in caps {
-                            sim.damage_captain(k, 10.0); // InteractSwallow::actNavi takes 10
-                        }
-                        c.bite_timer = 2.5;
-                        if eaten > 0 {
-                            c.chew_timer = 1.0;
-                        }
-                        let _ = t;
-                    }
-                    Some(t) => {
-                        let to = (t - c.pos).with_y(0.0);
-                        if to.length() > c.radius + 10.0 {
-                            let step = to.normalize() * 40.0 * dt;
-                            c.pos += step;
-                        }
-                        c.yaw = to.x.atan2(to.z);
-                    }
-                    None => {
-                        let to = c.wander - c.pos;
-                        if to.length() < 10.0 {
-                            c.wander =
-                                c.pos + Vec3::new((r1 - 0.5) * 300.0, 0.0, (r2 - 0.5) * 300.0);
-                        } else {
-                            let step = to.normalize() * 25.0 * dt;
-                            c.pos += step;
-                            c.yaw = step.x.atan2(step.z);
-                        }
-                    }
-                }
-                // The big one stomps when Pikmin crowd it.
-                if c.radius >= 35.0 && c.stomp_timer <= 0.0 && best < c.radius + 30.0 {
-                    sim.crush_pikis_in_sphere(c.pos, c.radius + 30.0, 20.0);
-                    sim.shake_off(id);
-                    c.stomp_timer = 6.0;
-                }
-            }
-            // Shake when enough Pikmin hang on, like most Pikmin 1 enemies.
-            c.shake_timer -= dt;
-            let latched = sim
-                .pikis()
-                .iter()
-                .filter(|p| p.state.latched_to() == Some(c.id))
-                .count();
-            if force_shake || (latched >= 4 && c.shake_timer <= 0.0) {
-                sim.shake_off(c.id);
-                c.shake_timer = 4.0;
-            }
-        }
-    }
+    tekis: teki::Tekis,
 }
 
 impl Host for World {
@@ -209,15 +43,7 @@ impl Host for World {
     }
 
     fn creatures(&mut self, out: &mut CreatureFrame) {
-        out.clear();
-        for c in self.creatures.iter().filter(|c| c.hp > 0.0) {
-            let body = CreaturePart {
-                centre: c.pos + Vec3::new(0.0, c.height, 0.0),
-                radius: c.radius,
-                stickable: true,
-            };
-            out.push(c.id, c.pos, c.yaw, c.hp > 0.0, false, &[body]);
-        }
+        self.tekis.frame(out);
     }
 
     fn damage(
@@ -227,16 +53,23 @@ impl Host for World {
         _part: Option<u32>,
         _from: libpikmin::DamageSource,
     ) -> bool {
-        let Some(c) = self.creatures.iter_mut().find(|c| c.id == creature) else {
-            return false;
-        };
-        if c.hp <= 0.0 {
-            return false;
-        }
-        c.hp -= amount;
-        c.flash = 0.08;
-        true
+        self.tekis.damage(creature, amount)
     }
+}
+
+/// Enemy specs from the disc (empty without assets).
+fn load_specs(assets: &Result<libpikmin_assets::Assets, String>, params: &Params) -> Vec<teki::TekiSpec> {
+    let Ok(a) = assets else { return Vec::new() };
+    teki::TekiKind::ALL
+        .iter()
+        .filter_map(|&k| match teki::TekiSpec::load(a, k, &params.pellets) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                eprintln!("{}: {e}", k.name());
+                None
+            }
+        })
+        .collect()
 }
 
 /// Finds the extracted `assets/` folder, extracting it from the user's disc on first run
@@ -310,32 +143,34 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
         );
     }
     let mut world = World {
-        seed: 0x1234_5678,
-        ..Default::default()
+        tekis: teki::Tekis::new(load_specs(assets, sim.params())),
     };
-    world.spawn(Vec3::new(200.0, 0.0, 150.0), 26.0, 750.0);
-    world.spawn(Vec3::new(-100.0, 0.0, 300.0), 18.0, 300.0);
-    world.spawn(Vec3::new(350.0, 0.0, -50.0), 40.0, 2000.0);
-    // Numbered pellets 1, 5, 10, 20 to carry. Carrier counts and seeds follow Pikmin 1's
-    // pellets; sizes are this host's choice (the real ones live in the disc's pelMgr.bin).
-    for (i, (n, seeds, radius, color)) in [
-        (1u32, (2, 1), 7.0, PikiColor::Red),
-        (5, (5, 3), 13.0, PikiColor::Yellow),
-        (10, (10, 5), 19.0, PikiColor::Blue),
-        (20, (20, 10), 27.0, PikiColor::Red),
+    // A Spotty Bulborb asleep in its nest, Dwarf Bulborbs on patrol, and a Honeywisp.
+    world.tekis.spawn(teki::TekiKind::Spotty, Vec3::new(330.0, 0.0, 160.0), std::f32::consts::PI);
+    world.tekis.spawn(teki::TekiKind::Dwarf, Vec3::new(200.0, 0.0, 300.0), 0.0);
+    world.tekis.spawn(teki::TekiKind::Dwarf, Vec3::new(-120.0, 0.0, 320.0), 0.0);
+    world.tekis.spawn(teki::TekiKind::Honeywisp, Vec3::new(-60.0, 0.0, 140.0), 0.0);
+    // Numbered pellets 1, 5, 10, 20 with the disc's configs (`pelMgr.bin`: pr01, py05, pb10,
+    // pr20); sizes are this host's choice.
+    for (i, (id, n, seeds, radius, color)) in [
+        ("pr01", 1u32, (2, 1), 7.0, PikiColor::Red),
+        ("py05", 5, (5, 3), 13.0, PikiColor::Yellow),
+        ("pb10", 10, (10, 6), 19.0, PikiColor::Blue),
+        ("pr20", 20, (20, 10), 27.0, PikiColor::Red),
     ]
     .into_iter()
     .enumerate()
     {
+        let cfg = libpikmin::pellet_config::find(&sim.params().pellets, id).cloned();
         sim.spawn_pellet(PelletDesc {
             pos: Vec3::new(-150.0 + i as f32 * 90.0, 0.0, -130.0),
             yaw: 0.0,
             radius,
             height: radius * 0.6,
-            min_carriers: n,
-            max_carriers: n * 2,
-            seeds_matching: seeds.0,
-            seeds_other: seeds.1,
+            min_carriers: cfg.as_ref().map_or(n, |c| c.min_carriers.max(1) as u32),
+            max_carriers: cfg.as_ref().map_or(n * 2, |c| c.max_carriers.max(1) as u32),
+            seeds_matching: cfg.as_ref().map_or(seeds.0, |c| c.seeds_matching),
+            seeds_other: cfg.as_ref().map_or(seeds.1, |c| c.seeds_other),
             color: Some(color),
             creature: None,
         });
@@ -397,6 +232,9 @@ async fn main() {
     let shot_frame: u32 = std::env::var("PIKMIN_SHOT_FRAME").ok().and_then(|v| v.parse().ok()).unwrap_or(120);
     // `PIKMIN_AUTOPLAY=1`: the active captain walks at the nearest creature and keeps throwing.
     let autoplay = std::env::var_os("PIKMIN_AUTOPLAY").is_some();
+    // `PIKMIN_TRACE=1`: print every enemy's state once a second.
+    let trace = std::env::var_os("PIKMIN_TRACE").is_some();
+    let mut last_trace = u64::MAX;
     // `PIKMIN_CAM=yaw,dist,pitch` sets the starting 3D camera.
     if let (Some(sc), Some(cam)) = (scene.as_mut(), std::env::var("PIKMIN_CAM").ok()) {
         let v: Vec<f32> = cam.split(',').filter_map(|x| x.trim().parse().ok()).collect();
@@ -479,9 +317,10 @@ async fn main() {
             let me = g.sim.captain(g.captains[g.active]).pos;
             if let Some(c) = g
                 .world
-                .creatures
+                .tekis
+                .list
                 .iter()
-                .filter(|c| c.hp > 0.0)
+                .filter(|t| t.alive() && t.kind != teki::TekiKind::Honeywisp)
                 .min_by(|a, b| (a.pos - me).length().total_cmp(&(b.pos - me).length()))
             {
                 let to = (c.pos - me).with_y(0.0);
@@ -511,9 +350,16 @@ async fn main() {
         }
 
         let active = g.captains[g.active];
+        let at = g.sim.captain(active).cursor_world.with_y(0.0);
+        let face = g.sim.captain(active).face + std::f32::consts::PI;
         if is_key_pressed(KeyCode::C) {
-            let at = g.sim.captain(active).cursor_world;
-            g.world.spawn(Vec3::new(at.x, 0.0, at.z), 24.0, 600.0);
+            g.world.tekis.spawn(teki::TekiKind::Dwarf, at, face);
+        }
+        if is_key_pressed(KeyCode::B) {
+            g.world.tekis.spawn(teki::TekiKind::Spotty, at, face);
+        }
+        if is_key_pressed(KeyCode::U) {
+            g.world.tekis.spawn(teki::TekiKind::Honeywisp, at, face);
         }
         // N: drop nectar from above the cursor.
         if is_key_pressed(KeyCode::N) {
@@ -548,7 +394,16 @@ async fn main() {
                 g.sim.heal_captain(active, None);
             }
         }
-        g.world.update(dt, &mut g.sim, is_key_pressed(KeyCode::G));
+        g.world.tekis.update(dt, &mut g.sim, is_key_pressed(KeyCode::G));
+        if trace && g.sim.tick() / 30 != last_trace {
+            last_trace = g.sim.tick() / 30;
+            for t in &g.world.tekis.list {
+                println!(
+                    "t={} {:?} {:?} hp {:.0} pos ({:.0},{:.0}) motion {} frame {:.0} hits {}",
+                    last_trace, t.kind, t.ai, t.hp, t.pos.x, t.pos.z, t.motion, t.frame, t.hits
+                );
+            }
+        }
         g.sim.advance(&mut g.world, dt);
         for e in g.sim.drain_events() {
             if let Some(sc) = scene.as_mut() {
@@ -567,14 +422,7 @@ async fn main() {
         // ---- draw ----
         if let Some(sc) = scene.as_mut().filter(|_| view3d) {
             clear_background(Color::from_rgba(150, 190, 225, 255));
-            let creatures: Vec<_> = g
-                .world
-                .creatures
-                .iter()
-                .filter(|c| c.hp > 0.0)
-                .map(|c| (c.pos, c.yaw, c.radius, c.height, c.hp / c.max_hp, c.flash > 0.0))
-                .collect();
-            let overlays = sc.draw(&g.sim, active, &creatures, dt);
+            let overlays = sc.draw(&g.sim, active, &g.world.tekis, dt);
             for o in overlays {
                 match o {
                     render3d::Overlay::Text { at, text, color, size } => {
@@ -691,34 +539,21 @@ async fn main() {
             }
         }
 
-        for c in g.world.creatures.iter().filter(|c| c.hp > 0.0) {
-            let s = to_screen(c.pos);
-            draw_circle(s.x, s.y, c.radius * zoom, Color::from_rgba(0, 0, 0, 60));
-            let body = lifted(c.pos + Vec3::new(0.0, c.height, 0.0));
-            let col = if c.flash > 0.0 {
-                WHITE
-            } else {
-                Color::from_rgba(200, 120, 150, 255)
-            };
-            draw_circle(body.x, body.y, c.radius * zoom, col);
-            let eye = body + vec2(c.yaw.sin(), -c.yaw.cos()) * c.radius * zoom * 0.6;
-            draw_circle(eye.x, eye.y, 3.0 * zoom, BLACK);
-            let w = c.radius * 2.0 * zoom;
-            let frac = (c.hp / c.max_hp).clamp(0.0, 1.0);
-            draw_rectangle(
-                body.x - w / 2.0,
-                body.y - c.radius * zoom - 10.0,
-                w,
-                5.0,
-                DARKGRAY,
-            );
-            draw_rectangle(
-                body.x - w / 2.0,
-                body.y - c.radius * zoom - 10.0,
-                w * frac,
-                5.0,
-                GREEN,
-            );
+        for t in g.world.tekis.list.iter().filter(|t| t.alive()) {
+            let Some(spec) = g.world.tekis.spec(t.kind) else { continue };
+            for part in t.parts(spec) {
+                let sh = to_screen(part.centre.with_y(0.0));
+                draw_circle(sh.x, sh.y, part.radius * zoom, Color::from_rgba(0, 0, 0, 50));
+                let b = lifted(part.centre);
+                let col = if t.flash > 0.0 { WHITE } else { Color::from_rgba(200, 120, 150, 255) };
+                draw_circle(b.x, b.y, part.radius * zoom, col);
+            }
+            let body = lifted(t.pos + Vec3::Y * 20.0);
+            let w = 40.0 * zoom;
+            let frac = (t.hp / spec.life).clamp(0.0, 1.0);
+            draw_rectangle(body.x - w / 2.0, body.y - 30.0 * zoom, w, 5.0, DARKGRAY);
+            draw_rectangle(body.x - w / 2.0, body.y - 30.0 * zoom, w * frac, 5.0, GREEN);
+            draw_text(format!("{:?}", t.ai), body.x - w / 2.0, body.y - 34.0 * zoom, 14.0, WHITE);
         }
 
         // Pikmin: ground ones first, then airborne/latched on top.
@@ -878,7 +713,7 @@ fn draw_hud(g: &Game) {
             g.sim.pikis().iter().filter(|p| p.is_alive()).count(),
         ),
         format!("hits {}  stolen {}  tick {}  {} fps  |  {}", g.hits, g.stolen, g.sim.tick(), get_fps(), g.params_source),
-        "WASD move (Ctrl: aim only)  Space throw/pluck/punch  Shift/RMB whistle  IJKL swarm  X dismiss  Tab captain  H revive  N nectar  O seeds  C creature  G shake  V 2D/3D  Q/E camera  F1 slots  R reset".into(),
+        "WASD move (Ctrl: aim only)  Space throw/pluck/punch  Shift/RMB whistle  IJKL swarm  X dismiss  Tab captain  H revive  N nectar  O seeds  C dwarf  B bulborb  U honeywisp  G shake  V 2D/3D  Q/E camera  F1 slots  R reset".into(),
     ];
     for (i, l) in lines.iter().enumerate() {
         draw_text(l, 12.0, 22.0 + i as f32 * 20.0, 20.0, WHITE);
