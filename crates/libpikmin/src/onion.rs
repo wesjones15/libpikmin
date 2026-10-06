@@ -40,8 +40,9 @@ pub enum OnionAnim {
     },
     /// Gone from the field until it lands.
     Away,
-    /// Coming back down (`GoalItem::startLand`). The ship has no landing motion and is
-    /// simply back.
+    /// Coming back down (`GoalItem::startLand`). The ship has no landing motion in the
+    /// game (it's simply back the next day); it takes as long as its take off, which hosts
+    /// can play backwards.
     Landing {
         frame: f32,
     },
@@ -335,12 +336,7 @@ impl Sim {
         if o.anim != OnionAnim::Away {
             return;
         }
-        if o.ship.is_some() {
-            o.anim = OnionAnim::Idle;
-            self.events.push(Event::OnionLanded { onion });
-        } else {
-            o.anim = OnionAnim::Landing { frame: 0.0 };
-        }
+        o.anim = OnionAnim::Landing { frame: 0.0 };
     }
 
     pub(crate) fn update_onions(&mut self, dt: f32) {
@@ -357,7 +353,8 @@ impl Sim {
                 }
                 OnionAnim::Landing { frame } => {
                     let f = frame + anim.fps * dt;
-                    if f >= anim.goal_land[colour] {
+                    let end = if o.ship.is_some() { anim.ship_takeoff } else { anim.goal_land[colour] };
+                    if f >= end {
                         // Seeds it was holding come out now.
                         let busy = !o.queue.is_empty() || o.fireworks > 0;
                         o.anim = if busy { OnionAnim::Emitting { frame: 0.0 } } else { OnionAnim::Idle };

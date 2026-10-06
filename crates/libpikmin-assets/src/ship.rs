@@ -198,6 +198,10 @@ pub enum ShipCue {
     },
     /// A command to the cutscene sound track (`Jac_DemoSound`) for demo `demo`.
     DemoSound { demo: u16, cmd: u16 },
+    /// The cutscene sound track goes quiet (`__Jac_FinishDemo`).
+    EndDemoSound,
+    /// Every [`ShipCue::Attached`] effect stops (`setJetEffect(0)`).
+    StopAttached,
 }
 
 /// One part's animation once it's on the ship (`PlayerState::UfoParts`): the lower animator
@@ -241,6 +245,8 @@ pub struct ShipAnimator {
     ionium: [bool; 2],
     /// Frames since the take off started.
     takeoff_time: Option<f32>,
+    /// Landing: frames left of the take off motion, played backwards.
+    landing: Option<f32>,
 }
 
 const SPEED: f32 = 30.0;
@@ -285,6 +291,7 @@ impl ShipAnimator {
             broken: true,
             ionium: [false; 2],
             takeoff_time: None,
+            landing: None,
         }
     }
 
@@ -303,14 +310,25 @@ impl ShipAnimator {
     /// `UfoItem::startAI`: the ship as it stands when the level starts, with `on_board` parts
     /// already fitted and showing `level`.
     pub fn start(&mut self, on_board: &[u32], level: u8, cues: &mut Vec<ShipCue>) {
+        self.set_up(on_board, level);
+        self.stand(cues);
+    }
+
+    /// Context 0 standing still, with the ship's hum.
+    fn stand(&mut self, cues: &mut Vec<ShipCue>) {
+        self.start_ctx(0, if self.broken { motion::WAIT_TUTORIAL } else { motion::WAIT });
+        self.listening = false;
+        self.speed[0] = 0.0;
+        cues.push(ShipCue::Sound(if self.broken { "SE_UFO_DESTROY" } else { "SE_UFO_IDLING" }));
+    }
+
+    /// `on_board` parts fitted, the lights and upgrade motions for `level`.
+    fn set_up(&mut self, on_board: &[u32], level: u8) {
         self.takeoff_time = None;
+        self.landing = None;
         self.repairing = None;
         self.parts.iter_mut().for_each(|p| *p = None);
-        let broken = on_board.is_empty();
-        self.broken = broken;
-        self.start_ctx(0, if broken { motion::WAIT_TUTORIAL } else { motion::WAIT });
-        self.listening = false;
-        cues.push(ShipCue::Sound(if broken { "SE_UFO_DESTROY" } else { "SE_UFO_IDLING" }));
+        self.broken = on_board.is_empty();
         self.speed = [0.0; 8];
         for &p in on_board {
             self.fit(p as usize);
@@ -457,13 +475,34 @@ impl ShipAnimator {
         self.takeoff_time = Some(0.0);
     }
 
-    /// The next day (`UfoItem::startAI`): the ship stands as it was, with dust as it's back.
-    /// It has no landing motion.
+    /// Comes back down. Not in the game, where the ship is simply there the next day
+    /// (`UfoItem::startAI`, with `EFF_Rocket_Land`): here it plays its take off motion
+    /// backwards, flames on and roaring, and lands in that dust where the flames lit on the
+    /// way up.
     pub fn land(&mut self, on_board: &[u32], level: u8, cues: &mut Vec<ShipCue>) {
-        self.start(on_board, level, cues);
-        if !self.broken {
-            cues.push(ShipCue::Effect { fx: effects::ROCKET_LAND, lift: 0.0, normal: None });
-        }
+        self.set_up(on_board, level);
+        let idx = (level as usize).saturating_sub(1).min(4);
+        self.start_ctx(0, motion::TAKEOFF[idx]);
+        self.listening = false;
+        self.speed[0] = 0.0;
+        let end = self.ship.get(motion::TAKEOFF[idx]).and_then(|i| i.keys.last()).map_or(0.0, |&k| k as f32);
+        self.ctx[0].frame = end;
+        self.landing = Some(end);
+        self.jets(cues);
+        self.booster(cues);
+        cues.push(ShipCue::DemoSound { demo: TAKEOFF_DEMO, cmd: TAKEOFF_DEMO_SOUNDS[0].1 });
+    }
+
+    /// Whether the ship is landing.
+    pub fn landing(&self) -> bool {
+        self.landing.is_some()
+    }
+
+    /// The flames go out where they lit on the way up (the motion's key 0).
+    fn touchdown_frame(&self) -> f32 {
+        let info = self.ship.get(self.ctx[0].motion);
+        let key = info.and_then(|i| i.event_keys.iter().find(|k| k.event == 1 && k.value == 0));
+        key.map_or(0.0, |k| k.frame as f32)
     }
 
     /// Whether the ship is taking off.
@@ -501,6 +540,24 @@ impl ShipAnimator {
     /// One frame of `dt` seconds: `UfoItem::update`'s `updateAnimation`, the lights
     /// (`LightAnimator::update`) and the parts (`renderParts`).
     pub fn update(&mut self, dt: f32, cues: &mut Vec<ShipCue>) {
+        if let Some(left) = self.landing {
+            let now = (left - SPEED * dt).max(0.0);
+            let down = self.touchdown_frame();
+            if left > down && now <= down {
+                cues.push(ShipCue::StopAttached);
+                if !self.broken {
+                    cues.push(ShipCue::Effect { fx: effects::ROCKET_LAND, lift: 0.0, normal: None });
+                }
+            }
+            self.ctx[0].frame = now;
+            if now <= 0.0 {
+                self.landing = None;
+                cues.push(ShipCue::EndDemoSound);
+                self.stand(cues);
+            } else {
+                self.landing = Some(now);
+            }
+        }
         if let Some(t) = self.takeoff_time.as_mut() {
             let step = SPEED * dt;
             for (at, cmd) in TAKEOFF_DEMO_SOUNDS {

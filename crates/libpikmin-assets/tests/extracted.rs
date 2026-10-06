@@ -313,9 +313,28 @@ fn ship_takes_off_with_its_level_s_motion_and_flames() {
     assert!(!cues.iter().any(|c| matches!(c, ShipCue::JointEffect { joint: 48, .. })), "no right one");
     assert!(cues.contains(&ShipCue::DemoSound { demo: 32, cmd: 1 }));
 
+    // Landing: the take off backwards, flames on until it's down.
     cues.clear();
     s.land(&on_board, 3, &mut cues);
-    assert!(!s.taking_off());
+    assert!(!s.taking_off() && s.landing());
+    assert_eq!(s.context(0), (motion::TAKEOFF[2], 398.0));
+    assert_eq!(cues.iter().filter(|c| matches!(c, ShipCue::Attached { .. })).count(), 8);
+    for _ in 0..30 {
+        s.update(1.0 / 30.0, &mut cues);
+    }
+    assert!((367.0..369.0).contains(&s.context(0).1), "going backwards: {:?}", s.context(0));
+    assert!(!cues.contains(&ShipCue::StopAttached));
+    for _ in 0..360 {
+        s.update(1.0 / 30.0, &mut cues);
+    }
+    assert!(cues.contains(&ShipCue::StopAttached), "flames out at touchdown");
+    assert!(cues.iter().any(|c| matches!(c, ShipCue::Effect { .. })), "landing dust");
+    assert!(!cues.contains(&ShipCue::Sound("SE_UFO_IDLING")), "not humming before it's down");
+    for _ in 0..30 {
+        s.update(1.0 / 30.0, &mut cues);
+    }
+    assert!(!s.landing());
     assert_eq!(s.context(0), (motion::WAIT, 0.0));
+    assert!(cues.contains(&ShipCue::EndDemoSound));
     assert!(cues.contains(&ShipCue::Sound("SE_UFO_IDLING")));
 }

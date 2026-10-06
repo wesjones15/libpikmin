@@ -456,8 +456,6 @@ struct ShipView {
     /// Onions (maybe the ship) a pellet reached this frame, and ship parts that went in.
     arrivals: Vec<OnionId>,
     collected: Vec<(u32, u32)>,
-    /// Onions (maybe the ship) back on the ground this frame.
-    landed: Vec<OnionId>,
     /// Gone after taking off.
     away: bool,
     /// Running flames: their slot and the collision sphere they follow.
@@ -497,7 +495,6 @@ impl ShipView {
             started: false,
             arrivals: Vec::new(),
             collected: Vec::new(),
-            landed: Vec::new(),
             away: false,
             flames: Vec::new(),
         })
@@ -685,11 +682,6 @@ impl Scene3d {
                     s.collected.push((*part, *total));
                 }
             }
-            Event::OnionLanded { onion } => {
-                if let Some(s) = self.ship.as_mut() {
-                    s.landed.push(*onion);
-                }
-            }
             // `Piki::doKill`: the ghost rises from where it died.
             Event::PikiGone { pos, .. } => {
                 if let Some(fx) = self.effects.as_mut() {
@@ -802,8 +794,8 @@ impl Scene3d {
                 sv.started = true;
                 sv.anim.start(&ship.parts, level, &mut cues);
             }
-            // The next day (`UfoItem::startAI`).
-            if std::mem::take(&mut sv.landed).contains(&o.id) {
+            // Coming back: the take off backwards (see `ShipAnimator::land`).
+            if matches!(o.anim, OnionAnim::Landing { .. }) && sv.away {
                 sv.anim.land(&ship.parts, level, &mut cues);
                 sv.away = false;
             }
@@ -888,6 +880,17 @@ impl Scene3d {
                     }
                     ShipCue::DemoSound { demo, cmd } => {
                         self.demo_sounds.push(Some((demo, cmd)));
+                        continue;
+                    }
+                    ShipCue::EndDemoSound => {
+                        self.demo_sounds.push(None);
+                        continue;
+                    }
+                    ShipCue::StopAttached => {
+                        sv.flames.clear();
+                        if let Some(e) = self.effects.as_mut() {
+                            e.detach_where(|k| k & !0xFF == SHIP_FX);
+                        }
                         continue;
                     }
                     ShipCue::Attached { fx, sphere: id, normal, slot } => {
