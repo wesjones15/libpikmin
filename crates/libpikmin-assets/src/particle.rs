@@ -52,6 +52,31 @@ pub mod effects {
     /// (`NaviFue::emit`).
     pub const WHISTLE_CIRCLE: EffectDef =
         EffectDef { pcr: "effects/pcr/g_curs00.pcr", tex: "effects/tex/g_cursor.bti", child_tex: None };
+
+    const fn one(pcr: &'static str, tex: &'static str) -> EffectDef {
+        EffectDef { pcr, tex, child_tex: None }
+    }
+    /// `EFF_Rocket_C`: sparkles over the ship when it powers up (`UfoItem::startLevelFlag`).
+    pub const ROCKET_C: EffectDef = one("effects/pcr/rkt_c.pcr", "effects/tex/star4_i.bti");
+    /// `EFF_Rocket_Complete1/2`: the same at the last level.
+    pub const ROCKET_COMPLETE: [EffectDef; 2] = [
+        one("effects/pcr/r_cpl01.pcr", "effects/tex/ov_cloud.bti"),
+        one("effects/pcr/r_cpl02.pcr", "effects/tex/star4_i.bti"),
+    ];
+    /// `EFF_Rocket_Gep`: a puff where a part goes in (`UfoItem::finishSuck`).
+    pub const ROCKET_GEP: EffectDef = one("effects/pcr/rct_gep.pcr", "effects/tex/hokori4.bti");
+    /// `EFF_UfoPart_ASN01/02`: sparkles as a part fits itself on (its Appear motion's keys).
+    pub const UFO_PART_ASSIGN: [EffectDef; 2] = [
+        one("effects/pcr/asn01.pcr", "effects/tex/star4_i.bti"),
+        one("effects/pcr/asn02.pcr", "effects/tex/star4_i.bti"),
+    ];
+    /// `EFF_Rocket_Nke1/2`: debris and dust as the broken ship shudders (`kiso_t`'s keys).
+    pub const ROCKET_NKE: [EffectDef; 2] = [
+        one("effects/pcr/rct_nke1.pcr", "effects/tex/iwa_1_32.bti"),
+        one("effects/pcr/rct_nke2.pcr", "effects/tex/hokori4.bti"),
+    ];
+    /// `EFF_CloudOfDust_1`
+    pub const CLOUD_OF_DUST_1: EffectDef = one("effects/pcr/kch_kem1.pcr", "effects/tex/hokori4.bti");
 }
 
 /// `PTCLFLAG_*` (zen/particle.h).
@@ -475,6 +500,8 @@ pub struct Generator {
     pub oriented_normal: Vec3,
     /// `setOrientedConstZAxis`: keep each particle's normal fixed when drawing oriented.
     pub fixed_normal: bool,
+    /// `mEmitDir`, from the file until `setEmitDir` changes it.
+    pub emit_dir: Vec3,
     pub particles: Vec<Particle>,
     pub children: Vec<Child>,
     partial: f32,
@@ -489,6 +516,7 @@ pub struct Generator {
 impl Generator {
     pub fn new(pcr: Arc<Pcr>, pos: Vec3, seed: u32) -> Self {
         Generator {
+            emit_dir: pcr.emit_dir,
             pcr,
             emit_pos: pos,
             emit_vel: Vec3::ZERO,
@@ -577,7 +605,7 @@ impl Generator {
 
     /// `PtclsGen`: a new particle's position and velocity from the emitter shape.
     fn spawn(&mut self, pcr: &Pcr, life: i32) -> Particle {
-        let dir = pcr.emit_dir.try_normalize().unwrap_or_else(|| self.arbit_unit());
+        let dir = self.emit_dir.try_normalize().unwrap_or_else(|| self.arbit_unit());
         let init_vel = pcr.init_vel.at(self.frame, pcr.max_frame as f32);
         let b = pcr.radius.at(self.frame, pcr.max_frame as f32);
         let c = pcr.radius_scale * b;

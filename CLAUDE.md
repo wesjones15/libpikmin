@@ -21,9 +21,9 @@ Workspace:
 - `crates/libpikmin/`: core sim. No Elden Ring or libsm64 types.
 - `crates/libpikmin-assets/`: first-run extractor (pure Rust: .iso/.gcm/.ciso → `assets/`, no
   Python or dtk) and loaders for models, textures, animations and particle effects (`.pcr`, run
-  by a port of `zen::particleGenerator`), the ship and its 30 parts (`ship.rs`), and the 2D
-  screens and font (`screen.rs`: P2D `.blo`, `bigFont.bti`). Renderer-agnostic: triangle
-  batches, RGBA images, posed joint matrices. Hosts call `Assets::discover_or_extract` at startup.
+  by a port of `zen::particleGenerator`), the ship and its 30 parts (`ship.rs`, with a port of
+  the ship's and parts' animators), and the 2D screens and font (`screen.rs`: P2D `.blo`,
+  `bigFont.bti`). Renderer-agnostic: triangle batches, RGBA images, posed joint matrices. Hosts call `Assets::discover_or_extract` at startup.
 - `crates/libpikmin-audio/`: Pikmin 1's sound system (JAudio 1) ported from `src/jaudio/`: the BMS
   sequencer, instruments/envelopes, 64 DSP voices and a resampling mixer, plus the game layer
   (system/Olimar SE, positional events, BGM mixes, `SeSystem`). Renders PCM; hosts own the audio

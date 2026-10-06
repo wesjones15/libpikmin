@@ -33,6 +33,14 @@ const SOUNDS: &[&str] = &[
     "SE_PIKI_GROW2",
     "SE_PIKI_GROW5",
     "SE_PIKI_DEAD",
+    "SE_UFO_DESTROY",
+    "SE_UFO_IDLING",
+    "SE_UFO_LIGHT",
+    "SE_UFO_LIGHT2",
+    "SE_UFO_ENGINE",
+    "SE_UFO_RADER",
+    "SE_UFO_ANTENNA",
+    "SE_UFO_SATELLITE",
 ];
 
 fn write_wav(path: &std::path::Path, rate: u32, samples: &[f32]) {
@@ -120,6 +128,10 @@ fn main() {
             }
         }
         stats(name, &v);
+        // Still sounding in the last half second: a loop (or a long tail).
+        let tail = &v[v.len().saturating_sub(DAC_RATE as usize / 2 * 2)..];
+        let rms = (tail.iter().map(|x| x * x).sum::<f32>() / tail.len().max(1) as f32).sqrt();
+        println!("  tail rms {rms:.4}");
         write_wav(&out.join(format!("{name}.wav")), DAC_RATE as u32, &v);
     }
 }

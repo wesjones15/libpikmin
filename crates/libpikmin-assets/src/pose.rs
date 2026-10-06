@@ -52,6 +52,34 @@ impl Skeleton {
         }
     }
 
+    /// Which override drives each joint: `BaseShape::overrideAnim(joint, ctx)` points a
+    /// joint and everything under it at a context, applied in the order given, so later ones
+    /// win. Joint `i` gets the index into `joints` of the last override covering it (0 when
+    /// none does).
+    pub fn override_map(&self, joints: &[usize]) -> Vec<usize> {
+        let mut map = vec![0; self.parents.len()];
+        for (ctx, &root) in joints.iter().enumerate() {
+            for j in self.subtree(root) {
+                map[j] = ctx;
+            }
+        }
+        map
+    }
+
+    /// `root` and every joint under it.
+    pub fn subtree(&self, root: usize) -> Vec<usize> {
+        let mut inside = vec![false; self.parents.len()];
+        let mut out = Vec::new();
+        for (i, &p) in self.parents.iter().enumerate() {
+            let under = i == root || (p >= 0 && (p as usize) < i && inside[p as usize]);
+            if under && i >= root {
+                inside[i] = true;
+                out.push(i);
+            }
+        }
+        out
+    }
+
     pub fn len(&self) -> usize {
         self.parents.len()
     }
@@ -77,8 +105,14 @@ impl Skeleton {
     /// World matrices for every joint. Joints the animation has no track for keep their
     /// bind pose.
     pub fn pose(&self, root: Mat4, anim: Option<(&Anim, f32)>) -> Pose {
+        self.pose_by(root, |_| anim)
+    }
+
+    /// Like [`pose`](Self::pose) with each joint's animation and frame chosen by `anim`
+    /// (`BaseShape::updateAnim` reads joint `i` from `mAnimOverrides[i]`).
+    pub fn pose_by<'a>(&self, root: Mat4, anim: impl Fn(usize) -> Option<(&'a Anim, f32)>) -> Pose {
         let joints = Self::world(&self.parents, root, |i| {
-            anim.and_then(|(a, f)| a.sample(i, f)).unwrap_or(self.bind[i])
+            anim(i).and_then(|(a, f)| a.sample(i, f)).unwrap_or(self.bind[i])
         });
         let envelopes = self
             .envelopes

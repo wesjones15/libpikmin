@@ -179,7 +179,7 @@ pub fn parse_bundle(data: &[u8]) -> Result<Vec<Anim>, Error> {
 }
 
 /// One `AnimInfo` from an AnimMgr file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AnimInfo {
     /// File name relative to [`AnimMgr::base_path`].
     pub name: String,

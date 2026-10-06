@@ -253,8 +253,19 @@ impl Effects {
         Some(Effects {
             beam,
             circle: Def::load(assets, effects::WHISTLE_CIRCLE)?,
-            extra: [effects::PIKI_DEAD_SOUL]
-                .into_iter()
+            extra: [
+                effects::PIKI_DEAD_SOUL,
+                effects::ROCKET_C,
+                effects::ROCKET_COMPLETE[0],
+                effects::ROCKET_COMPLETE[1],
+                effects::ROCKET_GEP,
+                effects::UFO_PART_ASSIGN[0],
+                effects::UFO_PART_ASSIGN[1],
+                effects::ROCKET_NKE[0],
+                effects::ROCKET_NKE[1],
+                effects::CLOUD_OF_DUST_1,
+            ]
+            .into_iter()
                 .filter_map(|d| Some((d, Def::load(assets, d)?)))
                 .collect(),
             oneshots: Vec::new(),
@@ -271,13 +282,12 @@ impl Effects {
         Generator::new(pcr.clone(), pos, self.seed)
     }
 
-    /// `EffectMgr::create` for a one-shot effect at `pos`.
-    pub fn spawn(&mut self, def: EffectDef, pos: Vec3) {
-        let Some(pcr) = self.extra.iter().find(|(d, _)| *d == def).map(|(_, x)| x.pcr.clone()) else {
-            return;
-        };
+    /// `EffectMgr::create` for a one-shot effect at `pos`; the generator, to set up further.
+    pub fn spawn(&mut self, def: EffectDef, pos: Vec3) -> Option<&mut Generator> {
+        let pcr = self.extra.iter().find(|(d, _)| *d == def).map(|(_, x)| x.pcr.clone())?;
         let g = self.generator(&pcr, pos);
         self.oneshots.push(g);
+        self.oneshots.last_mut()
     }
 
     /// Starts, moves, steps and stops each captain's whistle effects.

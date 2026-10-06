@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use glam::{Mat4, Vec3 as GVec3};
 use libpikmin::captain::{ThrowState, WhistleState};
-use libpikmin::onion::{OnionAnim, PluckPhase};
+use libpikmin::onion::{OnionAnim, OnionId, PluckPhase};
 use libpikmin::piki::AttackMode;
 use libpikmin::{
     CaptainId, Event, Params, PelletState, PikiColor, PikiState, Sim, SproutState, Vec2, Vec3,
@@ -21,6 +21,7 @@ use libpikmin::{
 use libpikmin_assets::model::{TexAttr, mat_flags};
 use libpikmin_assets::motion::Motion;
 use libpikmin_assets::pose::srt_matrix;
+use libpikmin_assets::ship::ShipAnimator;
 use libpikmin_assets::{Anim, AnimSet, Assets, Batch, Blend, Model, Skeleton, paths};
 use macroquad::miniquad::TextureWrap;
 use macroquad::prelude::{
@@ -215,6 +216,18 @@ fn draw_model(
     ctx: &mut Ctx,
 ) -> Vec<Mat4> {
     let pose = gm.skel.pose(root, anim);
+    draw_pose(gm, pose, look, &|_| look.color_frame, ctx)
+}
+
+/// Draws a model in `pose`, with each material's colour animations at `frame(material)`
+/// (`ShapeDynMaterials` lets parts of a model animate their materials apart).
+fn draw_pose(
+    gm: &GpuModel,
+    pose: libpikmin_assets::Pose,
+    look: Look,
+    frame: &dyn Fn(usize) -> Option<f32>,
+    ctx: &mut Ctx,
+) -> Vec<Mat4> {
     let colors: Vec<[u8; 4]> = gm
         .model
         .materials
@@ -222,7 +235,7 @@ fn draw_model(
         .enumerate()
         .map(|(i, m)| match look.tint0 {
             Some(t) if i == 0 => t,
-            _ => m.color_at(look.color_frame),
+            _ => m.color_at(frame(i)),
         })
         .collect();
 
@@ -259,7 +272,7 @@ fn draw_model(
             let m = &gm.model.materials[b.material];
             let info = m.tev_info.and_then(|t| gm.model.tev_infos.get(t));
             let mut regs = info
-                .map(|t| t.regs.each_ref().map(|r| r.color_at(look.color_frame)))
+                .map(|t| t.regs.each_ref().map(|r| r.color_at(frame(b.material))))
                 .unwrap_or([[255.0; 4]; 3]);
             if let Some(c) = look.reg0 {
                 regs[0][..3].copy_from_slice(&[c[0] as f32, c[1] as f32, c[2] as f32]);
@@ -417,11 +430,68 @@ struct SproutTrack {
     motion: PikiHeadMotion,
 }
 
-/// A ship part's model, its file name (for the ship joint) and `PelletConfig` p10 scale.
+/// A ship part's model, its file name (for the ship joint), `PelletConfig` p10 scale, and
+/// its animations with the joints its upper animator drives (`PelletShapeObject`: the subtree
+/// under `mOverrideJoint`).
 pub struct ShipPartModel {
     model: GpuModel,
     pub file: String,
     pub scale: f32,
+    anims: Option<AnimSet>,
+    override_joint: i32,
+    upper: Vec<bool>,
+}
+
+/// The S.S. Dolphin's model, animations and animation state.
+struct ShipView {
+    model: GpuModel,
+    anims: AnimSet,
+    /// Which `UfoAnimator` context drives each joint.
+    ctx_of_joint: Vec<usize>,
+    /// Which level light animates each material (`LightAnimator`'s `ShapeDynMaterials`).
+    light_of_material: Vec<Option<usize>>,
+    anim: ShipAnimator,
+    started: bool,
+    /// Onions (maybe the ship) a pellet reached this frame, and ship parts that went in.
+    arrivals: Vec<OnionId>,
+    collected: Vec<(u32, u32)>,
+}
+
+impl ShipView {
+    fn load(assets: &Assets, parts: &[Option<ShipPartModel>]) -> Option<Self> {
+        use libpikmin_assets::ship;
+        let model = GpuModel::load(assets, ship::SHIP_MODEL).ok()?;
+        let anims = AnimSet::load(assets, ship::SHIP_ANIM_MGR, ship::SHIP_BUNDLE).ok()?;
+        let ctx_of_joint = model.skel.override_map(&ship::CONTEXT_JOINTS);
+        let mut light_of_material = vec![None; model.model.materials.len()];
+        for (l, &root) in ship::LIGHT_JOINTS.iter().enumerate() {
+            for j in model.skel.subtree(root) {
+                for &(m, _) in &model.model.joints[j].matpolys {
+                    if let Some(slot) = light_of_material.get_mut(m as usize) {
+                        *slot = Some(l);
+                    }
+                }
+            }
+        }
+        let part_mgrs = parts
+            .iter()
+            .map(|p| {
+                let p = p.as_ref()?;
+                Some((p.anims.as_ref()?.mgr.clone(), p.override_joint >= 0))
+            })
+            .collect();
+        let anim = ShipAnimator::new(&anims.mgr, part_mgrs);
+        Some(ShipView {
+            model,
+            anims,
+            ctx_of_joint,
+            light_of_material,
+            anim,
+            started: false,
+            arrivals: Vec::new(),
+            collected: Vec::new(),
+        })
+    }
 }
 
 /// Loads every ship part's model (`pelAnim.bin` → `objects/<folder>/<file>.mod`).
@@ -443,7 +513,21 @@ fn ship_part_models(assets: &Assets) -> Vec<Option<ShipPartModel>> {
             let info = infos.iter().find(|i| i.id == *id)?;
             let model = GpuModel::load(assets, &info.model()).ok()?;
             let scale = libpikmin::pellet_config::find(&configs, id).map_or(1.0, |c| c.scale);
-            Some(ShipPartModel { model, file: info.file.clone(), scale })
+            let anims = AnimSet::load(assets, &info.anim_mgr(), &info.bundle()).ok();
+            let mut upper = vec![false; model.skel.len()];
+            if info.override_joint >= 0 {
+                for j in model.skel.subtree(info.override_joint as usize) {
+                    upper[j] = true;
+                }
+            }
+            Some(ShipPartModel {
+                model,
+                file: info.file.clone(),
+                scale,
+                anims,
+                override_joint: info.override_joint,
+                upper,
+            })
         })
         .collect()
 }
@@ -464,7 +548,11 @@ pub struct Scene3d {
     /// The whistle's particles.
     effects: Option<Effects>,
     /// The S.S. Dolphin (`ufo0705`) and its animations.
-    ship: Option<(GpuModel, AnimSet)>,
+    ship: Option<ShipView>,
+    /// Ship sounds to start (true) or stop this frame (`playEventSound(ufo, ...)`).
+    pub ship_sounds: Vec<(OnionId, &'static str, bool)>,
+    /// The game is paused (a message is up): the ship's animations hold.
+    pub paused: bool,
     /// Ship part models by part index (`_ufoIDTable`), with their file names
     /// (`pelAnim.bin`) and `PelletConfig` scale.
     parts: Vec<Option<ShipPartModel>>,
@@ -497,6 +585,7 @@ pub struct Scene3d {
 impl Scene3d {
     pub fn load(assets: &Assets) -> Result<Self, libpikmin_assets::Error> {
         let m = |p: &str| GpuModel::load(assets, p);
+        let parts = ship_part_models(assets);
         let ground = {
             // A procedural grass checker (not game data).
             let n = 64usize;
@@ -528,10 +617,10 @@ impl Scene3d {
             onion: m(paths::ONION)?,
             cursor: m(paths::CURSOR).ok().zip(m(paths::CURSOR_MARKER).ok()),
             effects: Effects::load(assets),
-            ship: m(libpikmin_assets::ship::SHIP_MODEL).ok().zip(
-                AnimSet::load(assets, libpikmin_assets::ship::SHIP_ANIM_MGR, libpikmin_assets::ship::SHIP_BUNDLE).ok(),
-            ),
-            parts: ship_part_models(assets),
+            ship: ShipView::load(assets, &parts),
+            ship_sounds: Vec::new(),
+            paused: false,
+            parts,
             pellets: [
                 m(paths::PELLETS[0])?,
                 m(paths::PELLETS[1])?,
@@ -571,6 +660,16 @@ impl Scene3d {
         match e {
             Event::Thrown { captain, .. } => {
                 self.throw_timer.insert(*captain, 9.0 / 30.0);
+            }
+            Event::PelletArrived { onion, .. } => {
+                if let Some(s) = self.ship.as_mut() {
+                    s.arrivals.push(*onion);
+                }
+            }
+            Event::ShipPartCollected { part, total, .. } => {
+                if let Some(s) = self.ship.as_mut() {
+                    s.collected.push((*part, *total));
+                }
             }
             // `Piki::doKill`: the ghost rises from where it died.
             Event::PikiGone { pos, .. } => {
@@ -668,28 +767,89 @@ impl Scene3d {
             to_eye: -GVec3::new(d.x, d.y, d.z).normalize_or_zero(),
         };
 
-        // The ship: `UfoItem` idles on `kiso` (`UfoMotion::Wait`), or `kiso_t`
-        // (`WaitTutorial`) while broken. Exterior and attached parts on board sit on their
-        // `null_<part>` joints (`PlayerState::UfoParts`).
-        for (i, o) in sim.onions().iter().enumerate() {
-            let (Some(ship), Some((gm, anims))) = (o.ship.as_ref(), self.ship.as_ref()) else { continue };
-            let motion = if ship.parts.is_empty() { 0 } else { 1 };
-            let key = (6u64 << 40) | i as u64;
-            let anim = advance_index(&mut self.players, key, anims, motion, Clock::Loop(30.0), dt);
+        // The ship (`UfoItem`): eight animation contexts each drive part of its skeleton
+        // (`UfoAnimator`), the level lights animate their materials (`LightAnimator`), and the
+        // parts on board play their own motions on their `null_<part>` joints
+        // (`PlayerState::renderParts`).
+        if let Some(sv) = self.ship.as_mut()
+            && let Some(o) = sim.onions().iter().find(|o| o.ship.is_some())
+            && let Some(ship) = o.ship.as_ref()
+        {
+            use libpikmin_assets::ship::{ShipCue, ship_joint};
+            let mut cues = Vec::new();
+            if !sv.started {
+                sv.started = true;
+                sv.anim.start(&ship.parts, params.ai.ship_level(ship.parts.len() as u32), &mut cues);
+            }
             let yaw = {
                 let d = ship.goal - o.pos;
                 d.x.atan2(d.z)
             };
-            let root = srt_matrix(GVec3::ONE, GVec3::new(0.0, yaw, 0.0), o.pos);
-            let joints = draw_model(gm, root, anim, Look::default(), &mut ctx);
-            for &part in &ship.parts {
-                let Some(Some(pm)) = self.parts.get(part as usize) else { continue };
-                if part >= 16 {
-                    continue; // `naka` parts go inside
+            // `UfoItem::suckMe` when a part reaches the ship.
+            for onion in std::mem::take(&mut sv.arrivals) {
+                if onion == o.id {
+                    sv.anim.suck_start();
                 }
-                let Some(j) = gm.model.joint_index(&libpikmin_assets::ship::ship_joint(&pm.file)) else { continue };
-                if let Some(&jm) = joints.get(j) {
-                    draw_model(&pm.model, jm, None, Look::default(), &mut ctx);
+            }
+            for (part, total) in std::mem::take(&mut sv.collected) {
+                sv.anim.suck_finish(part as usize, params.ai.ship_level(total), &mut cues);
+                // `finishSuck`: a puff where it went in, blown the way the ship faces.
+                if let Some(fx) = self.effects.as_mut()
+                    && let Some(g) = fx.spawn(libpikmin_assets::particle::effects::ROCKET_GEP, o.suck_pos())
+                {
+                    g.emit_dir = GVec3::new(yaw.sin(), 0.0, yaw.cos());
+                }
+            }
+            sv.anim.update(if self.paused { 0.0 } else { dt }, &mut cues);
+
+            let root = srt_matrix(GVec3::ONE, GVec3::new(0.0, yaw, 0.0), o.pos);
+            let (anim, anims, map) = (&sv.anim, &sv.anims, &sv.ctx_of_joint);
+            let pose = sv.model.skel.pose_by(root, |j| {
+                let (m, f) = anim.context(map.get(j).copied().unwrap_or(0));
+                let (_, a) = anims.get(m)?;
+                Some((a, f.clamp(0.0, a.frames.saturating_sub(1) as f32)))
+            });
+            let lights = &sv.light_of_material;
+            let frame = |m: usize| Some(lights.get(m).copied().flatten().map_or(0.0, |l| anim.light_frame(l)));
+            let joints = draw_pose(&sv.model, pose, Look::default(), &frame, &mut ctx);
+            let part_joint = |part: usize| {
+                let pm = self.parts.get(part)?.as_ref()?;
+                joints.get(sv.model.model.joint_index(&ship_joint(&pm.file))?).copied()
+            };
+            for &part in &ship.parts {
+                let (Some(pa), Some(jm)) = (anim.part(part as usize), part_joint(part as usize)) else { continue };
+                let Some(Some(pm)) = self.parts.get(part as usize) else { continue };
+                let pose = match pm.anims.as_ref() {
+                    Some(set) => pm.model.skel.pose_by(jm, |k| {
+                        let p = if pm.upper.get(k).copied().unwrap_or(false) { pa.upper.as_ref()? } else { &pa.lower };
+                        let (_, a) = set.get(p.motion)?;
+                        Some((a, p.frame.clamp(0.0, a.frames.saturating_sub(1) as f32)))
+                    }),
+                    None => pm.model.skel.pose(jm, None),
+                };
+                draw_pose(&pm.model, pose, Look::default(), &|_| None, &mut ctx);
+            }
+            for c in cues {
+                let (fx, at, normal) = match c {
+                    ShipCue::Sound(name) => {
+                        self.ship_sounds.push((o.id, name, true));
+                        continue;
+                    }
+                    ShipCue::StopSound(name) => {
+                        self.ship_sounds.push((o.id, name, false));
+                        continue;
+                    }
+                    ShipCue::Effect { fx, lift, normal } => (fx, o.pos + GVec3::Y * lift, normal),
+                    ShipCue::PartEffect { fx, part } => {
+                        let Some(jm) = part_joint(part) else { continue };
+                        (fx, jm.w_axis.truncate(), None)
+                    }
+                };
+                if let Some(e) = self.effects.as_mut()
+                    && let Some(g) = e.spawn(fx, at)
+                    && let Some(n) = normal
+                {
+                    g.oriented_normal = n;
                 }
             }
         }

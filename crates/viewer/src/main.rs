@@ -20,7 +20,7 @@
 //! start (autoplay then throws at the corpses), `PIKMIN_WHISTLE=1` holds the whistle and
 //! `PIKMIN_DIE=n` kills n of the active squad at the start (for the ghosts);
 //! `PIKMIN_PART_TEXT=i` opens ship part i's description; `PIKMIN_SHIP_PARTS=n` puts parts
-//! 0..n on the ship.
+//! 0..n on the ship and `PIKMIN_DELIVER=i` plays part i arriving at it.
 
 use std::path::PathBuf;
 
@@ -162,13 +162,6 @@ fn ship_part_desc(assets: &libpikmin_assets::Assets, params: &Params, part: u32,
     })
 }
 
-/// `PlayerState::getNextPowerupNumber`: parts still needed for the next ship level.
-fn parts_to_next_level(params: &Params, total: u32) -> i32 {
-    let a = &params.ai;
-    let counts = [1, a.ufo_level2, a.ufo_level3, a.ufo_level4, a.ufo_level5, 30];
-    let level = counts[..5].iter().filter(|&&c| total as i32 >= c).count();
-    counts[level] - total as i32
-}
 
 fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
     let (params, params_source) = load_params(assets);
@@ -611,8 +604,23 @@ async fn main() {
                 .collect();
             let mut numbers = [0; 10];
             numbers[2] = 1;
-            numbers[5] = parts_to_next_level(g.sim.params(), 1);
+            numbers[5] = g.sim.params().ai.parts_to_next_level(1);
             msg = Some(message::Message::new(pages, numbers));
+        }
+        // `PIKMIN_DELIVER=i`: part i reaches the ship at frame 10 and goes in at frame 400 (a
+        // couple of seconds, like a real delivery's wait and suck), as the ship would see it
+        // (no message).
+        if let (Some(i), Some(sc)) = (std::env::var("PIKMIN_DELIVER").ok().and_then(|v| v.parse::<u32>().ok()), scene.as_mut())
+            && let Some(ship) = g.sim.onions().iter().find(|o| o.ship.is_some()).map(|o| o.id)
+        {
+            if frames == 10 {
+                sc.on_event(&Event::PelletArrived { pellet: libpikmin::PelletId(0), onion: ship });
+            }
+            if frames == 400 {
+                g.sim.give_ship_part(ship, i);
+                let total = g.sim.onions()[ship.0 as usize].ship.as_ref().map_or(0, |s| s.parts.len() as u32);
+                sc.on_event(&Event::ShipPartCollected { pellet: libpikmin::PelletId(0), ship, part: i, total });
+            }
         }
         if frames == 1
             && let Some(n) = std::env::var("PIKMIN_DIE").ok().and_then(|v| v.parse::<usize>().ok())
@@ -701,7 +709,7 @@ async fn main() {
                         let mut numbers = [0; 10];
                         numbers[2] = total as i32;
                         numbers[3] = 30 - total as i32;
-                        numbers[5] = parts_to_next_level(g.sim.params(), total);
+                        numbers[5] = g.sim.params().ai.parts_to_next_level(total);
                         msg = Some(message::Message::new(pages, numbers));
                     }
                 }
@@ -717,6 +725,7 @@ async fn main() {
         }
 
         let sprout_sounds = scene.as_mut().map(|sc| std::mem::take(&mut sc.sprout_sounds)).unwrap_or_default();
+        let ship_sounds = scene.as_mut().map(|sc| std::mem::take(&mut sc.ship_sounds)).unwrap_or_default();
         match audio.as_mut() {
             Some(a) => {
                 let me = g.sim.captain(active);
@@ -726,7 +735,8 @@ async fn main() {
                     None => ::glam::Mat4::look_at_rh(me.pos + ::glam::Vec3::Y * 500.0, me.pos, -::glam::Vec3::Z),
                 };
                 let whistling = matches!(me.whistle, libpikmin::captain::WhistleState::Calling { .. });
-                a.frame(view, me.pos, &g.sim, &mut g.world.tekis, whistling, &sprout_sounds);
+                let scene_sounds = sound::SceneSounds { sprouts: &sprout_sounds, ship: &ship_sounds };
+                a.frame(view, me.pos, &g.sim, &mut g.world.tekis, whistling, scene_sounds);
             }
             None => {
                 for t in g.world.tekis.list.iter_mut() {
@@ -738,6 +748,7 @@ async fn main() {
         // ---- draw ----
         if let Some(sc) = scene.as_mut().filter(|_| view3d) {
             clear_background(Color::from_rgba(150, 190, 225, 255));
+            sc.paused = paused;
             let overlays = sc.draw(&g.sim, active, &g.world.tekis, dt);
             for o in overlays {
                 match o {

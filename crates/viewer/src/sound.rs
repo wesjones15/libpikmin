@@ -37,6 +37,15 @@ fn piki_owner(id: libpikmin::PikiId) -> u64 {
 fn teki_owner(id: libpikmin::host::CreatureId) -> u64 {
     2 << 56 | id
 }
+/// Sounds the 3D scene's animations asked for this frame.
+#[derive(Default, Clone, Copy)]
+pub struct SceneSounds<'a> {
+    /// Sprout animation keys: (parent Onion, value, position).
+    pub sprouts: &'a [(Option<libpikmin::onion::OnionId>, u8, Vec3)],
+    /// The ship's: (ship, sound, start or stop).
+    pub ship: &'a [(libpikmin::onion::OnionId, &'static str, bool)],
+}
+
 fn onion_owner(id: libpikmin::onion::OnionId) -> u64 {
     3 << 56 | id.0 as u64
 }
@@ -135,8 +144,9 @@ impl Audio {
         sim: &Sim,
         tekis: &mut Tekis,
         whistling: bool,
-        sprout_sounds: &[(Option<libpikmin::onion::OnionId>, u8, Vec3)],
+        scene: SceneSounds,
     ) {
+        let SceneSounds { sprouts: sprout_sounds, ship: ship_sounds } = scene;
         let squad = sim.pikis().iter().filter(|p| p.captain.is_some()).count();
         let whistle_started = whistling && !self.whistling;
         let whistle_stopped = self.whistling && !whistling;
@@ -187,6 +197,14 @@ impl Audio {
                         }
                     }
                     None => {}
+                }
+            }
+            // The ship's animation sounds (`UfoItem` and `PlayerState::UfoParts`).
+            for &(ship, name, play) in ship_sounds {
+                if play {
+                    s.play_from(onion_owner(ship), name, onions.get(ship.0 as usize).copied().unwrap_or_default());
+                } else {
+                    s.stop_from(onion_owner(ship), name);
                 }
             }
             for (owner, base, i, pos) in teki_sounds {

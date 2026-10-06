@@ -11,6 +11,7 @@ pub mod disc;
 pub mod extract;
 pub mod model;
 pub mod motion;
+pub mod pani;
 pub mod particle;
 pub mod pose;
 pub mod screen;

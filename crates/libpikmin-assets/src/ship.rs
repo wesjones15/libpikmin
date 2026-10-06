@@ -12,6 +12,9 @@
 //!   `bloFile_PartsInfo_*`, ogTutorialData.cpp). The Main Engine's discovery is `tu_tx14.blo`.
 
 use crate::Error;
+use crate::anim::{AnimInfo, AnimMgr};
+use crate::pani::{KeyEvent, PaniPlayer};
+use crate::particle::effects;
 use crate::reader::Reader;
 
 /// `_ufoIDTable`: part ids in index order.
@@ -130,6 +133,422 @@ pub fn parse_pel_anim(data: &[u8]) -> Result<Vec<PelletAnimInfo>, Error> {
 /// The part's joint on the ship (`ufo0705.h`: `null_<file>`), for exterior and attached parts.
 pub fn ship_joint(file: &str) -> String {
     format!("null_{file}")
+}
+
+/// `UfoShapeObject`: the joints whose subtrees each of the ship's 8 animation contexts drives,
+/// in the order they're overridden (later ones win; 37 sits under 36).
+pub const CONTEXT_JOINTS: [usize; 8] = [0, 38, 36, 19, 32, 37, 29, 53];
+/// `UfoItem::UfoItem`: the joints whose materials the 4 level lights animate
+/// (`instanceMaterials`).
+pub const LIGHT_JOINTS: [usize; 4] = [15, 52, 51, 40];
+
+/// `UfoMotion` (PaniAnimator.h): AnimMgr indices in `ufo0705.bin`.
+pub mod motion {
+    pub const WAIT_TUTORIAL: usize = 0;
+    pub const WAIT: usize = 1;
+    pub const HENKA1: usize = 3;
+    pub const HENKA4B: usize = 10;
+    pub const OPEN_CLOSE: usize = 16;
+}
+
+/// `PelletMotion` (PaniAnimator.h): AnimMgr indices in a part's `<file>.bin`.
+pub mod part_motion {
+    pub const CARRY: usize = 0;
+    pub const APPEAR: usize = 1;
+    pub const AFTER: usize = 2;
+    pub const PISTON: usize = 3;
+    pub const SPECIAL: usize = 4;
+}
+
+/// Something the ship's animations ask the host to do.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShipCue {
+    /// `playEventSound(ufo, ...)`
+    Sound(&'static str),
+    /// Stop a sound the ship is playing.
+    StopSound(&'static str),
+    /// `effectMgr->create` at the ship's position raised by `lift`, with
+    /// `setOrientedNormalVector(normal)` when given.
+    Effect {
+        fx: crate::particle::EffectDef,
+        lift: f32,
+        normal: Option<glam::Vec3>,
+    },
+    /// An effect where part `part` sits on the ship (`UfoParts::mRepairEffectPosition`).
+    PartEffect { fx: crate::particle::EffectDef, part: usize },
+}
+
+/// One part's animation once it's on the ship (`PlayerState::UfoParts`): the lower animator
+/// drives the whole model, the upper (`PelletMotionFlags::UsePiston`) the subtree under its
+/// override joint.
+#[derive(Debug, Clone)]
+pub struct PartAnim {
+    pub lower: PaniPlayer,
+    pub upper: Option<PaniPlayer>,
+    /// `mMotionSpeed`, the lower animator's; the upper always runs at 30.
+    speed: f32,
+}
+
+/// `UfoItem::LightAnimator`: a frame for the level lights' material animations.
+#[derive(Debug, Clone, Copy, Default)]
+struct Light {
+    frame: f32,
+    speed: f32,
+    level: u8,
+}
+
+/// The S.S. Dolphin's animation state: `UfoAnimator`'s 8 contexts, the 4 level lights, and
+/// the parts on board. It only animates; the sim decides when parts arrive.
+#[derive(Debug, Clone)]
+pub struct ShipAnimator {
+    ship: Vec<AnimInfo>,
+    /// Per part index: its AnimMgr entries and whether it has an upper animator.
+    part_infos: Vec<Option<(Vec<AnimInfo>, bool)>>,
+    ctx: [PaniPlayer; 8],
+    speed: [f32; 8],
+    /// Context 0 reports keys only when the ship itself started it (`PaniMotionInfo(id, this)`).
+    listening: bool,
+    lights: [Light; 4],
+    pub level: u8,
+    parts: Vec<Option<PartAnim>>,
+    /// `PlayerState::mCurrentRepairingPart`
+    repairing: Option<usize>,
+    /// `isUfoBroken`: no parts on board.
+    broken: bool,
+}
+
+const SPEED: f32 = 30.0;
+
+/// `UfoParts::animationKeyUpdated` picks sounds by these ids.
+const MAIN_ENGINE_ID: &str = "ust5";
+const RADAR_ID: &str = "uf01";
+const SATELLITE_ID: &str = "uf03";
+/// `PlayerState::startSpecialMotions`: the Bowsprit, Whimsical Radar, Interstellar Radio and
+/// Guard Satellite.
+const SPECIAL_IDS: [&str; 4] = ["ust1", "uf01", "uf02", "uf03"];
+
+impl ShipAnimator {
+    /// `ship` is `ufo0705.bin`; `parts[i]` is part `i`'s AnimMgr and whether it has an
+    /// override joint (`PelletAnimInfo::mOverrideJoint != -1`).
+    pub fn new(ship: &AnimMgr, parts: Vec<Option<(AnimMgr, bool)>>) -> Self {
+        let ship = ship.infos.clone();
+        let idle = ship.first().map(|i| PaniPlayer::start(i, motion::WAIT_TUTORIAL));
+        let idle = idle.unwrap_or_else(|| PaniPlayer::start(&AnimInfo::default(), 0));
+        let n = parts.len();
+        ShipAnimator {
+            ctx: std::array::from_fn(|_| idle.clone()),
+            ship,
+            part_infos: parts.into_iter().map(|p| p.map(|(m, upper)| (m.infos, upper))).collect(),
+            speed: [0.0; 8],
+            listening: false,
+            lights: [Light::default(); 4],
+            level: 0,
+            parts: vec![None; n],
+            repairing: None,
+            broken: true,
+        }
+    }
+
+    fn start_ctx(&mut self, i: usize, m: usize) {
+        if let Some(info) = self.ship.get(m) {
+            self.ctx[i] = PaniPlayer::start(info, m);
+        }
+    }
+
+    fn last_frame(&mut self, i: usize) {
+        if let Some(info) = self.ship.get(self.ctx[i].motion) {
+            self.ctx[i].set_last_frame(info);
+        }
+    }
+
+    /// `UfoItem::startAI`: the ship as it stands when the level starts, with `on_board` parts
+    /// already fitted and showing `level`.
+    pub fn start(&mut self, on_board: &[u32], level: u8, cues: &mut Vec<ShipCue>) {
+        let broken = on_board.is_empty();
+        self.broken = broken;
+        self.start_ctx(0, if broken { motion::WAIT_TUTORIAL } else { motion::WAIT });
+        self.listening = false;
+        cues.push(ShipCue::Sound(if broken { "SE_UFO_DESTROY" } else { "SE_UFO_IDLING" }));
+        self.speed = [0.0; 8];
+        for &p in on_board {
+            self.fit(p as usize);
+        }
+        self.level = level;
+        self.light_level(level);
+        self.init_flag_motions(level);
+    }
+
+    /// Puts a part on board, waiting at the start of its Appear motion (`getUfoParts`).
+    /// Returns whether it shows on the ship.
+    fn fit(&mut self, part: usize) -> bool {
+        // `naka` parts have no ship joint (`mRepairAnimJointIndex == -1`) and aren't drawn.
+        if part >= 16 {
+            return false;
+        }
+        let Some(Some((infos, upper))) = self.part_infos.get(part) else { return false };
+        let at = |m: usize| infos.get(m).map(|i| PaniPlayer::start(i, m));
+        let Some(lower) = at(part_motion::APPEAR) else { return false };
+        let upper = if *upper { at(part_motion::PISTON) } else { None };
+        self.parts[part] = Some(PartAnim { lower, upper, speed: 0.0 });
+        true
+    }
+
+    /// `UfoParts::startMotion(lower, upper)` at full speed.
+    fn part_motion(&mut self, part: usize, lower: usize, upper: usize) {
+        let Some(Some((infos, has_upper))) = self.part_infos.get(part) else { return };
+        let Some(p) = self.parts.get_mut(part).and_then(Option::as_mut) else { return };
+        if let Some(i) = infos.get(lower) {
+            p.lower = PaniPlayer::start(i, lower);
+        }
+        if *has_upper && let Some(i) = infos.get(upper) {
+            p.upper = Some(PaniPlayer::start(i, upper));
+        }
+        p.speed = SPEED;
+    }
+
+    /// `PlayerState::startAfterMotions`
+    fn after_motions(&mut self) {
+        for i in 0..self.parts.len() {
+            if self.parts[i].is_some() {
+                self.part_motion(i, part_motion::AFTER, part_motion::AFTER);
+            }
+        }
+    }
+
+    /// `PlayerState::startSpecialMotions` (`startUfoPartsMotion(id, Special, false)`).
+    fn special_motions(&mut self) {
+        for id in SPECIAL_IDS {
+            if let Some(i) = PART_IDS.iter().position(|p| *p == id) {
+                self.part_motion(i, part_motion::SPECIAL, part_motion::SPECIAL);
+            }
+        }
+    }
+
+    /// `UfoItem::lightLevelFlag` / `LightAnimator::start`
+    fn light_level(&mut self, level: u8) {
+        for l in &mut self.lights {
+            l.level = level;
+            l.frame = if level > 0 { (level - 1) as f32 * 20.0 } else { 19.0 };
+            l.speed = if level > 0 { SPEED } else { 0.0 };
+        }
+    }
+
+    /// `UfoAnimator::initFlagMotions`: every level's upgrade motion, those already reached
+    /// shown at their end.
+    fn init_flag_motions(&mut self, level: u8) {
+        for i in 1..8 {
+            self.start_ctx(i, i + 2);
+            self.speed[i] = 0.0;
+        }
+        self.start_flag_motions(level);
+        let done: &[usize] = match level {
+            0 => &[],
+            1 => &[1, 2],
+            2 => &[4, 5, 1, 2],
+            3 => &[7, 3, 4, 5, 1, 2],
+            _ => &[6, 7, 3, 4, 5, 1, 2],
+        };
+        for &i in done {
+            self.last_frame(i);
+        }
+        self.after_motions();
+        if level == 5 {
+            self.special_motions();
+        }
+    }
+
+    /// `UfoAnimator::startFlagMotions`: runs the upgrade motions up to `level`.
+    fn start_flag_motions(&mut self, level: u8) {
+        if level == 0 {
+            for i in 1..8 {
+                self.start_ctx(i, i + motion::HENKA1 - 1);
+                self.speed[i] = 0.0;
+            }
+            return;
+        }
+        if level >= 5 {
+            self.start_ctx(7, motion::HENKA4B);
+            self.special_motions();
+        }
+        let run: &[usize] = match level {
+            1 => &[1, 2],
+            2 => &[4, 5, 1, 2],
+            3 => &[7, 3, 4, 5, 1, 2],
+            _ => &[6, 7, 3, 4, 5, 1, 2],
+        };
+        for &i in run {
+            self.speed[i] = SPEED;
+        }
+    }
+
+    /// `UfoItem::startLevelFlag`: the ship powers up to `level`.
+    pub fn level_up(&mut self, level: u8, cues: &mut Vec<ShipCue>) {
+        self.level = level;
+        self.light_level(level);
+        let normal = Some(glam::Vec3::Z);
+        if level == 5 {
+            for fx in effects::ROCKET_COMPLETE {
+                cues.push(ShipCue::Effect { fx, lift: 0.0, normal });
+            }
+        } else {
+            cues.push(ShipCue::Effect { fx: effects::ROCKET_C, lift: 60.0, normal });
+        }
+        self.start_flag_motions(level);
+    }
+
+    /// `UfoItem::suckMe`: a part starts going in; the ship plays up to its Action0 key.
+    pub fn suck_start(&mut self) {
+        self.start_ctx(0, if self.broken { motion::WAIT_TUTORIAL } else { motion::WAIT });
+        self.listening = true;
+        self.speed[0] = SPEED;
+    }
+
+    /// `UfoItem::finishSuck`: part `part` is in, making the ship `level`. A visible part
+    /// waits to fit itself until the ship's motion ends (`ufoAssignStart`); a new level powers
+    /// the ship up (in the game the upgrade movie does, at its `Henka` event).
+    pub fn suck_finish(&mut self, part: usize, level: u8, cues: &mut Vec<ShipCue>) {
+        let shown = self.fit(part);
+        self.repairing = shown.then_some(part);
+        self.broken = false;
+        self.speed[0] = SPEED;
+        if level != self.level {
+            self.level_up(level, cues);
+        }
+    }
+
+    /// `PlayerState::ufoAssignStart`
+    fn assign_start(&mut self) {
+        if let Some(part) = self.repairing.take() {
+            self.part_motion(part, part_motion::APPEAR, part_motion::PISTON);
+        }
+    }
+
+    /// One frame of `dt` seconds: `UfoItem::update`'s `updateAnimation`, the lights
+    /// (`LightAnimator::update`) and the parts (`renderParts`).
+    pub fn update(&mut self, dt: f32, cues: &mut Vec<ShipCue>) {
+        let mut ev = Vec::new();
+        for i in 0..8 {
+            let Some(info) = self.ship.get(self.ctx[i].motion) else { continue };
+            self.ctx[i].animate(info, self.speed[i] * dt, &mut ev);
+            if i == 0 && self.listening {
+                for e in std::mem::take(&mut ev) {
+                    self.ship_key(e, cues);
+                }
+            }
+            ev.clear();
+        }
+
+        let mut blink = false;
+        for l in &mut self.lights {
+            if l.level == 0 {
+                continue;
+            }
+            let base = 20.0 * (l.level - 1) as f32;
+            l.frame += l.speed * dt;
+            if l.frame >= 20.0 + base - 1.0 {
+                blink = true;
+                l.frame = base;
+            }
+        }
+        if blink {
+            // All four lights play it at once; once is enough.
+            cues.push(ShipCue::Sound(if self.level < 5 { "SE_UFO_LIGHT" } else { "SE_UFO_LIGHT2" }));
+        }
+
+        for part in 0..self.parts.len() {
+            let Some(Some((infos, _))) = self.part_infos.get(part) else { continue };
+            let Some(p) = self.parts[part].as_mut() else { continue };
+            if let Some(info) = infos.get(p.lower.motion) {
+                p.lower.animate(info, p.speed * dt, &mut ev);
+            }
+            // The upper animator has no listener.
+            if let Some(u) = p.upper.as_mut()
+                && let Some(info) = infos.get(u.motion)
+            {
+                u.animate(info, SPEED * dt, &mut Vec::new());
+            }
+            let motion = p.lower.motion;
+            for e in std::mem::take(&mut ev) {
+                self.part_key(part, motion, e, cues);
+            }
+        }
+    }
+
+    /// `UfoItem::animationKeyUpdated` for the motions it reacts to.
+    fn ship_key(&mut self, e: KeyEvent, cues: &mut Vec<ShipCue>) {
+        let m = self.ctx[0].motion;
+        if m != motion::WAIT_TUTORIAL && m != motion::WAIT && m != motion::OPEN_CLOSE {
+            return;
+        }
+        match e {
+            KeyEvent::Action(0) => self.speed[0] = 0.0,
+            KeyEvent::Finished => {
+                if m != motion::OPEN_CLOSE {
+                    self.assign_start();
+                }
+                self.speed[0] = 0.0;
+                // `kiso_t` only shudders and ends as wrecked as it began; in the game the ship
+                // first stands up on `kiso` after the upgrade movie, the next day (`startAI`).
+                // Stand it up here instead.
+                if m == motion::WAIT_TUTORIAL && !self.broken {
+                    self.start_ctx(0, motion::WAIT);
+                    self.listening = false;
+                    cues.push(ShipCue::StopSound("SE_UFO_DESTROY"));
+                    cues.push(ShipCue::Sound("SE_UFO_IDLING"));
+                }
+            }
+            KeyEvent::Effect(0) if m == motion::WAIT_TUTORIAL => {
+                for fx in effects::ROCKET_NKE {
+                    cues.push(ShipCue::Effect { fx, lift: 0.0, normal: None });
+                }
+            }
+            KeyEvent::Effect(2) if m != motion::OPEN_CLOSE => {
+                cues.push(ShipCue::Effect { fx: effects::CLOUD_OF_DUST_1, lift: 0.0, normal: None });
+            }
+            _ => {}
+        }
+    }
+
+    /// `PlayerState::UfoParts::animationKeyUpdated`
+    fn part_key(&mut self, part: usize, motion: usize, e: KeyEvent, cues: &mut Vec<ShipCue>) {
+        let id = PART_IDS.get(part).copied().unwrap_or("");
+        match e {
+            KeyEvent::LoopEnd if motion == part_motion::PISTON => match id {
+                RADAR_ID => cues.push(ShipCue::Sound("SE_UFO_ANTENNA")),
+                SATELLITE_ID => cues.push(ShipCue::Sound("SE_UFO_SATELLITE")),
+                _ => {}
+            },
+            KeyEvent::LoopEnd => {
+                // The Main Engine falls through to the radar's sound as well, as in the game.
+                if id == MAIN_ENGINE_ID {
+                    cues.push(ShipCue::Sound("SE_UFO_ENGINE"));
+                }
+                if id == MAIN_ENGINE_ID || id == RADAR_ID {
+                    cues.push(ShipCue::Sound("SE_UFO_RADER"));
+                }
+            }
+            KeyEvent::Finished => self.part_motion(part, part_motion::AFTER, part_motion::AFTER),
+            KeyEvent::Effect(v) if motion == part_motion::APPEAR && v < 2 => {
+                cues.push(ShipCue::PartEffect { fx: effects::UFO_PART_ASSIGN[v as usize], part });
+            }
+            _ => {}
+        }
+    }
+
+    /// Context `i`'s motion (an AnimMgr index) and frame.
+    pub fn context(&self, i: usize) -> (usize, f32) {
+        (self.ctx[i].motion, self.ctx[i].frame)
+    }
+
+    /// Light `i`'s material animation frame.
+    pub fn light_frame(&self, i: usize) -> f32 {
+        self.lights[i].frame
+    }
+
+    /// Part `part`'s animation if it's showing on the ship.
+    pub fn part(&self, part: usize) -> Option<&PartAnim> {
+        self.parts.get(part)?.as_ref()
+    }
 }
 
 #[cfg(test)]

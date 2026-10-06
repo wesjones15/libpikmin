@@ -258,6 +258,23 @@ parms! {
     }
 }
 
+impl AiParams {
+    /// Parts needed for ship levels 1..5, then all 30 (`getNextPowerupNumber`'s table).
+    fn ufo_levels(&self) -> [i32; 6] {
+        [1, self.ufo_level2, self.ufo_level3, self.ufo_level4, self.ufo_level5, 30]
+    }
+
+    /// `PlayerState::getUfoParts`: the ship's level (0 broken, 5 complete) with `parts` on board.
+    pub fn ship_level(&self, parts: u32) -> u8 {
+        self.ufo_levels()[..5].iter().filter(|&&c| parts as i32 >= c).count() as u8
+    }
+
+    /// `PlayerState::getNextPowerupNumber`: parts still needed for the next level.
+    pub fn parts_to_next_level(&self, parts: u32) -> i32 {
+        self.ufo_levels()[self.ship_level(parts) as usize] - parts as i32
+    }
+}
+
 parms! {
     /// `GameDemo::Parms` (Demo.h, gameDemo.cpp). File: `demo.bin`.
     pub struct DemoParams {

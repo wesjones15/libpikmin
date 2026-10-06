@@ -227,3 +227,59 @@ fn ship_parts_screens_and_font_load() {
     let i = font.glyph(b'i').unwrap();
     assert!(a.advance > i.advance && i.advance > 0, "A {a:?} i {i:?}");
 }
+
+/// The ship's motions through a delivery: it opens up and stops at `kiso_t`'s Action0 key,
+/// carries on when the part is in, then the part fits itself (Appear) and settles into its
+/// After loop while the first upgrade plays and the lights start blinking.
+#[test]
+fn ship_animator_runs_a_delivery_and_a_level_up() {
+    use libpikmin_assets::AnimMgr;
+    use libpikmin_assets::ship::{self, ShipAnimator, ShipCue, motion, part_motion};
+    let Some(disc) = disc() else { return };
+    let mgr = AnimMgr::parse(&disc.read(ship::SHIP_ANIM_MGR).unwrap()).unwrap();
+    let infos = ship::parse_pel_anim(&disc.read(ship::PEL_ANIM).unwrap()).unwrap();
+    let parts = ship::PART_IDS
+        .iter()
+        .map(|id| {
+            let i = infos.iter().find(|i| i.id == *id)?;
+            Some((AnimMgr::parse(&disc.read(&i.anim_mgr()).ok()?).ok()?, i.override_joint != -1))
+        })
+        .collect();
+    let mut s = ShipAnimator::new(&mgr, parts);
+    let mut cues = Vec::new();
+    s.start(&[], 0, &mut cues);
+    assert_eq!(cues, vec![ShipCue::Sound("SE_UFO_DESTROY")]);
+    let run = |s: &mut ShipAnimator, secs: f32, cues: &mut Vec<ShipCue>| {
+        for _ in 0..(secs * 30.0) as usize {
+            s.update(1.0 / 30.0, cues);
+        }
+    };
+    // Standing still until a part comes.
+    run(&mut s, 1.0, &mut cues);
+    assert_eq!(s.context(0), (motion::WAIT_TUTORIAL, 0.0));
+
+    s.suck_start();
+    run(&mut s, 2.0, &mut cues);
+    let (m, f) = s.context(0);
+    assert_eq!(m, motion::WAIT_TUTORIAL);
+    assert!((14.0..15.0).contains(&f), "stops at Action0: {f}");
+
+    cues.clear();
+    let engine = ship::MAIN_ENGINE;
+    s.suck_finish(engine, 1, &mut cues);
+    assert!(cues.iter().any(|c| matches!(c, ShipCue::Effect { lift, .. } if *lift == 60.0)));
+    assert_eq!(s.part(engine).unwrap().lower.motion, part_motion::APPEAR);
+    run(&mut s, 4.0, &mut cues);
+    // Done shuddering, it stands up for good.
+    assert_eq!(s.context(0), (motion::WAIT, 0.0));
+    assert!(cues.iter().any(|c| matches!(c, ShipCue::PartEffect { part, .. } if *part == engine)));
+    // henka1 has played to its end; henka1b loops.
+    assert_eq!(s.context(1), (motion::HENKA1, 119.0));
+    run(&mut s, 2.0, &mut cues);
+    assert_eq!(s.part(engine).unwrap().lower.motion, part_motion::AFTER);
+    assert!(s.light_frame(0) < 19.0);
+    assert!(cues.contains(&ShipCue::Sound("SE_UFO_LIGHT")));
+    // soto5f loops every 100 frames, humming as it goes round.
+    run(&mut s, 3.5, &mut cues);
+    assert!(cues.contains(&ShipCue::Sound("SE_UFO_ENGINE")));
+}
