@@ -249,6 +249,12 @@ parms! {
         attack_once: i32 = 1, b"p10";
         do_scale_happa_move_speed: i32 = 1, b"p14";
         max_pikis_on_field: i32 = 100, b"p15";
+        /// "UFO LEVEL 2..5": parts on the ship for each upgrade
+        /// (`PlayerState::getNextPowerupNumber`).
+        ufo_level2: i32 = 6, b"p19";
+        ufo_level3: i32 = 12, b"p20";
+        ufo_level4: i32 = 29, b"p21";
+        ufo_level5: i32 = 30, b"p22";
     }
 }
 

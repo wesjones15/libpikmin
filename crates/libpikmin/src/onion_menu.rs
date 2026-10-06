@@ -87,7 +87,7 @@ impl Sim {
         }
         self.onions
             .iter()
-            .filter(|o| (o.pos - c.pos).with_y(0.0).length() < CONTAINER_REACH)
+            .filter(|o| o.ship.is_none() && (o.pos - c.pos).with_y(0.0).length() < CONTAINER_REACH)
             .min_by(|a, b| {
                 let da = (a.pos - c.pos).length();
                 let db = (b.pos - c.pos).length();

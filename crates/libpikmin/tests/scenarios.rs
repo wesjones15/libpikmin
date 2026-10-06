@@ -625,6 +625,7 @@ fn hundred_pikmin_tick_budget() {
 
 fn corpse(pos: Vec3, min: u32, max: u32, seeds: i32) -> libpikmin::PelletDesc {
     libpikmin::PelletDesc {
+        ship_part: None,
         pos,
         yaw: 0.0,
         radius: 12.0,

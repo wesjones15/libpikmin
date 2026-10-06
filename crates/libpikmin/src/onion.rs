@@ -50,6 +50,19 @@ pub struct Onion {
     pub queue: VecDeque<PikiColor>,
     /// Pending fireworks from negative seed counts (`mSAICtx.mCounter`).
     pub fireworks: u32,
+    /// Set for the ship (`UfoItem`): it takes ship parts instead of pellets.
+    pub ship: Option<Ship>,
+}
+
+/// The S.S. Dolphin as a carry goal (`UfoItem`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ship {
+    /// Where carriers bring parts (`UfoItem::getGoalPos`, its 'gol1' sphere).
+    pub goal: Vec3,
+    /// Where parts are pulled up to (`getSuckPos`, 'suc1').
+    pub suck: Vec3,
+    /// Part indices on board, in the order they arrived.
+    pub parts: Vec<u32>,
 }
 
 impl Onion {
@@ -66,9 +79,17 @@ impl Onion {
         self.stored.iter().flatten().sum()
     }
 
-    /// `GoalItem::getSuckPos`
+    /// `GoalItem::getSuckPos` (`UfoItem::getSuckPos` for the ship).
     pub fn suck_pos(&self) -> Vec3 {
-        self.pos + Vec3::new(0.0, 74.0, 0.0)
+        match &self.ship {
+            Some(s) => s.suck,
+            None => self.pos + Vec3::new(0.0, 74.0, 0.0),
+        }
+    }
+
+    /// Where carriers bring things (`getGoalPos`).
+    pub fn goal_pos(&self) -> Vec3 {
+        self.ship.as_ref().map_or(self.pos, |s| s.goal)
     }
 
     /// `GoalItem::suckMe`
@@ -162,6 +183,26 @@ impl Sim {
             anim: OnionAnim::Idle,
             queue: VecDeque::new(),
             fireworks: 0,
+            ship: None,
+        });
+        id
+    }
+
+    /// Places the ship. `goal` and `suck` are world positions of its delivery point and of
+    /// where parts are pulled in (the host knows its model: 'gol1' / 'suc1').
+    pub fn add_ship(&mut self, pos: Vec3, goal: Vec3, suck: Vec3) -> OnionId {
+        let id = OnionId(self.onions.len() as u32);
+        self.onions.push(Onion {
+            id,
+            pos,
+            colors: Vec::new(),
+            stored: [[0; 3]; 3],
+            exits: VecDeque::new(),
+            exit_timer: 0.0,
+            anim: OnionAnim::Idle,
+            queue: VecDeque::new(),
+            fireworks: 0,
+            ship: Some(Ship { goal, suck, parts: Vec::new() }),
         });
         id
     }
@@ -387,7 +428,7 @@ impl Sim {
     /// (`action_radius` within 220 of an Onion, else `pluck_distance_outside_onyon`).
     pub(crate) fn find_pluckable(&self, ci: usize) -> Option<SproutId> {
         let c = &self.captains[ci];
-        let near_onion = self.onions.iter().any(|o| dist_xz(o.pos, c.pos) <= 220.0);
+        let near_onion = self.onions.iter().any(|o| o.ship.is_none() && dist_xz(o.pos, c.pos) <= 220.0);
         let reach = if c.fast_pluck {
             // Chaining: `mContinuousPluckDistance` (200).
             self.params.navi.continuous_pluck_distance

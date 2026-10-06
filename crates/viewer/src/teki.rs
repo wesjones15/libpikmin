@@ -644,6 +644,7 @@ fn update_bulborb(t: &mut Teki, spec: &TekiSpec, sim: &mut Sim, dt: f32, force_s
                     seeds_other: c.map_or(4, |c| c.seeds_other),
                     color: None,
                     creature: Some(t.id),
+                    ship_part: None,
                 });
                 t.ai = Ai::Corpse(id);
             }

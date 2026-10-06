@@ -193,3 +193,37 @@ fn every_particle_generator_parses_and_runs() {
     let ante = olimar.coll.iter().find(|c| c.id == "ante").expect("antenna sphere");
     assert_eq!(ante.joint, 6);
 }
+
+#[test]
+fn ship_parts_screens_and_font_load() {
+    use libpikmin_assets::screen::{Font, Screen};
+    use libpikmin_assets::ship;
+    let Some(disc) = disc() else { return };
+    let infos = ship::parse_pel_anim(&disc.read(ship::PEL_ANIM).unwrap()).unwrap();
+    for id in ship::PART_IDS {
+        let info = infos.iter().find(|i| i.id == id).unwrap_or_else(|| panic!("{id}"));
+        let m = Model::parse(&disc.read(&info.model()).unwrap()).unwrap();
+        assert!(!m.batches().unwrap().is_empty(), "{id}");
+    }
+    assert_eq!(infos.iter().find(|i| i.id == "ust1").unwrap().file, "soto1");
+    let ufo = Model::parse(&disc.read(ship::SHIP_MODEL).unwrap()).unwrap();
+    assert!(ufo.joint_index(&ship::ship_joint("soto1")).is_some());
+
+    // Every English screen parses; the Bowsprit's discovery text names it.
+    for e in std::fs::read_dir(disc.root.join("screen/eng_blo")).unwrap() {
+        let p = e.unwrap().path();
+        Screen::parse(&std::fs::read(&p).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+    }
+    let found = Screen::parse(&disc.read(&ship::found_screen(0)).unwrap()).unwrap();
+    assert!(found.plain_text().concat().contains("Bowsprit"), "{:?}", found.plain_text());
+    for i in 0..30 {
+        let s = Screen::parse(&disc.read(&ship::info_screen(i)).unwrap()).unwrap();
+        assert!(!s.plain_text().concat().is_empty(), "part {i}");
+    }
+
+    let (img, ..) = libpikmin_assets::texture::decode_bti(&disc.read(Font::PATH).unwrap()).unwrap();
+    let font = Font::new(img, 21, 42);
+    let a = font.glyph(b'A').unwrap();
+    let i = font.glyph(b'i').unwrap();
+    assert!(a.advance > i.advance && i.advance > 0, "A {a:?} i {i:?}");
+}

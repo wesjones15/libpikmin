@@ -41,6 +41,9 @@ pub struct PelletDesc {
     pub color: Option<PikiColor>,
     /// The host creature this corpse came from, if any.
     pub creature: Option<CreatureId>,
+    /// A ship part (its index in `_ufoIDTable`): carried to the ship, not an Onion
+    /// (`ActTransport::decideGoal`: `PELTYPE_UfoPart` → `itemMgr->getUfo()`).
+    pub ship_part: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -231,6 +234,19 @@ impl Sim {
     /// `ActTransport::decideGoal`: the carriers' majority colour (ties at random) picks the Onion.
     fn decide_goal(&mut self, pi: usize) -> Option<(OnionId, PikiColor)> {
         let pellet = &self.pellets[pi];
+        if pellet.desc.ship_part.is_some() {
+            let pos = pellet.pos;
+            let color = pellet
+                .carriers
+                .first()
+                .map_or(PikiColor::Red, |id| self.pikis[id.0 as usize].color);
+            return self
+                .onions
+                .iter()
+                .filter(|o| o.ship.is_some())
+                .min_by(|a, b| dist_xz(a.pos, pos).total_cmp(&dist_xz(b.pos, pos)))
+                .map(|o| (o.id, color));
+        }
         let mut counts = [0u32; 3];
         for id in &pellet.carriers {
             counts[self.pikis[id.0 as usize].color.index()] += 1;
@@ -244,6 +260,7 @@ impl Sim {
         let nearest = |accepting: bool| {
             self.onions
                 .iter()
+                .filter(|o| o.ship.is_none())
                 .filter(|o| !accepting || o.accepts(color))
                 .min_by(|a, b| dist_xz(a.pos, pos).total_cmp(&dist_xz(b.pos, pos)))
                 .map(|o| o.id)
@@ -260,6 +277,9 @@ impl Sim {
     /// `Pellet::onSlotStickStart` / `onSlotStickEnd` keep the colour counts that
     /// `Pellet::getPelletGoal` reads, we re-pick when Pikmin join or leave on the way.
     fn goal_still_majority(&self, pi: usize, onion: OnionId) -> bool {
+        if self.pellets[pi].desc.ship_part.is_some() {
+            return true;
+        }
         let mut counts = [0u32; 3];
         for id in &self.pellets[pi].carriers {
             counts[self.pikis[id.0 as usize].color.index()] += 1;
@@ -267,7 +287,7 @@ impl Sim {
         let max = counts.iter().copied().max().unwrap_or(0);
         let o = &self.onions[onion.0 as usize];
         (0..3).any(|c| counts[c] == max && o.accepts(PikiColor::from_index(c)))
-            || !self.onions.iter().any(|other| {
+            || !self.onions.iter().filter(|o| o.ship.is_none()).any(|other| {
                 (0..3).any(|c| counts[c] == max && other.accepts(PikiColor::from_index(c)))
             })
     }
@@ -283,7 +303,7 @@ impl Sim {
                     {
                         let mut path = Vec::new();
                         let from = self.pellets[i].pos;
-                        let to = self.onions[onion.0 as usize].pos;
+                        let to = self.onions[onion.0 as usize].goal_pos();
                         if host.carry_path(from, to, &mut path) && !path.is_empty() {
                             let p = &mut self.pellets[i];
                             p.state = PelletState::Carried {
@@ -314,7 +334,7 @@ impl Sim {
                         && let Some((o, c)) = self.decide_goal(i)
                     {
                         let mut route = Vec::new();
-                        let to = self.onions[o.0 as usize].pos;
+                        let to = self.onions[o.0 as usize].goal_pos();
                         if host.carry_path(self.pellets[i].pos, to, &mut route) && !route.is_empty() {
                             (onion, color, path, next) = (o, c, route, 0);
                             self.pellets[i].state = PelletState::Carried {
@@ -382,7 +402,7 @@ impl Sim {
             return;
         }
 
-        let goal = self.onions[onion.0 as usize].pos;
+        let goal = self.onions[onion.0 as usize].goal_pos();
         if dist_xz(self.pellets[i].pos, goal) < 10.0 {
             // `PelletGoalState`: carriers let go and the Onion takes over.
             let p = &mut self.pellets[i];
@@ -463,6 +483,22 @@ impl Sim {
         let speed = speed + dt * 720.0;
         if progress >= 1.0 {
             p.state = PelletState::Gone;
+            if let Some(part) = p.desc.ship_part {
+                // `UfoItem::suckMe`: the part goes on the ship (`PlayerState::getUfoParts`).
+                let id = p.id;
+                let ship = self.onions[onion.0 as usize].ship.as_mut().expect("ship parts go to ships");
+                if !ship.parts.contains(&part) {
+                    ship.parts.push(part);
+                }
+                let total = ship.parts.len() as u32;
+                self.events.push(Event::ShipPartCollected {
+                    pellet: id,
+                    ship: onion,
+                    part,
+                    total,
+                });
+                return;
+            }
             let seeds = match p.desc.color {
                 Some(c) if c != color => p.desc.seeds_other,
                 _ => p.desc.seeds_matching,
@@ -665,6 +701,7 @@ mod tests {
             seeds_other: 1,
             color: None,
             creature: None,
+            ship_part: None,
         });
         let goal = |sim: &Sim| match sim.pellet(pel).state {
             PelletState::Carried { onion, .. } => Some(onion),
@@ -682,5 +719,45 @@ mod tests {
         sim.step(&mut host);
         assert_eq!(goal(&sim), Some(red), "two reds to one blue: red Onion");
         assert!(sim.drain_events().any(|e| matches!(e, Event::PelletRerouted { onion, .. } if onion == red)));
+    }
+
+    #[test]
+    fn ship_parts_go_to_the_ship_not_the_onion() {
+        let mut sim = Sim::new(Params::default(), 5);
+        let mut host = FlatHost;
+        let onion = sim.add_onion(Vec3::new(100.0, 0.0, 0.0), &[PikiColor::Red]);
+        let ship = sim.add_ship(Vec3::new(-300.0, 0.0, 0.0), Vec3::new(-180.0, 0.0, 0.0), Vec3::new(-280.0, 60.0, 20.0));
+        let pel = sim.spawn_pellet(PelletDesc {
+            pos: Vec3::ZERO,
+            yaw: 0.0,
+            radius: 10.0,
+            height: 10.0,
+            min_carriers: 1,
+            max_carriers: 4,
+            seeds_matching: 1,
+            seeds_other: 1,
+            color: None,
+            creature: None,
+            ship_part: Some(4),
+        });
+        attach(&mut sim, PikiColor::Red, pel);
+        sim.step(&mut host);
+        assert!(matches!(sim.pellet(pel).state, PelletState::Carried { onion: o, .. } if o == ship));
+        assert_ne!(Some(onion), Some(ship));
+        let mut got = None;
+        for _ in 0..30 * 30 {
+            sim.step(&mut host);
+            for e in sim.drain_events() {
+                if let Event::ShipPartCollected { part, total, ship: s, .. } = e {
+                    got = Some((part, total, s));
+                }
+            }
+            if got.is_some() {
+                break;
+            }
+        }
+        assert_eq!(got, Some((4, 1, ship)));
+        assert_eq!(sim.onions()[ship.0 as usize].ship.as_ref().unwrap().parts, vec![4]);
+        assert!(sim.sprouts().next().is_none(), "no seeds from a ship part");
     }
 }

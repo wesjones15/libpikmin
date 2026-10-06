@@ -18,13 +18,17 @@
 //!   passed to `Jaf_InitSeqArchive2` in verysimple.c) and this extractor copies out.
 //! - `effects/`: particle generators (`pcr/`), their textures (`tex/`) and effect models
 //! - `shapes/cursor/`: the cursor and its marker (`GlobalShape::init`)
+//! - `objects/ufo/`, `objects/ufoparts/`, `objects/pelAnim.bin`: the S.S. Dolphin, its parts and
+//!   which model each part uses
+//! - `screen/eng_blo/`, `screen/eng_tex/`, `bigFont.bti`: the English 2D screens (messages,
+//!   ship part descriptions), their textures and the font
 
 use std::path::{Component, Path, PathBuf};
 
 use crate::{Disc, Error};
 
 /// Folders under `files/dataDir/` copied whole.
-pub const FOLDERS: [&str; 15] = [
+pub const FOLDERS: [&str; 21] = [
     "parms/",
     "pikis/",
     "objects/goal/",
@@ -40,10 +44,16 @@ pub const FOLDERS: [&str; 15] = [
     "SndData/",
     "effects/",
     "shapes/cursor/",
+    "objects/ufo/",
+    "objects/ufoparts/",
+    "objects/pelAnim.bin",
+    "screen/eng_blo/",
+    "screen/eng_tex/",
+    "bigFont.bti",
 ];
 
 /// Files that must exist for the sim and viewer to work.
-pub const REQUIRED: [&str; 28] = [
+pub const REQUIRED: [&str; 31] = [
     "parms/naviMgr.bin",
     "parms/pikiMgr.bin",
     "parms/aiconst.bin",
@@ -68,6 +78,9 @@ pub const REQUIRED: [&str; 28] = [
     "SndData/Banks/pikibank.bx",
     "effects/pcr/g_curs00.pcr",
     "shapes/cursor/cursor.mod",
+    crate::ship::SHIP_MODEL,
+    crate::ship::MESSAGE_BASE_SCREEN,
+    "bigFont.bti",
     "SndData/Seqs/pikiseq.arc",
     SEQ_HEADER,
     crate::sound::tables::TABLES,

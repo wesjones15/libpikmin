@@ -62,6 +62,13 @@ pub enum Event {
         piki: PikiId,
         damage: f32,
     },
+    /// A ship part reached the ship (`UfoItem::suckMe`); `total` parts are on board now.
+    ShipPartCollected {
+        pellet: PelletId,
+        ship: OnionId,
+        part: u32,
+        total: u32,
+    },
     /// A carrier reached its slot and took hold (`ActTransport::gotoLiftPos`: `SEF_PIKI_HANG`,
     /// and the pellet's `SE_LIFT_TRY` loop if it isn't lifted yet).
     CarrierGrabbed {

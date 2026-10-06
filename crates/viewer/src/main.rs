@@ -184,6 +184,7 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
             seeds_other: cfg.as_ref().map_or(seeds.1, |c| c.seeds_other),
             color: Some(color),
             creature: None,
+            ship_part: None,
         });
     }
     sim.add_onion(Vec3::new(-220.0, 0.0, -260.0), &[PikiColor::Red]);
