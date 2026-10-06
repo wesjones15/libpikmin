@@ -223,6 +223,15 @@ impl Sim {
         }
     }
 
+    /// Puts ship part `part` on `ship` directly (hosts restoring a save, tests).
+    pub fn give_ship_part(&mut self, ship: OnionId, part: u32) {
+        if let Some(s) = self.onions.get_mut(ship.0 as usize).and_then(|o| o.ship.as_mut())
+            && !s.parts.contains(&part)
+        {
+            s.parts.push(part);
+        }
+    }
+
     /// Plants a ready-to-pluck sprout directly (handy for hosts and tests).
     pub fn plant_sprout(&mut self, color: PikiColor, pos: Vec3) -> SproutId {
         let timer = self.params.piki.grow_up_time;

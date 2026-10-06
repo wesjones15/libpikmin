@@ -258,6 +258,19 @@ parms! {
     }
 }
 
+parms! {
+    /// `GameDemo::Parms` (Demo.h, gameDemo.cpp). File: `demo.bin`.
+    pub struct DemoParams {
+        /// "コンテナ接近距離": walking this near an Onion starts its demo.
+        onion_boot_trigger_radius: f32 = 150.0, b"p00";
+        /// "芽ピキ接近距離": sprouts.
+        seed_demo_trigger_radius: f32 = 100.0, b"p01";
+        /// "エンジン接近距離": walking this near a ship part (past its edge) shows its
+        /// discovery text (`DemoInvoker`, demoInvoker.cpp).
+        demo_trigger_radius: f32 = 150.0, b"p04";
+    }
+}
+
 /// Everything the sim reads.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Params {
@@ -267,6 +280,7 @@ pub struct Params {
     pub piki: PikiParams,
     pub plate: PlateParams,
     pub ai: AiParams,
+    pub demo: DemoParams,
     pub anim: AnimTimings,
     /// Nectar drop and puddle animation timings (`objects/water`, `objects/fl_water`).
     pub nectar: crate::nectar::NectarTimings,
@@ -310,6 +324,7 @@ impl Default for Params {
             piki: PikiParams::default(),
             plate: PlateParams::default(),
             ai: AiParams::default(),
+            demo: DemoParams::default(),
             anim: AnimTimings::default(),
             nectar: Default::default(),
             pellets: Vec::new(),
@@ -350,11 +365,12 @@ impl Params {
         dir: &std::path::Path,
     ) -> Result<Vec<&'static str>, Box<dyn std::error::Error>> {
         type Apply = fn(&mut Params, &[u8]) -> Result<(), ParmError>;
-        let files: [(&str, Apply); 4] = [
+        let files: [(&str, Apply); 5] = [
             ("naviMgr.bin", Params::apply_navi_mgr_bin),
             ("pikiMgr.bin", Params::apply_piki_mgr_bin),
             ("cunit.bin", Params::apply_cunit_bin),
             ("aiconst.bin", Params::apply_aiconst_bin),
+            ("demo.bin", |p, d| p.demo.read_block(d, &mut 0)),
         ];
         let mut applied = Vec::new();
         for (name, apply) in files {
@@ -461,11 +477,12 @@ mod tests {
         }
         let mut p = Params::default();
         let applied = p.load_p1_dir(&dir).unwrap();
-        assert_eq!(applied.len(), 4);
+        assert_eq!(applied.len(), 5);
         // Spot-check values known to differ from the code defaults.
         assert_eq!(p.navi.move_speed, 160.0);
         assert_eq!(p.navi.whistle_max_radius, 90.0);
         assert_eq!(p.piki.max_leaf_move_speed, 120.0);
         assert_eq!(p.ai.gravity, 560.0);
+        assert_eq!(p.demo.demo_trigger_radius, 40.0);
     }
 }

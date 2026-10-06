@@ -312,6 +312,11 @@ impl Audio {
                 let pos = sim.onions()[onion.0 as usize].pos;
                 s.play_from(onion_owner(onion), "SE_CONTAINER_PELLETIN2", pos);
             }
+            // `UfoItem::suckMe` (ufoItem.cpp).
+            Event::ShipPartCollected { ship, .. } => {
+                let pos = sim.onions()[ship.0 as usize].pos;
+                s.play_from(onion_owner(ship), "SE_UFO_PARTSIN", pos);
+            }
             // `GoalAI::EmitPiki` (itemAI.cpp): each seed shot.
             Event::SeedLaunched { onion, .. } => {
                 let pos = sim.onions()[onion.0 as usize].pos;

@@ -18,7 +18,9 @@
 //! enemy AI states once a second, `PIKMIN_MENU=1` opens an Onion window, `PIKMIN_PUTAWAY=n`
 //! sends n squad Pikmin of each colour home and `PIKMIN_KILL=1` kills every creature at the
 //! start (autoplay then throws at the corpses), `PIKMIN_WHISTLE=1` holds the whistle and
-//! `PIKMIN_DIE=n` kills n of the active squad at the start (for the ghosts).
+//! `PIKMIN_DIE=n` kills n of the active squad at the start (for the ghosts);
+//! `PIKMIN_PART_TEXT=i` opens ship part i's description; `PIKMIN_SHIP_PARTS=n` puts parts
+//! 0..n on the ship.
 
 use std::path::PathBuf;
 
@@ -33,6 +35,7 @@ use libpikmin::{
 use macroquad::prelude::*;
 
 mod effects;
+mod message;
 mod onion_menu;
 mod sound;
 mod render3d;
@@ -119,6 +122,52 @@ struct Game {
     params_source: String,
     /// A message for the HUD and how long it stays up.
     notice: Option<(String, f32)>,
+    /// Ship parts whose discovery text has shown (`DEMOFLAG_UfoPartDiscoveryOffset + id`).
+    found: Vec<u32>,
+}
+
+/// The ship's 'gol1' / 'suc1' points from its model at `pos` facing `yaw`.
+fn ship_points(assets: &libpikmin_assets::Assets, pos: Vec3, yaw: f32) -> Option<(Vec3, Vec3)> {
+    let m = assets.model(libpikmin_assets::ship::SHIP_MODEL).ok()?;
+    let root = libpikmin_assets::pose::srt_matrix(Vec3::ONE, Vec3::new(0.0, yaw, 0.0), pos);
+    let pose = libpikmin_assets::Skeleton::new(&m).pose(root, None);
+    let at = |id: &str| {
+        let c = m.coll.iter().find(|c| c.id == id)?;
+        Some(pose.joints.get(c.joint)?.transform_point3(c.centre))
+    };
+    Some((at("gol1")?, at("suc1")?))
+}
+
+/// A ship part as a pellet: carriers and size from its `PelletConfig`, bottom radius from its
+/// model's 'cent' sphere (`Pellet::getBottomRadius`).
+fn ship_part_desc(assets: &libpikmin_assets::Assets, params: &Params, part: u32, pos: Vec3) -> Option<PelletDesc> {
+    use libpikmin_assets::ship;
+    let id = ship::PART_IDS[part as usize];
+    let cfg = libpikmin::pellet_config::find(&params.pellets, id)?;
+    let info = ship::parse_pel_anim(&assets.read(ship::PEL_ANIM).ok()?).ok()?.into_iter().find(|i| i.id == id)?;
+    let m = assets.model(&info.model()).ok()?;
+    let r = m.coll.iter().find(|c| c.id == "cent").map_or(20.0, |c| c.radius) * cfg.scale;
+    Some(PelletDesc {
+        pos,
+        yaw: 0.0,
+        radius: r,
+        height: cfg.carry_info_height,
+        min_carriers: cfg.min_carriers.max(1) as u32,
+        max_carriers: cfg.max_carriers.max(1) as u32,
+        seeds_matching: 0,
+        seeds_other: 0,
+        color: None,
+        creature: None,
+        ship_part: Some(part),
+    })
+}
+
+/// `PlayerState::getNextPowerupNumber`: parts still needed for the next ship level.
+fn parts_to_next_level(params: &Params, total: u32) -> i32 {
+    let a = &params.ai;
+    let counts = [1, a.ufo_level2, a.ufo_level3, a.ufo_level4, a.ufo_level5, 30];
+    let level = counts[..5].iter().filter(|&&c| total as i32 >= c).count();
+    counts[level] - total as i32
 }
 
 fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
@@ -190,6 +239,28 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
     sim.add_onion(Vec3::new(-220.0, 0.0, -260.0), &[PikiColor::Red]);
     sim.add_onion(Vec3::new(0.0, 0.0, -340.0), &[PikiColor::Yellow]);
     sim.add_onion(Vec3::new(220.0, 0.0, -260.0), &[PikiColor::Blue]);
+    // The S.S. Dolphin to the west facing east, and three of its parts: the Main Engine,
+    // the Whimsical Radar and the Automatic Gear.
+    if let Ok(a) = assets {
+        let (pos, yaw) = (Vec3::new(-460.0, 0.0, 40.0), std::f32::consts::FRAC_PI_2);
+        if let Some((goal, suck)) = ship_points(a, pos, yaw) {
+            let ship = sim.add_ship(pos, goal, suck);
+            let n: u32 = std::env::var("PIKMIN_SHIP_PARTS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            for p in 0..n.min(30) {
+                sim.give_ship_part(ship, p);
+            }
+        }
+        let params = sim.params().clone();
+        for (part, at) in [
+            (libpikmin_assets::ship::MAIN_ENGINE as u32, Vec3::new(-170.0, 0.0, 30.0)),
+            (5, Vec3::new(130.0, 0.0, 60.0)),
+            (20, Vec3::new(400.0, 0.0, -40.0)),
+        ] {
+            if let Some(d) = ship_part_desc(a, &params, part, at) {
+                sim.spawn_pellet(d);
+            }
+        }
+    }
     Game {
         sim,
         world,
@@ -199,6 +270,7 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
         stolen: 0,
         params_source,
         notice: None,
+        found: Vec::new(),
     }
 }
 
@@ -253,6 +325,9 @@ async fn main() {
         }
     }
     let mut menu: Option<onion_menu::OnionMenu> = None;
+    // The message window (`ogScrMessageMgr`) with the game's own screens and font.
+    let mut ui = assets.as_ref().ok().and_then(message::Ui::load);
+    let mut msg: Option<message::Message> = None;
     // Space that opened the Onion window doesn't also throw.
     let mut space_held_for_menu = false;
     // `PIKMIN_SHOT=out.png`: save a frame after ~2 s of play and exit (for checking visuals).
@@ -378,7 +453,46 @@ async fn main() {
         // before the action button does anything else).
         let active_id = g.captains[g.active];
         let mut opened_now = false;
+        // Ship parts: walking near one for the first time shows its discovery page
+        // (`DemoInvoker`: within `mDemoTriggerRadius` of its edge); the action button within
+        // 20 of it shows its description (`NAVISTATE_PartsAccess`).
+        if msg.is_none()
+            && menu.is_none()
+            && let Some(u) = ui.as_ref()
+        {
+            let me = g.sim.captain(active_id).pos;
+            let reach = g.sim.params().demo.demo_trigger_radius;
+            let near = |p: &libpikmin::Pellet, r: f32| {
+                matches!(p.state, PelletState::Idle) && (p.pos - me).with_y(0.0).length() - p.desc.radius <= r
+            };
+            let parts: Vec<(u32, bool, bool)> = g
+                .sim
+                .pellets()
+                .iter()
+                .filter_map(|p| Some((p.desc.ship_part?, near(p, reach), near(p, 20.0))))
+                .collect();
+            let mut open = None;
+            for (part, in_reach, at_hand) in parts {
+                if in_reach && !g.found.contains(&part) {
+                    g.found.push(part);
+                    open = Some(vec![libpikmin_assets::ship::found_screen(part as usize)]);
+                    break;
+                }
+                if at_hand && is_key_pressed(KeyCode::Space) {
+                    open = Some(vec![libpikmin_assets::ship::info_screen(part as usize)]);
+                    space_held_for_menu = true;
+                    opened_now = true;
+                    break;
+                }
+            }
+            if let Some(paths) = open {
+                let pages: Vec<_> = paths.iter().filter_map(|p| u.screen(p)).collect();
+                msg = Some(message::Message::new(pages, [0; 10]));
+            }
+        }
         if menu.is_none()
+            && msg.is_none()
+            && !opened_now
             && is_key_pressed(KeyCode::Space)
             && let Some(o) = g.sim.onion_in_reach(active_id)
         {
@@ -426,6 +540,27 @@ async fn main() {
             Some(onion_menu::MenuResult::Open) => true,
             None => menu.is_some(),
         };
+        // The message window pauses the field while it's up.
+        let mut paused = paused;
+        if let (Some(m), Some(u)) = (msg.as_mut(), ui.as_ref()) {
+            let mut sounds = Vec::new();
+            let a = !opened_now && (is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::Enter));
+            let b = is_key_pressed(KeyCode::X) || is_key_pressed(KeyCode::Escape);
+            m.update(u, dt, a, b, is_key_down(KeyCode::Space), &mut sounds);
+            if let Some(au) = audio.as_ref() {
+                for s in sounds {
+                    au.play(match s {
+                        message::Sound::Typewriter => "SYSSE_TYPEWRITER",
+                        message::Sound::Close => "SYSSE_MESSAGE_CLOSE",
+                    });
+                }
+            }
+            paused = true;
+            space_held_for_menu = true;
+            if m.is_done() {
+                msg = None;
+            }
+        }
         for (i, &cid) in g.captains.iter().enumerate() {
             let input = if i == g.active && !paused {
                 CaptainInput {
@@ -466,6 +601,18 @@ async fn main() {
             for id in ids {
                 g.world.tekis.damage(id, 1e9);
             }
+        }
+        if frames == 1
+            && let (Some(i), Some(u)) = (std::env::var("PIKMIN_PART_TEXT").ok().and_then(|v| v.parse::<usize>().ok()), ui.as_ref())
+        {
+            let pages = [libpikmin_assets::ship::info_screen(i), libpikmin_assets::ship::COLLECTED_SCREEN.to_string()]
+                .iter()
+                .filter_map(|p| u.screen(p))
+                .collect();
+            let mut numbers = [0; 10];
+            numbers[2] = 1;
+            numbers[5] = parts_to_next_level(g.sim.params(), 1);
+            msg = Some(message::Message::new(pages, numbers));
         }
         if frames == 1
             && let Some(n) = std::env::var("PIKMIN_DIE").ok().and_then(|v| v.parse::<usize>().ok())
@@ -540,6 +687,24 @@ async fn main() {
             }
             match e {
                 Event::Hit { .. } => g.hits += 1,
+                // `UfoItem::suckMe` then the part's description and the parts count
+                // (`bloFile_PartsGet_*`: `auf_<x>_0` and `tu_tx24`).
+                Event::ShipPartCollected { part, total, .. } => {
+                    if let Some(u) = ui.as_ref() {
+                        let pages: Vec<_> = [
+                            libpikmin_assets::ship::info_screen(part as usize),
+                            libpikmin_assets::ship::COLLECTED_SCREEN.to_string(),
+                        ]
+                        .iter()
+                        .filter_map(|p| u.screen(p))
+                        .collect();
+                        let mut numbers = [0; 10];
+                        numbers[2] = total as i32;
+                        numbers[3] = 30 - total as i32;
+                        numbers[5] = parts_to_next_level(g.sim.params(), total);
+                        msg = Some(message::Message::new(pages, numbers));
+                    }
+                }
                 Event::SeedStored { .. } => {
                     g.notice = Some(("Field full (100): seeds stay in the Onion".into(), 3.0));
                 }
@@ -593,6 +758,9 @@ async fn main() {
             }
             draw_hud(&g);
             draw_onion_prompt(&g, menu.as_ref());
+            if let (Some(m), Some(u)) = (msg.as_ref(), ui.as_mut()) {
+                m.draw(u);
+            }
             frames += 1;
             if let Some(path) = shot.as_ref().filter(|_| frames == shot_frame) {
                 get_screen_data().export_png(&path.to_string_lossy());
@@ -839,6 +1007,9 @@ async fn main() {
 
         draw_hud(&g);
         draw_onion_prompt(&g, menu.as_ref());
+        if let (Some(m), Some(u)) = (msg.as_ref(), ui.as_mut()) {
+            m.draw(u);
+        }
 
         next_frame().await;
     }

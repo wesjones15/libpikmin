@@ -417,6 +417,37 @@ struct SproutTrack {
     motion: PikiHeadMotion,
 }
 
+/// A ship part's model, its file name (for the ship joint) and `PelletConfig` p10 scale.
+pub struct ShipPartModel {
+    model: GpuModel,
+    pub file: String,
+    pub scale: f32,
+}
+
+/// Loads every ship part's model (`pelAnim.bin` → `objects/<folder>/<file>.mod`).
+fn ship_part_models(assets: &Assets) -> Vec<Option<ShipPartModel>> {
+    use libpikmin_assets::ship;
+    let infos = assets
+        .read(ship::PEL_ANIM)
+        .ok()
+        .and_then(|d| ship::parse_pel_anim(&d).ok())
+        .unwrap_or_default();
+    let configs = assets
+        .read("parms/pelMgr.bin")
+        .ok()
+        .and_then(|d| libpikmin::pellet_config::parse_pellet_configs(&d).ok())
+        .unwrap_or_default();
+    ship::PART_IDS
+        .iter()
+        .map(|id| {
+            let info = infos.iter().find(|i| i.id == *id)?;
+            let model = GpuModel::load(assets, &info.model()).ok()?;
+            let scale = libpikmin::pellet_config::find(&configs, id).map_or(1.0, |c| c.scale);
+            Some(ShipPartModel { model, file: info.file.clone(), scale })
+        })
+        .collect()
+}
+
 /// Text or a bar to draw in screen space after the 3D pass.
 pub enum Overlay {
     Text { at: Vec3, text: String, color: Color, size: f32 },
@@ -432,6 +463,11 @@ pub struct Scene3d {
     cursor: Option<(GpuModel, GpuModel)>,
     /// The whistle's particles.
     effects: Option<Effects>,
+    /// The S.S. Dolphin (`ufo0705`) and its animations.
+    ship: Option<(GpuModel, AnimSet)>,
+    /// Ship part models by part index (`_ufoIDTable`), with their file names
+    /// (`pelAnim.bin`) and `PelletConfig` scale.
+    parts: Vec<Option<ShipPartModel>>,
     pellets: [GpuModel; 4],
     pikihead: GpuModel,
     pikihead_anims: AnimSet,
@@ -492,6 +528,10 @@ impl Scene3d {
             onion: m(paths::ONION)?,
             cursor: m(paths::CURSOR).ok().zip(m(paths::CURSOR_MARKER).ok()),
             effects: Effects::load(assets),
+            ship: m(libpikmin_assets::ship::SHIP_MODEL).ok().zip(
+                AnimSet::load(assets, libpikmin_assets::ship::SHIP_ANIM_MGR, libpikmin_assets::ship::SHIP_BUNDLE).ok(),
+            ),
+            parts: ship_part_models(assets),
             pellets: [
                 m(paths::PELLETS[0])?,
                 m(paths::PELLETS[1])?,
@@ -628,8 +668,37 @@ impl Scene3d {
             to_eye: -GVec3::new(d.x, d.y, d.z).normalize_or_zero(),
         };
 
+        // The ship: `UfoItem` idles on `kiso` (`UfoMotion::Wait`), or `kiso_t`
+        // (`WaitTutorial`) while broken. Exterior and attached parts on board sit on their
+        // `null_<part>` joints (`PlayerState::UfoParts`).
+        for (i, o) in sim.onions().iter().enumerate() {
+            let (Some(ship), Some((gm, anims))) = (o.ship.as_ref(), self.ship.as_ref()) else { continue };
+            let motion = if ship.parts.is_empty() { 0 } else { 1 };
+            let key = (6u64 << 40) | i as u64;
+            let anim = advance_index(&mut self.players, key, anims, motion, Clock::Loop(30.0), dt);
+            let yaw = {
+                let d = ship.goal - o.pos;
+                d.x.atan2(d.z)
+            };
+            let root = srt_matrix(GVec3::ONE, GVec3::new(0.0, yaw, 0.0), o.pos);
+            let joints = draw_model(gm, root, anim, Look::default(), &mut ctx);
+            for &part in &ship.parts {
+                let Some(Some(pm)) = self.parts.get(part as usize) else { continue };
+                if part >= 16 {
+                    continue; // `naka` parts go inside
+                }
+                let Some(j) = gm.model.joint_index(&libpikmin_assets::ship::ship_joint(&pm.file)) else { continue };
+                if let Some(&jm) = joints.get(j) {
+                    draw_model(&pm.model, jm, None, Look::default(), &mut ctx);
+                }
+            }
+        }
+
         // Onions.
         for (i, o) in sim.onions().iter().enumerate() {
+            if o.ship.is_some() {
+                continue;
+            }
             let (motion_idx, clock) = match o.anim {
                 OnionAnim::Idle => (1, Clock::Loop(30.0)),
                 OnionAnim::Suction { frame } => (2, Clock::Sim(frame)),
@@ -675,6 +744,25 @@ impl Scene3d {
                 if !matches!(pel.state, PelletState::Sucking { .. }) {
                     overlays.push(Overlay::Text {
                         at: pel.pos + GVec3::new(0.0, pel.desc.height + 20.0, 0.0),
+                        text: format!("{}/{}", pel.carriers.len(), pel.desc.min_carriers),
+                        color: Color::new(1.0, 1.0, 1.0, 1.0),
+                        size: 18.0,
+                    });
+                }
+                continue;
+            }
+            // Ship parts: their own models at the config's scale.
+            if let Some(Some(pm)) = pel.desc.ship_part.map(|p| self.parts.get(p as usize).and_then(Option::as_ref)) {
+                let s = pm.scale * pel.scale;
+                let root = srt_matrix(
+                    GVec3::splat(s),
+                    GVec3::new(0.0, pel.yaw, 0.0),
+                    pel.pos - GVec3::new(0.0, pm.model.lo.y * s, 0.0),
+                );
+                draw_model(&pm.model, root, None, Look::default(), &mut ctx);
+                if !matches!(pel.state, PelletState::Sucking { .. }) {
+                    overlays.push(Overlay::Text {
+                        at: pel.pos + GVec3::new(0.0, (pm.model.hi.y - pm.model.lo.y) * s + 10.0, 0.0),
                         text: format!("{}/{}", pel.carriers.len(), pel.desc.min_carriers),
                         color: Color::new(1.0, 1.0, 1.0, 1.0),
                         size: 18.0,
