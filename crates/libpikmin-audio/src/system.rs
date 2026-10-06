@@ -114,6 +114,10 @@ pub struct SoundSystem {
     queues: Vec<CmdQueue>,
     system_se: [usize; 2],
     orima_se: [usize; 2],
+    /// `demo_q`: commands for the cutscene sound track (0x1000F port 2).
+    demo_q: usize,
+    /// `current_demo_no`
+    demo: Option<u16>,
     events: Vec<SEvent>,
     events_ready: bool,
     current_time: i32,
@@ -160,6 +164,8 @@ impl SoundSystem {
             queues: Vec::new(),
             system_se: [0; 2],
             orima_se: [0; 2],
+            demo_q: 0,
+            demo: None,
             events: vec![SEvent::default(); 16],
             events_ready: false,
             current_time: 0,
@@ -194,6 +200,7 @@ impl SoundSystem {
             s.add_queue(QueueTrack::Registered(0x1000A), 0),
             s.add_queue(QueueTrack::Registered(0x1000A), 2),
         ];
+        s.demo_q = s.add_queue(QueueTrack::Registered(0x1000F), 2);
         for i in 0..16 {
             let q = s.add_queue(QueueTrack::Slot(usize::MAX), 0);
             s.events[i].queue = q;
@@ -422,6 +429,27 @@ impl SoundSystem {
         self.gaya_timer = 0;
         if let Some(t) = self.engine.track_handle(0x10008) {
             self.engine.write_port(t, 0, kind);
+        }
+    }
+
+    /// A cutscene's sound without the cutscene: `Jac_StartDemo` tells the demo track which
+    /// scene it is (port 0), then `Jac_DemoSound` hands it command `cmd` (the scene's timed
+    /// events, pikidemo.c). Only the track's own sounds; scene music and fades aren't done.
+    pub fn demo_sound(&mut self, demo: u16, cmd: u16) {
+        if self.demo != Some(demo) {
+            let Some(t) = self.engine.track_handle(0x1000F) else { return };
+            self.engine.write_port(t, 0, demo);
+            self.demo = Some(demo);
+        }
+        self.send(self.demo_q, cmd);
+    }
+
+    /// `__Jac_FinishDemo`: the demo track goes quiet.
+    pub fn end_demo(&mut self) {
+        if self.demo.take().is_some()
+            && let Some(t) = self.engine.track_handle(0x1000F)
+        {
+            self.engine.write_port(t, 0, 0);
         }
     }
 

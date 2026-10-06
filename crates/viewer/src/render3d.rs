@@ -19,6 +19,7 @@ use libpikmin::{
     CaptainId, Event, Params, PelletState, PikiColor, PikiState, Sim, SproutState, Vec2, Vec3,
 };
 use libpikmin_assets::model::{TexAttr, mat_flags};
+use libpikmin_assets::particle::effects;
 use libpikmin_assets::motion::Motion;
 use libpikmin_assets::pose::srt_matrix;
 use libpikmin_assets::ship::ShipAnimator;
@@ -455,6 +456,12 @@ struct ShipView {
     /// Onions (maybe the ship) a pellet reached this frame, and ship parts that went in.
     arrivals: Vec<OnionId>,
     collected: Vec<(u32, u32)>,
+    /// Onions (maybe the ship) back on the ground this frame.
+    landed: Vec<OnionId>,
+    /// Gone after taking off.
+    away: bool,
+    /// Running flames: their slot and the collision sphere they follow.
+    flames: Vec<(u8, &'static str)>,
 }
 
 impl ShipView {
@@ -490,6 +497,9 @@ impl ShipView {
             started: false,
             arrivals: Vec::new(),
             collected: Vec::new(),
+            landed: Vec::new(),
+            away: false,
+            flames: Vec::new(),
         })
     }
 }
@@ -551,6 +561,9 @@ pub struct Scene3d {
     ship: Option<ShipView>,
     /// Ship sounds to start (true) or stop this frame (`playEventSound(ufo, ...)`).
     pub ship_sounds: Vec<(OnionId, &'static str, bool)>,
+    /// Commands for the cutscene sound track this frame (`Jac_DemoSound`: demo, command);
+    /// `None` ends it.
+    pub demo_sounds: Vec<Option<(u16, u16)>>,
     /// The game is paused (a message is up): the ship's animations hold.
     pub paused: bool,
     /// Ship part models by part index (`_ufoIDTable`), with their file names
@@ -619,6 +632,7 @@ impl Scene3d {
             effects: Effects::load(assets),
             ship: ShipView::load(assets, &parts),
             ship_sounds: Vec::new(),
+            demo_sounds: Vec::new(),
             paused: false,
             parts,
             pellets: [
@@ -669,6 +683,11 @@ impl Scene3d {
             Event::ShipPartCollected { part, total, .. } => {
                 if let Some(s) = self.ship.as_mut() {
                     s.collected.push((*part, *total));
+                }
+            }
+            Event::OnionLanded { onion } => {
+                if let Some(s) = self.ship.as_mut() {
+                    s.landed.push(*onion);
                 }
             }
             // `Piki::doKill`: the ghost rises from where it died.
@@ -776,10 +795,31 @@ impl Scene3d {
             && let Some(ship) = o.ship.as_ref()
         {
             use libpikmin_assets::ship::{ShipCue, ship_joint};
+            const SHIP_FX: u64 = 6 << 40;
             let mut cues = Vec::new();
+            let level = params.ai.ship_level(ship.parts.len() as u32);
             if !sv.started {
                 sv.started = true;
-                sv.anim.start(&ship.parts, params.ai.ship_level(ship.parts.len() as u32), &mut cues);
+                sv.anim.start(&ship.parts, level, &mut cues);
+            }
+            // The next day (`UfoItem::startAI`).
+            if std::mem::take(&mut sv.landed).contains(&o.id) {
+                sv.anim.land(&ship.parts, level, &mut cues);
+                sv.away = false;
+            }
+            // `DemoEventUFO::Takeoff`
+            if matches!(o.anim, OnionAnim::TakeOff { .. }) && !sv.anim.taking_off() {
+                sv.anim.take_off(&ship.parts, &mut cues);
+            }
+            let away = o.anim == OnionAnim::Away;
+            if away && !sv.away {
+                // Out of sight: its flames and the take off's sound stop.
+                sv.away = true;
+                sv.flames.clear();
+                if let Some(fx) = self.effects.as_mut() {
+                    fx.detach_where(|k| k & !0xFF == SHIP_FX);
+                }
+                self.demo_sounds.push(None);
             }
             let yaw = {
                 let d = ship.goal - o.pos;
@@ -800,6 +840,7 @@ impl Scene3d {
                     g.emit_dir = GVec3::new(yaw.sin(), 0.0, yaw.cos());
                 }
             }
+            if !away {
             sv.anim.update(if self.paused { 0.0 } else { dt }, &mut cues);
 
             let root = srt_matrix(GVec3::ONE, GVec3::new(0.0, yaw, 0.0), o.pos);
@@ -829,6 +870,12 @@ impl Scene3d {
                 };
                 draw_pose(&pm.model, pose, Look::default(), &|_| None, &mut ctx);
             }
+            // A collision sphere's centre ('eng1', 'gcen', ...).
+            let coll = &sv.model.model.coll;
+            let sphere = |id: &str| {
+                let c = coll.iter().find(|c| c.id == id)?;
+                Some(joints.get(c.joint)?.transform_point3(c.centre))
+            };
             for c in cues {
                 let (fx, at, normal) = match c {
                     ShipCue::Sound(name) => {
@@ -837,6 +884,34 @@ impl Scene3d {
                     }
                     ShipCue::StopSound(name) => {
                         self.ship_sounds.push((o.id, name, false));
+                        continue;
+                    }
+                    ShipCue::DemoSound { demo, cmd } => {
+                        self.demo_sounds.push(Some((demo, cmd)));
+                        continue;
+                    }
+                    ShipCue::Attached { fx, sphere: id, normal, slot } => {
+                        let Some(at) = sphere(id) else { continue };
+                        if let Some(e) = self.effects.as_mut()
+                            && let Some(g) = e.attach(SHIP_FX | slot as u64, fx, at)
+                            && let Some(n) = normal
+                        {
+                            g.oriented_normal = n;
+                        }
+                        sv.flames.retain(|f| f.0 != slot);
+                        sv.flames.push((slot, id));
+                        continue;
+                    }
+                    ShipCue::JointEffect { fx, joint, offset, dir, normal } => {
+                        let Some(m) = joints.get(joint) else { continue };
+                        if let Some(e) = self.effects.as_mut()
+                            && let Some(g) = e.spawn(fx, m.transform_point3(offset))
+                        {
+                            g.emit_dir = root.transform_vector3(dir);
+                            if let Some(n) = normal {
+                                g.oriented_normal = n;
+                            }
+                        }
                         continue;
                     }
                     ShipCue::Effect { fx, lift, normal } => (fx, o.pos + GVec3::Y * lift, normal),
@@ -852,6 +927,14 @@ impl Scene3d {
                     g.oriented_normal = n;
                 }
             }
+            if let Some(e) = self.effects.as_mut() {
+                for &(slot, id) in &sv.flames {
+                    if let Some(at) = sphere(id) {
+                        e.move_attached(SHIP_FX | slot as u64, at);
+                    }
+                }
+            }
+            }
         }
 
         // Onions.
@@ -859,17 +942,34 @@ impl Scene3d {
             if o.ship.is_some() {
                 continue;
             }
+            // `GoalItem::playEffect` keeps its flying sparkles under this key.
+            let fx_key = (5u64 << 40) | i as u64;
+            // `GoalItem::mOnionColour` order (blue, red, yellow) picks the flight motions.
+            let colour = o.colors[0].index();
             let (motion_idx, clock) = match o.anim {
                 OnionAnim::Idle => (1, Clock::Loop(30.0)),
                 OnionAnim::Suction { frame } => (2, Clock::Sim(frame)),
                 OnionAnim::Emitting { frame } => (0, Clock::Sim(frame)),
+                OnionAnim::TakeOff { frame } => (libpikmin::anim::ANIM_GOAL_TAKEOFF + colour, Clock::Sim(frame)),
+                OnionAnim::Landing { frame } => (libpikmin::anim::ANIM_GOAL_LAND + colour, Clock::Sim(frame)),
+                OnionAnim::Away => {
+                    if let Some(e) = self.effects.as_mut() {
+                        e.detach(fx_key);
+                    }
+                    continue;
+                }
             };
+            let key = (3u64 << 40) | i as u64;
+            // Where the motion was last frame, for its effect keys.
+            let before = self.players.get(&key).filter(|p| p.anim == motion_idx).map(|p| p.frame);
             let anim = self.onion_anims.get(motion_idx).map(|(info, a)| {
-                let key = (3u64 << 40) | i as u64;
                 let p = self.players.entry(key).or_insert(Player {
                     anim: motion_idx,
                     frame: 0.0,
                 });
+                if p.anim != motion_idx {
+                    *p = Player { anim: motion_idx, frame: 0.0 };
+                }
                 let end = *info.keys.last().unwrap_or(&0) as f32;
                 p.frame = match clock {
                     Clock::Sim(f) => f,
@@ -877,22 +977,67 @@ impl Scene3d {
                 };
                 (a, p.frame.min(a.frames.saturating_sub(1) as f32))
             });
-            let colour = match o.colors[0] {
-                PikiColor::Blue => 0.0,
-                PikiColor::Red => 1.0,
-                PikiColor::Yellow => 2.0,
-            };
             let root = srt_matrix(GVec3::ONE, GVec3::ZERO, o.pos);
-            draw_model(
+            let now = anim.map_or(0.0, |(_, f)| f);
+            let joints = draw_model(
                 &self.onion,
                 root,
                 anim,
                 Look {
-                    color_frame: Some(colour * 2.0),
+                    color_frame: Some(colour as f32 * 2.0),
                     ..Default::default()
                 },
                 &mut ctx,
             );
+            let flying = matches!(o.anim, OnionAnim::TakeOff { .. } | OnionAnim::Landing { .. });
+            if let (true, Some(e), Some((info, _))) = (flying, self.effects.as_mut(), self.onion_anims.get(motion_idx)) {
+                let coll = &self.onion.model.coll;
+                let sphere = |id: &str| {
+                    let c = coll.iter().find(|c| c.id == id)?;
+                    Some(joints.get(c.joint)?.transform_point3(c.centre))
+                };
+                let landing = matches!(o.anim, OnionAnim::Landing { .. });
+                // `GoalItem::startLand` turns the sparkles on.
+                if landing
+                    && before.is_none()
+                    && let Some(at) = sphere("piki")
+                {
+                    e.attach(fx_key, effects::KAFUN_NG, at);
+                }
+                let from = before.unwrap_or(-1.0);
+                for k in info.event_keys.iter().filter(|k| k.event == 1) {
+                    let f = k.frame as f32;
+                    if !(from <= f && f < now) {
+                        continue;
+                    }
+                    // `GoalItem::playEffect`. Not shown: the light cone shrinking (this viewer
+                    // has no cone) and the flight light, which the game only records.
+                    match (landing, k.value) {
+                        (false, 0) => {
+                            if let Some(at) = sphere("piki") {
+                                e.attach(fx_key, effects::KAFUN_NG, at);
+                            }
+                        }
+                        (false, 2) => {
+                            e.spawn(effects::ROCKET_TAKE_S, o.pos);
+                        }
+                        (true, 0) => {
+                            e.spawn(effects::ROCKET_LAND_S, o.pos);
+                        }
+                        (true, 1 | 2) => {
+                            let feet: &[&str] = if k.value == 1 { &["bas1"] } else { &["bas1", "bas2", "bas3"] };
+                            for at in feet.iter().filter_map(|id| sphere(id)) {
+                                e.spawn(effects::ROCKET_SMOKE_D, at);
+                            }
+                        }
+                        (true, 3) => e.detach(fx_key),
+                        _ => {}
+                    }
+                }
+                if let Some(at) = sphere("piki") {
+                    e.move_attached(fx_key, at);
+                }
+            }
         }
 
         // Pellets and corpses: the numbered pellets, sized to the thing being carried.

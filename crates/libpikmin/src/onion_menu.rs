@@ -87,7 +87,7 @@ impl Sim {
         }
         self.onions
             .iter()
-            .filter(|o| o.ship.is_none() && (o.pos - c.pos).with_y(0.0).length() < CONTAINER_REACH)
+            .filter(|o| o.ship.is_none() && o.grounded() && (o.pos - c.pos).with_y(0.0).length() < CONTAINER_REACH)
             .min_by(|a, b| {
                 let da = (a.pos - c.pos).length();
                 let db = (b.pos - c.pos).length();
@@ -161,7 +161,7 @@ impl Sim {
     /// `GoalItem` dispensing: one Pikmin out every 0.04-0.06 s.
     pub(crate) fn update_onion_exits(&mut self, dt: f32) {
         for oi in 0..self.onions.len() {
-            if self.onions[oi].exits.is_empty() {
+            if self.onions[oi].exits.is_empty() || !self.onions[oi].grounded() {
                 continue;
             }
             self.onions[oi].exit_timer -= dt;

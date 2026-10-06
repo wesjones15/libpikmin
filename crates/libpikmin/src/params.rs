@@ -407,7 +407,7 @@ impl Params {
 
     /// Loads everything libpikmin reads from a folder extracted from the user's disc, laid
     /// out like `files/dataDir` (`parms/*.bin`, `pikis/animMgr.bin`,
-    /// `objects/goal/anims.bin`). Returns what it applied.
+    /// `objects/goal/anims.bin`, `objects/ufo/ufo0705.bin`). Returns what it applied.
     pub fn load_extracted(
         &mut self,
         root: &std::path::Path,
@@ -422,6 +422,11 @@ impl Params {
         if goal.exists() {
             self.anim.apply_goal_anims(&std::fs::read(goal)?)?;
             applied.push("goal/anims.bin");
+        }
+        let ufo = root.join("objects/ufo/ufo0705.bin");
+        if ufo.exists() {
+            self.anim.apply_ufo_anims(&std::fs::read(ufo)?)?;
+            applied.push("ufo0705.bin");
         }
         let pel = root.join("parms/pelMgr.bin");
         if pel.exists() {

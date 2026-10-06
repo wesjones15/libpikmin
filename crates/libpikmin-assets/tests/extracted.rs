@@ -283,3 +283,39 @@ fn ship_animator_runs_a_delivery_and_a_level_up() {
     run(&mut s, 3.5, &mut cues);
     assert!(cues.contains(&ShipCue::Sound("SE_UFO_ENGINE")));
 }
+
+#[test]
+fn ship_takes_off_with_its_level_s_motion_and_flames() {
+    use libpikmin_assets::AnimMgr;
+    use libpikmin_assets::ship::{self, ShipAnimator, ShipCue, motion};
+    let Some(disc) = disc() else { return };
+    let mgr = AnimMgr::parse(&disc.read(ship::SHIP_ANIM_MGR).unwrap()).unwrap();
+    let mut s = ShipAnimator::new(&mgr, vec![None; 30]);
+    let mut cues = Vec::new();
+    // Ionium Jet #1 (uf10, part 14) on board: the left thruster fires.
+    let on_board = [14u32];
+    s.start(&on_board, 3, &mut cues);
+    cues.clear();
+    s.take_off(&on_board, &mut cues);
+    assert!(cues.contains(&ShipCue::StopSound("SE_UFO_IDLING")));
+    assert_eq!(s.context(0).0, motion::TAKEOFF[2]);
+    for _ in 0..60 {
+        s.update(1.0 / 30.0, &mut cues);
+    }
+    assert!(cues.contains(&ShipCue::DemoSound { demo: 32, cmd: 0 }));
+    let flames = cues.iter().filter(|c| matches!(c, ShipCue::Attached { .. })).count();
+    assert_eq!(flames, 8, "two flames on each engine");
+    assert!(cues.iter().any(|c| matches!(c, ShipCue::Effect { .. })), "ground blast");
+    for _ in 0..360 {
+        s.update(1.0 / 30.0, &mut cues);
+    }
+    assert!(cues.iter().any(|c| matches!(c, ShipCue::JointEffect { joint: 49, .. })), "left thruster");
+    assert!(!cues.iter().any(|c| matches!(c, ShipCue::JointEffect { joint: 48, .. })), "no right one");
+    assert!(cues.contains(&ShipCue::DemoSound { demo: 32, cmd: 1 }));
+
+    cues.clear();
+    s.land(&on_board, 3, &mut cues);
+    assert!(!s.taking_off());
+    assert_eq!(s.context(0), (motion::WAIT, 0.0));
+    assert!(cues.contains(&ShipCue::Sound("SE_UFO_IDLING")));
+}

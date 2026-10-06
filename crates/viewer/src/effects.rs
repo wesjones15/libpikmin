@@ -148,6 +148,9 @@ pub struct Effects {
     extra: Vec<(EffectDef, Def)>,
     /// Running one-shots; each finishes on its own (`mMaxPasses`).
     oneshots: Vec<Generator>,
+    /// Effects that follow something (`setEmitPosPtr`), by the host's key. They run until
+    /// detached, then run down as one-shots.
+    attached: Vec<(u64, Generator)>,
     pipes: HashMap<(u8, u8), Material>,
     whistles: HashMap<CaptainId, Whistle>,
     /// `Navi::renderCircle`'s spinning angle (a static shared by every captain).
@@ -264,11 +267,23 @@ impl Effects {
                 effects::ROCKET_NKE[0],
                 effects::ROCKET_NKE[1],
                 effects::CLOUD_OF_DUST_1,
+                effects::ROCKET_FKM1,
+                effects::ROCKET_LAND,
+                effects::KAFUN_NG,
+                effects::ROCKET_TAKE_S,
+                effects::ROCKET_LAND_S,
+                effects::ROCKET_SMOKE_D,
             ]
             .into_iter()
+            .chain(effects::ROCKET_JETS.into_iter().flatten())
+            .chain(effects::ROCKET_JET_G)
+            .chain(effects::ROCKET_BOOST_GROUND)
+            .chain(effects::ROCKET_BOOSTER)
+            .chain(effects::ROCKET_PCA)
                 .filter_map(|d| Some((d, Def::load(assets, d)?)))
                 .collect(),
             oneshots: Vec::new(),
+            attached: Vec::new(),
             pipes: HashMap::new(),
             whistles: HashMap::new(),
             ring_angle: 0.0,
@@ -288,6 +303,41 @@ impl Effects {
         let g = self.generator(&pcr, pos);
         self.oneshots.push(g);
         self.oneshots.last_mut()
+    }
+
+    /// Starts an effect that follows something, replacing the one under `key`.
+    pub fn attach(&mut self, key: u64, def: EffectDef, pos: Vec3) -> Option<&mut Generator> {
+        self.detach(key);
+        let pcr = self.extra.iter().find(|(d, _)| *d == def).map(|(_, x)| x.pcr.clone())?;
+        let g = self.generator(&pcr, pos);
+        self.attached.push((key, g));
+        self.attached.last_mut().map(|(_, g)| g)
+    }
+
+    /// Moves the effect under `key`.
+    pub fn move_attached(&mut self, key: u64, pos: Vec3) {
+        for (_, g) in self.attached.iter_mut().filter(|(k, _)| *k == key) {
+            g.emit_pos = pos;
+        }
+    }
+
+    /// Stops the effect under `key`; its particles run out (`effectMgr->kill(efx, false)`).
+    pub fn detach(&mut self, key: u64) {
+        self.detach_where(|k| k == key);
+    }
+
+    /// Stops every attached effect whose key matches.
+    pub fn detach_where(&mut self, f: impl Fn(u64) -> bool) {
+        let mut i = 0;
+        while i < self.attached.len() {
+            if f(self.attached[i].0) {
+                let (_, mut g) = self.attached.swap_remove(i);
+                g.finish();
+                self.oneshots.push(g);
+            } else {
+                i += 1;
+            }
+        }
     }
 
     /// Starts, moves, steps and stops each captain's whistle effects.
@@ -341,6 +391,9 @@ impl Effects {
                 }
             }
             self.oneshots.retain_mut(|g| g.update(1.0, &mut |_| {}));
+            for (_, g) in self.attached.iter_mut() {
+                g.update(1.0, &mut |_| {});
+            }
             // Effects of captains that have left the list still run down.
             for (id, w) in self.whistles.iter_mut() {
                 if frames.iter().any(|f| f.captain == *id) {
@@ -396,7 +449,7 @@ impl Effects {
             .chain(self.extra.iter().map(|(_, d)| d))
             .map(|d| (d.pcr.clone(), d.tex.clone(), d.child_tex.clone()))
             .collect();
-        for g in self.oneshots.iter_mut() {
+        for g in self.oneshots.iter_mut().chain(self.attached.iter_mut().map(|(_, g)| g)) {
             if let Some(def) = defs.iter().find(|d| Arc::ptr_eq(&d.0, &g.pcr)).cloned() {
                 batches.push((def, g.quads(right, up)));
             }

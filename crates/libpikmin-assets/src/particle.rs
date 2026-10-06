@@ -77,6 +77,58 @@ pub mod effects {
     ];
     /// `EFF_CloudOfDust_1`
     pub const CLOUD_OF_DUST_1: EffectDef = one("effects/pcr/kch_kem1.pcr", "effects/tex/hokori4.bti");
+
+    const fn jet(fb: &'static str, fa: &'static str) -> [EffectDef; 2] {
+        [one(fb, "effects/tex/kaen_2.bti"), one(fa, "effects/tex/kaen_2.bti")]
+    }
+    /// `EFF_Rocket_NJ*FB` / `NJ*FA`: the engines' flames (ufoItem.cpp `effects[8][4]`, the two
+    /// columns `setJetEffect` uses without smoke). Rows 0-3 are for ship levels 2-5; rows
+    /// 4-7 are one per engine below level 2.
+    pub const ROCKET_JETS: [[EffectDef; 2]; 8] = [
+        jet("effects/pcr/r_nj2fb.pcr", "effects/pcr/r_nj2fa.pcr"),
+        jet("effects/pcr/r_nj2fb.pcr", "effects/pcr/r_nj2fa.pcr"),
+        jet("effects/pcr/r_nj3fb.pcr", "effects/pcr/r_nj3fa.pcr"),
+        jet("effects/pcr/r_nj3fb.pcr", "effects/pcr/r_nj3fa.pcr"),
+        jet("effects/pcr/r_nj1fb.pcr", "effects/pcr/r_nj1fa.pcr"),
+        jet("effects/pcr/r_nj1fb2.pcr", "effects/pcr/r_nj1fa2.pcr"),
+        jet("effects/pcr/r_nj1fb3.pcr", "effects/pcr/r_nj1fa3.pcr"),
+        jet("effects/pcr/r_nj1fb4.pcr", "effects/pcr/r_nj1fa4.pcr"),
+    ];
+    /// `EFF_Rocket_JetG01-03`: the blast on the ground as the ship lifts off.
+    pub const ROCKET_JET_G: [EffectDef; 3] = [
+        one("effects/pcr/jetg01.pcr", "effects/tex/ov_cloud.bti"),
+        one("effects/pcr/jetg02.pcr", "effects/tex/ov_cloud.bti"),
+        one("effects/pcr/jetg03.pcr", "effects/tex/ov_cloud.bti"),
+    ];
+    /// `EFF_Rocket_Fkm1`
+    pub const ROCKET_FKM1: EffectDef = one("effects/pcr/rct_fkm1.pcr", "effects/tex/hokori4.bti");
+    /// `EFF_Rocket_Bstg`, `Bst1db`, `Bst1da`: the finished ship's ground blast.
+    pub const ROCKET_BOOST_GROUND: [EffectDef; 3] = [
+        one("effects/pcr/bstg.pcr", "effects/tex/ov_cloud.bti"),
+        one("effects/pcr/r_bst1db.pcr", "effects/tex/hokori4.bti"),
+        one("effects/pcr/r_bst1da.pcr", "effects/tex/ov_cloud.bti"),
+    ];
+    /// `EFF_Rocket_Bst1fb`, `Bst1fa`, `Bst1cb`: the finished ship's booster flame at 'gcen'.
+    pub const ROCKET_BOOSTER: [EffectDef; 3] = [
+        one("effects/pcr/r_bst1fb.pcr", "effects/tex/kaen_2.bti"),
+        one("effects/pcr/r_bst1fa.pcr", "effects/tex/kaen_2.bti"),
+        one("effects/pcr/r_bst1cb.pcr", "effects/tex/kaen_2.bti"),
+    ];
+    /// `EFF_Rocket_PCA1/2`: a side thruster puff (`UfoItem::setPca1Effect`).
+    pub const ROCKET_PCA: [EffectDef; 2] = [
+        one("effects/pcr/pca1.pcr", "effects/tex/p_cloud05.bti"),
+        one("effects/pcr/pca2.pcr", "effects/tex/p_hsbs3.bti"),
+    ];
+    /// `EFF_Rocket_Land`: dust as the ship is back (`UfoItem::startAI`).
+    pub const ROCKET_LAND: EffectDef = one("effects/pcr/rkt_land.pcr", "effects/tex/p_cloud05.bti");
+    /// `EFF_Kafun_NG`: sparkles trailing from a flying Onion (`GoalItem::setFlowEffect`).
+    pub const KAFUN_NG: EffectDef = one("effects/pcr/kafun_ng.pcr", "effects/tex/star4_i.bti");
+    /// `EFF_Rocket_TakeS`: dust as an Onion lifts off.
+    pub const ROCKET_TAKE_S: EffectDef = one("effects/pcr/take_s.pcr", "effects/tex/hokori4.bti");
+    /// `EFF_Rocket_LandS`: dust as an Onion touches down.
+    pub const ROCKET_LAND_S: EffectDef = one("effects/pcr/land_s.pcr", "effects/tex/hokori4.bti");
+    /// `EFF_Rocket_SmokeD`: smoke at an Onion's feet as it lands.
+    pub const ROCKET_SMOKE_D: EffectDef = one("effects/pcr/kemuri_d.pcr", "effects/tex/kaen_ok.bti");
 }
 
 /// `PTCLFLAG_*` (zen/particle.h).

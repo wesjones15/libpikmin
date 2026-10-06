@@ -14,6 +14,8 @@ pub enum Event {
     PikiEnteredOnion { piki: PikiId, onion: OnionId },
     /// A Pikmin started sliding out of an Onion (`SE_PIKI_OUTHOME`).
     PikiLeftOnion { piki: PikiId, onion: OnionId },
+    /// An Onion (or the ship) is back on the ground after [`crate::Sim::onion_land`].
+    OnionLanded { onion: OnionId },
     /// A nectar drop hit the ground; its puddle appears shortly.
     NectarSplash { pos: Vec3 },
     /// A nectar puddle finished draining.

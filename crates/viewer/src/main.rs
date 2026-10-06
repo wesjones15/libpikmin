@@ -6,7 +6,8 @@
 //! Space = throw (hold, release to throw), Shift / right mouse = whistle, X = dismiss,
 //! Tab = switch captain, C / B / U = spawn a Dwarf Bulborb / Spotty Bulborb / Honeywisp at the cursor, G = make creatures shake, IJKL = C-stick swarm,
 //! F1 = formation debug, R = reset, mouse wheel = zoom, M = next stage's music. Space next to a
-//! sprout plucks it. Sound is the game's own (`libpikmin-audio`); `PIKMIN_MUTE=1` turns it off.
+//! sprout plucks it. T = the ship and Onions take off (as at the end of the day), and once
+//! they're gone, T again lands them (the next morning). Sound is the game's own (`libpikmin-audio`); `PIKMIN_MUTE=1` turns it off.
 //!
 //! Dead creatures become corpses the Pikmin can carry to the Onions (red, yellow, blue).
 //! Creatures fight back: they chase, bite (eating up to 3 Pikmin, hurting captains) and the big
@@ -20,7 +21,8 @@
 //! start (autoplay then throws at the corpses), `PIKMIN_WHISTLE=1` holds the whistle and
 //! `PIKMIN_DIE=n` kills n of the active squad at the start (for the ghosts);
 //! `PIKMIN_PART_TEXT=i` opens ship part i's description; `PIKMIN_SHIP_PARTS=n` puts parts
-//! 0..n on the ship and `PIKMIN_DELIVER=i` plays part i arriving at it.
+//! 0..n on the ship and `PIKMIN_DELIVER=i` plays part i arriving at it; `PIKMIN_TAKEOFF=1`
+//! presses T at the start, `PIKMIN_TAKEOFF=2` also once everything is gone (to land).
 
 use std::path::PathBuf;
 
@@ -124,6 +126,8 @@ struct Game {
     notice: Option<(String, f32)>,
     /// Ship parts whose discovery text has shown (`DEMOFLAG_UfoPartDiscoveryOffset + id`).
     found: Vec<u32>,
+    /// Seconds until the Onions follow the ship up.
+    onions_take_off_in: Option<f32>,
 }
 
 /// The ship's 'gol1' / 'suc1' points from its model at `pos` facing `yaw`.
@@ -264,6 +268,7 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
         params_source,
         notice: None,
         found: Vec::new(),
+        onions_take_off_in: None,
     }
 }
 
@@ -666,6 +671,41 @@ async fn main() {
             }
         }
         let sim_dt = if paused { 0.0 } else { dt };
+        // T: take off, as the end of the day does without its scene: the ship first, the
+        // Onions 111 frames later (`cinemas/demo32.cin`'s `Takeoff` events). Once all are gone,
+        // T lands them again (`cinemas/demo40.cin`: the Onions land together).
+        let ship_id = g.sim.onions().iter().find(|o| o.ship.is_some()).map(|o| o.id);
+        let onions: Vec<_> = g.sim.onions().iter().map(|o| (o.id, o.grounded(), o.anim == OnionAnim::Away)).collect();
+        let auto_t = match std::env::var("PIKMIN_TAKEOFF").as_deref() {
+            Ok("1") => frames == 10,
+            Ok("2") => frames == 10 || onions.iter().all(|o| o.2),
+            _ => false,
+        };
+        if (is_key_pressed(KeyCode::T) || auto_t) && !paused && g.onions_take_off_in.is_none() {
+            if onions.iter().all(|o| o.1) {
+                match ship_id {
+                    Some(ship) => {
+                        g.sim.onion_take_off(ship);
+                        g.onions_take_off_in = Some(111.0 / 30.0);
+                    }
+                    None => g.onions_take_off_in = Some(0.0),
+                }
+            } else if onions.iter().all(|o| o.2) {
+                for (id, ..) in onions {
+                    g.sim.onion_land(id);
+                }
+            }
+        }
+        if let Some(t) = g.onions_take_off_in.as_mut() {
+            *t -= sim_dt;
+            if *t <= 0.0 {
+                g.onions_take_off_in = None;
+                let ids: Vec<_> = g.sim.onions().iter().filter(|o| o.ship.is_none()).map(|o| o.id).collect();
+                for id in ids {
+                    g.sim.onion_take_off(id);
+                }
+            }
+        }
         if let Some((_, t)) = g.notice.as_mut() {
             *t -= dt;
             if *t <= 0.0 {
@@ -726,6 +766,12 @@ async fn main() {
 
         let sprout_sounds = scene.as_mut().map(|sc| std::mem::take(&mut sc.sprout_sounds)).unwrap_or_default();
         let ship_sounds = scene.as_mut().map(|sc| std::mem::take(&mut sc.ship_sounds)).unwrap_or_default();
+        let demo_sounds = scene.as_mut().map(|sc| std::mem::take(&mut sc.demo_sounds)).unwrap_or_default();
+        if let Some(a) = audio.as_ref() {
+            for d in demo_sounds {
+                a.demo(d);
+            }
+        }
         match audio.as_mut() {
             Some(a) => {
                 let me = g.sim.captain(active);
@@ -791,17 +837,22 @@ async fn main() {
 
         for o in g.sim.onions() {
             let s = to_screen(o.pos);
-            let col = piki_color(o.colors[0]);
+            // The ship has no colour.
+            let col = o.colors.first().map_or(LIGHTGRAY, |&c| piki_color(c));
             draw_circle(s.x, s.y, 34.0 * zoom, Color::new(col.r, col.g, col.b, 0.35));
             draw_circle_lines(s.x, s.y, 34.0 * zoom, 3.0, col);
             let state = match o.anim {
                 OnionAnim::Idle => "",
                 OnionAnim::Suction { .. } => "slurp",
                 OnionAnim::Emitting { .. } => "seeds!",
+                OnionAnim::TakeOff { .. } => "taking off",
+                OnionAnim::Away => "away",
+                OnionAnim::Landing { .. } => "landing",
             };
             let stored: u32 = o.stored_total();
+            let name = if o.ship.is_some() { "Ship" } else { "Onion" };
             draw_text(
-                format!("Onion {state}"),
+                format!("{name} {state}"),
                 s.x - 30.0,
                 s.y - 38.0 * zoom,
                 18.0,

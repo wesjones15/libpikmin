@@ -135,6 +135,14 @@ impl Audio {
         self.with(|s| s.play(name, Vec3::ZERO));
     }
 
+    /// A command for the cutscene sound track (`Jac_DemoSound`), or `None` to end it.
+    pub fn demo(&self, cmd: Option<(u16, u16)>) {
+        self.with(|s| match cmd {
+            Some((demo, cmd)) => s.demo_sound(demo, cmd),
+            None => s.end_demo(),
+        });
+    }
+
     /// Once per game frame: the camera, emitter positions, enemy animation sounds, and
     /// whether the active captain is whistling.
     pub fn frame(

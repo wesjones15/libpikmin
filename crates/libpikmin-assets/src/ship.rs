@@ -148,6 +148,8 @@ pub mod motion {
     pub const WAIT: usize = 1;
     pub const HENKA1: usize = 3;
     pub const HENKA4B: usize = 10;
+    /// `UfoItem::startTakeoff`: pm_st_l1-3 by ship level 1-5 (level 0 uses the first).
+    pub const TAKEOFF: [usize; 5] = [11, 11, 12, 13, 13];
     pub const OPEN_CLOSE: usize = 16;
 }
 
@@ -176,6 +178,26 @@ pub enum ShipCue {
     },
     /// An effect where part `part` sits on the ship (`UfoParts::mRepairEffectPosition`).
     PartEffect { fx: crate::particle::EffectDef, part: usize },
+    /// An effect that follows the ship model's collision sphere `sphere` (`setEmitPosPtr` on
+    /// its centre). It runs until the host stops it; a new one in the same `slot` replaces it
+    /// (`setJetEffect` kills the old flames first).
+    Attached {
+        fx: crate::particle::EffectDef,
+        sphere: &'static str,
+        normal: Option<glam::Vec3>,
+        slot: u8,
+    },
+    /// An effect at `offset` in joint `joint`'s space, emitting along `dir` in the ship's
+    /// space (`setEmitDir(dir.rotate(mWorldMtx))`).
+    JointEffect {
+        fx: crate::particle::EffectDef,
+        joint: usize,
+        offset: glam::Vec3,
+        dir: glam::Vec3,
+        normal: Option<glam::Vec3>,
+    },
+    /// A command to the cutscene sound track (`Jac_DemoSound`) for demo `demo`.
+    DemoSound { demo: u16, cmd: u16 },
 }
 
 /// One part's animation once it's on the ship (`PlayerState::UfoParts`): the lower animator
@@ -215,6 +237,10 @@ pub struct ShipAnimator {
     repairing: Option<usize>,
     /// `isUfoBroken`: no parts on board.
     broken: bool,
+    /// `hasUfoLeftControl` / `hasUfoRightControl`: Ionium Jet #1 / #2 are on board.
+    ionium: [bool; 2],
+    /// Frames since the take off started.
+    takeoff_time: Option<f32>,
 }
 
 const SPEED: f32 = 30.0;
@@ -226,6 +252,17 @@ const SATELLITE_ID: &str = "uf03";
 /// `PlayerState::startSpecialMotions`: the Bowsprit, Whimsical Radar, Interstellar Radio and
 /// Guard Satellite.
 const SPECIAL_IDS: [&str; 4] = ["ust1", "uf01", "uf02", "uf03"];
+/// `UFOID_IoniumJet1` / `2` (`PlayerState::getUfoParts` sets the left / right control flags).
+const IONIUM_JET_IDS: [&str; 2] = ["uf10", "uf11"];
+/// The engines' collision spheres (`setJetEffect`).
+const ENGINES: [&str; 4] = ["eng1", "eng2", "eng3", "eng4"];
+/// The side thrusters: joints 49 (left) and 48 (right), 14 up (`UfoItem::demoDraw`).
+const PCA_JOINTS: [usize; 2] = [49, 48];
+/// The take off's sound is the end-of-day scene's (`DEMOID_ChalDayEndPractice`,
+/// cinemas/demo32.cin, which starts with `DemoEventUFO::Takeoff` at frame 0): its timed
+/// commands (pikidemo.c `demo32`).
+const TAKEOFF_DEMO: u16 = 32;
+const TAKEOFF_DEMO_SOUNDS: [(f32, u16); 2] = [(0.0, 0), (160.0, 1)];
 
 impl ShipAnimator {
     /// `ship` is `ufo0705.bin`; `parts[i]` is part `i`'s AnimMgr and whether it has an
@@ -246,6 +283,8 @@ impl ShipAnimator {
             parts: vec![None; n],
             repairing: None,
             broken: true,
+            ionium: [false; 2],
+            takeoff_time: None,
         }
     }
 
@@ -264,6 +303,9 @@ impl ShipAnimator {
     /// `UfoItem::startAI`: the ship as it stands when the level starts, with `on_board` parts
     /// already fitted and showing `level`.
     pub fn start(&mut self, on_board: &[u32], level: u8, cues: &mut Vec<ShipCue>) {
+        self.takeoff_time = None;
+        self.repairing = None;
+        self.parts.iter_mut().for_each(|p| *p = None);
         let broken = on_board.is_empty();
         self.broken = broken;
         self.start_ctx(0, if broken { motion::WAIT_TUTORIAL } else { motion::WAIT });
@@ -396,6 +438,39 @@ impl ShipAnimator {
         self.start_flag_motions(level);
     }
 
+    /// `UfoItem::startTakeoff`: the take off motion for the ship's level carries it up and
+    /// away, and the parts with special motions start them (`startSpecialMotions`).
+    /// `on_board` decides the side thrusters.
+    pub fn take_off(&mut self, on_board: &[u32], cues: &mut Vec<ShipCue>) {
+        let idx = (self.level as usize).saturating_sub(1).min(4);
+        self.start_ctx(0, motion::TAKEOFF[idx]);
+        self.speed[0] = SPEED;
+        self.listening = true;
+        self.repairing = None;
+        self.special_motions();
+        let has = |id: &str| PART_IDS.iter().position(|p| *p == id).is_some_and(|i| on_board.contains(&(i as u32)));
+        self.ionium = IONIUM_JET_IDS.map(has);
+        // The take off scene silences the field (`Jac_StartDemo` -> `Jac_InitAllEvent`),
+        // which stops the ship's hum.
+        cues.push(ShipCue::StopSound("SE_UFO_IDLING"));
+        cues.push(ShipCue::StopSound("SE_UFO_DESTROY"));
+        self.takeoff_time = Some(0.0);
+    }
+
+    /// The next day (`UfoItem::startAI`): the ship stands as it was, with dust as it's back.
+    /// It has no landing motion.
+    pub fn land(&mut self, on_board: &[u32], level: u8, cues: &mut Vec<ShipCue>) {
+        self.start(on_board, level, cues);
+        if !self.broken {
+            cues.push(ShipCue::Effect { fx: effects::ROCKET_LAND, lift: 0.0, normal: None });
+        }
+    }
+
+    /// Whether the ship is taking off.
+    pub fn taking_off(&self) -> bool {
+        self.takeoff_time.is_some()
+    }
+
     /// `UfoItem::suckMe`: a part starts going in; the ship plays up to its Action0 key.
     pub fn suck_start(&mut self) {
         self.start_ctx(0, if self.broken { motion::WAIT_TUTORIAL } else { motion::WAIT });
@@ -426,6 +501,15 @@ impl ShipAnimator {
     /// One frame of `dt` seconds: `UfoItem::update`'s `updateAnimation`, the lights
     /// (`LightAnimator::update`) and the parts (`renderParts`).
     pub fn update(&mut self, dt: f32, cues: &mut Vec<ShipCue>) {
+        if let Some(t) = self.takeoff_time.as_mut() {
+            let step = SPEED * dt;
+            for (at, cmd) in TAKEOFF_DEMO_SOUNDS {
+                if at >= *t && at < *t + step {
+                    cues.push(ShipCue::DemoSound { demo: TAKEOFF_DEMO, cmd });
+                }
+            }
+            *t += step;
+        }
         let mut ev = Vec::new();
         for i in 0..8 {
             let Some(info) = self.ship.get(self.ctx[i].motion) else { continue };
@@ -477,6 +561,12 @@ impl ShipAnimator {
     /// `UfoItem::animationKeyUpdated` for the motions it reacts to.
     fn ship_key(&mut self, e: KeyEvent, cues: &mut Vec<ShipCue>) {
         let m = self.ctx[0].motion;
+        if motion::TAKEOFF.contains(&m) {
+            if let KeyEvent::Effect(v) = e {
+                self.takeoff_key(v, cues);
+            }
+            return;
+        }
         if m != motion::WAIT_TUTORIAL && m != motion::WAIT && m != motion::OPEN_CLOSE {
             return;
         }
@@ -506,6 +596,64 @@ impl ShipAnimator {
                 cues.push(ShipCue::Effect { fx: effects::CLOUD_OF_DUST_1, lift: 0.0, normal: None });
             }
             _ => {}
+        }
+    }
+
+    /// `UfoItem::animationKeyUpdated` for the take off motions' effect keys.
+    fn takeoff_key(&mut self, v: u8, cues: &mut Vec<ShipCue>) {
+        let ground = |fx| ShipCue::Effect { fx, lift: 0.0, normal: None };
+        match v {
+            0 => self.jets(cues),
+            1 => {
+                match self.level {
+                    0 | 1 => cues.extend([ground(effects::ROCKET_JET_G[0]), ground(effects::ROCKET_FKM1)]),
+                    2 | 3 => cues.extend([ground(effects::ROCKET_JET_G[1]), ground(effects::ROCKET_FKM1)]),
+                    4 => cues.extend([ground(effects::ROCKET_JET_G[2]), ground(effects::ROCKET_FKM1)]),
+                    _ => cues.extend(effects::ROCKET_BOOST_GROUND.map(ground)),
+                }
+                // The game falls through to key 9 here.
+                self.booster(cues);
+            }
+            9 => self.booster(cues),
+            2 if self.ionium[1] => self.side_thruster(1, -glam::Vec3::X, cues),
+            3 if self.ionium[0] => self.side_thruster(0, glam::Vec3::X, cues),
+            _ => {}
+        }
+    }
+
+    /// `UfoItem::setJetEffect(level, false)`: flames on the four engines, picked by the ship's
+    /// level (below level 2 each engine has its own).
+    fn jets(&self, cues: &mut Vec<ShipCue>) {
+        let level = self.level.min(5) as usize;
+        for (i, sphere) in ENGINES.into_iter().enumerate() {
+            let row = if level <= 1 { 4 + i } else { level - 2 };
+            let [fb, fa] = effects::ROCKET_JETS[row];
+            cues.push(ShipCue::Attached { fx: fb, sphere, normal: None, slot: i as u8 * 2 });
+            cues.push(ShipCue::Attached { fx: fa, sphere, normal: Some(glam::Vec3::X), slot: i as u8 * 2 + 1 });
+        }
+    }
+
+    /// The finished ship's booster at 'gcen'.
+    fn booster(&self, cues: &mut Vec<ShipCue>) {
+        if self.level != 5 {
+            return;
+        }
+        for (i, fx) in effects::ROCKET_BOOSTER.into_iter().enumerate() {
+            let normal = (i == 1).then_some(glam::Vec3::X);
+            cues.push(ShipCue::Attached { fx, sphere: "gcen", normal, slot: 8 + i as u8 });
+        }
+    }
+
+    /// `UfoItem::setPca1Effect` (left) / `setPca2Effect` (right).
+    fn side_thruster(&self, side: usize, dir: glam::Vec3, cues: &mut Vec<ShipCue>) {
+        for fx in effects::ROCKET_PCA {
+            cues.push(ShipCue::JointEffect {
+                fx,
+                joint: PCA_JOINTS[side],
+                offset: glam::Vec3::new(0.0, 14.0, 0.0),
+                dir,
+                normal: Some(glam::Vec3::Y),
+            });
         }
     }
 

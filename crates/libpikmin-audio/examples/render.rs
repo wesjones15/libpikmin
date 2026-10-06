@@ -1,7 +1,7 @@
 //! Renders the game's music and sound effects to `.wav` files.
 //!
 //! `cargo run -p libpikmin-audio --example render -- <out_dir> [bgm id] [seconds]`
-//! writes `bgm_<id>.wav`, then one file per sound in `SOUNDS`.
+//! writes `bgm_<id>.wav`, then one file per sound in `SOUNDS`, then the ship's take off.
 
 use std::sync::Arc;
 
@@ -134,4 +134,20 @@ fn main() {
         println!("  tail rms {rms:.4}");
         write_wav(&out.join(format!("{name}.wav")), DAC_RATE as u32, &v);
     }
+
+    // The ship's take off: the end-of-day scene's sound commands 0 and 1 (frames 0 and 160).
+    let mut s = SoundSystem::new(data.clone(), tables.clone());
+    let mut v = Vec::new();
+    for f in 0..600 {
+        match f {
+            0 => s.demo_sound(32, 0),
+            160 => s.demo_sound(32, 1),
+            400 => s.end_demo(),
+            _ => {}
+        }
+        s.frame();
+        v.extend(s.render_native(1.0 / 30.0));
+    }
+    stats("takeoff", &v);
+    write_wav(&out.join("takeoff.wav"), DAC_RATE as u32, &v);
 }

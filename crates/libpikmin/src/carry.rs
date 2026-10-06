@@ -243,7 +243,7 @@ impl Sim {
             return self
                 .onions
                 .iter()
-                .filter(|o| o.ship.is_some())
+                .filter(|o| o.ship.is_some() && o.grounded())
                 .min_by(|a, b| dist_xz(a.pos, pos).total_cmp(&dist_xz(b.pos, pos)))
                 .map(|o| (o.id, color));
         }
@@ -260,7 +260,7 @@ impl Sim {
         let nearest = |accepting: bool| {
             self.onions
                 .iter()
-                .filter(|o| o.ship.is_none())
+                .filter(|o| o.ship.is_none() && o.grounded())
                 .filter(|o| !accepting || o.accepts(color))
                 .min_by(|a, b| dist_xz(a.pos, pos).total_cmp(&dist_xz(b.pos, pos)))
                 .map(|o| o.id)
@@ -277,6 +277,9 @@ impl Sim {
     /// `Pellet::onSlotStickStart` / `onSlotStickEnd` keep the colour counts that
     /// `Pellet::getPelletGoal` reads, we re-pick when Pikmin join or leave on the way.
     fn goal_still_majority(&self, pi: usize, onion: OnionId) -> bool {
+        if !self.onions[onion.0 as usize].grounded() {
+            return false;
+        }
         if self.pellets[pi].desc.ship_part.is_some() {
             return true;
         }
@@ -287,7 +290,7 @@ impl Sim {
         let max = counts.iter().copied().max().unwrap_or(0);
         let o = &self.onions[onion.0 as usize];
         (0..3).any(|c| counts[c] == max && o.accepts(PikiColor::from_index(c)))
-            || !self.onions.iter().filter(|o| o.ship.is_none()).any(|other| {
+            || !self.onions.iter().filter(|o| o.ship.is_none() && o.grounded()).any(|other| {
                 (0..3).any(|c| counts[c] == max && other.accepts(PikiColor::from_index(c)))
             })
     }
@@ -385,7 +388,10 @@ impl Sim {
         next: &mut usize,
     ) {
         let min = self.pellets[i].desc.min_carriers.max(1);
-        if (self.pellets[i].carriers.len() as u32) < min {
+        // Its Onion took off and none other is down to reroute to: put it down too, and lift
+        // again once one lands.
+        let gone = !self.onions[onion.0 as usize].grounded();
+        if (self.pellets[i].carriers.len() as u32) < min || gone {
             // "小人数!!!": too few, put it down. The rest keep hold and struggle (Lift).
             let p = &mut self.pellets[i];
             p.state = PelletState::Idle;
@@ -759,5 +765,51 @@ mod tests {
         assert_eq!(got, Some((4, 1, ship)));
         assert_eq!(sim.onions()[ship.0 as usize].ship.as_ref().unwrap().parts, vec![4]);
         assert!(sim.sprouts().next().is_none(), "no seeds from a ship part");
+    }
+
+    #[test]
+    fn an_onion_taking_off_stops_deliveries_until_it_lands() {
+        let mut sim = Sim::new(Params::default(), 7);
+        let mut host = FlatHost;
+        let red = sim.add_onion(Vec3::new(600.0, 0.0, 0.0), &[PikiColor::Red]);
+        let pel = sim.spawn_pellet(PelletDesc {
+            pos: Vec3::ZERO,
+            yaw: 0.0,
+            radius: 10.0,
+            height: 10.0,
+            min_carriers: 1,
+            max_carriers: 4,
+            seeds_matching: 1,
+            seeds_other: 1,
+            color: None,
+            creature: None,
+            ship_part: None,
+        });
+        attach(&mut sim, PikiColor::Red, pel);
+        sim.step(&mut host);
+        assert!(matches!(sim.pellet(pel).state, PelletState::Carried { onion, .. } if onion == red));
+
+        sim.onion_take_off(red);
+        sim.step(&mut host);
+        assert_eq!(sim.pellet(pel).state, PelletState::Idle, "put down: nowhere to take it");
+        for _ in 0..30 * 15 {
+            sim.step(&mut host);
+        }
+        assert_eq!(sim.onions()[0].anim, crate::onion::OnionAnim::Away);
+        assert_eq!(sim.pellet(pel).state, PelletState::Idle, "still waiting");
+
+        sim.onion_land(red);
+        let mut landed = false;
+        for _ in 0..30 * 12 {
+            sim.step(&mut host);
+            landed |= sim.drain_events().any(|e| matches!(e, Event::OnionLanded { onion } if onion == red));
+        }
+        assert!(landed);
+        assert!(sim.onions()[0].grounded());
+        assert!(
+            !matches!(sim.pellet(pel).state, PelletState::Idle),
+            "lifted again once the Onion is back: {:?}",
+            sim.pellet(pel).state
+        );
     }
 }

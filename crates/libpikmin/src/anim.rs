@@ -42,6 +42,13 @@ pub const ANIM_GETUP: usize = 59;
 pub const ANIM_GOAL_FLOWROT: usize = 0;
 /// Onion motion 2, "suction.dck": played when something is sucked in (`GOAL_Effect`).
 pub const ANIM_GOAL_SUCTION: usize = 2;
+/// Onion motions 6-8, "c_blue_t" / "c_red_t" / "c_yell_t": taking off
+/// (`GoalItem::startTakeoff` plays `mOnionColour + 6`), and 9-11, "pm_blu_d" / ...: landing
+/// (`startLand`, `mOnionColour + 9`).
+pub const ANIM_GOAL_TAKEOFF: usize = 6;
+pub const ANIM_GOAL_LAND: usize = 9;
+/// Ship motions 11-13, "pm_st_l1-3": taking off (`UfoItem::startTakeoff`).
+pub const ANIM_UFO_TAKEOFF: [usize; 3] = [11, 12, 13];
 
 /// Frame timings for one animation, as gameplay sees them. Missing keys are `f32::INFINITY`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -83,6 +90,12 @@ pub struct AnimTimings {
     pub goal_flowrot: AnimTiming,
     /// Onion suck-in reaction.
     pub goal_suction: AnimTiming,
+    /// Onion take off and landing lengths, by colour index (blue, red, yellow, as
+    /// `GoalItem::mOnionColour`).
+    pub goal_takeoff: [f32; 3],
+    pub goal_land: [f32; 3],
+    /// The ship's take off length (the longest of its three take off motions).
+    pub ship_takeoff: f32,
     /// Lengths of the three death animations (`PikiDyingState`).
     pub dead: [f32; 3],
     /// Captain hit reaction (`Navi::finishDamage` at its end).
@@ -115,6 +128,9 @@ impl Default for AnimTimings {
             nuku: AnimTiming::new(23.0, 24.0, None, 39.0),
             goal_flowrot: AnimTiming::new(30.0, INF, Some((20.0, 40.0)), 58.0),
             goal_suction: AnimTiming::new(INF, INF, None, 48.0),
+            goal_takeoff: [398.0; 3],
+            goal_land: [279.0; 3],
+            ship_takeoff: 398.0,
             dead: [104.0, 114.0, 129.0],
             damage: AnimTiming::new(INF, INF, None, 19.0),
             punch: AnimTiming::new(1.0, 4.0, None, 9.0),
@@ -255,6 +271,21 @@ impl AnimTimings {
         let infos = parse_anim_mgr(data)?;
         self.goal_flowrot = timing_at(&infos, ANIM_GOAL_FLOWROT)?;
         self.goal_suction = timing_at(&infos, ANIM_GOAL_SUCTION)?;
+        for c in 0..3 {
+            self.goal_takeoff[c] = timing_at(&infos, ANIM_GOAL_TAKEOFF + c)?.end;
+            self.goal_land[c] = timing_at(&infos, ANIM_GOAL_LAND + c)?.end;
+        }
+        Ok(())
+    }
+
+    /// Applies `objects/ufo/ufo0705.bin` (the ship) from the user's disc.
+    pub fn apply_ufo_anims(&mut self, data: &[u8]) -> Result<(), ParmError> {
+        let infos = parse_anim_mgr(data)?;
+        let mut end = 0.0f32;
+        for i in ANIM_UFO_TAKEOFF {
+            end = end.max(timing_at(&infos, i)?.end);
+        }
+        self.ship_takeoff = end;
         Ok(())
     }
 }

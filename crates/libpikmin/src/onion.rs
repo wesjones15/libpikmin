@@ -12,7 +12,7 @@ use glam::Vec3;
 
 use crate::event::Event;
 use crate::math::{ang_dist, dir_of, dist_xz, round_ang, yaw_of};
-use crate::piki::{Happa, PikiColor};
+use crate::piki::{Happa, PikiColor, PikiState};
 use crate::sim::Sim;
 use crate::{CaptainId, Host, PikiId};
 
@@ -31,6 +31,18 @@ pub enum OnionAnim {
     },
     /// "flowrot" looping; one seed per loop end (`GOAL_EmitPiki`).
     Emitting {
+        frame: f32,
+    },
+    /// Flying off (`GoalItem::startTakeoff`, `UfoItem::startTakeoff`): the motion carries it
+    /// up out of sight.
+    TakeOff {
+        frame: f32,
+    },
+    /// Gone from the field until it lands.
+    Away,
+    /// Coming back down (`GoalItem::startLand`). The ship has no landing motion and is
+    /// simply back.
+    Landing {
         frame: f32,
     },
 }
@@ -87,6 +99,12 @@ impl Onion {
         }
     }
 
+    /// On the ground: it can be used, delivered to and called from. Not while taking off,
+    /// away, or landing.
+    pub fn grounded(&self) -> bool {
+        !matches!(self.anim, OnionAnim::TakeOff { .. } | OnionAnim::Away | OnionAnim::Landing { .. })
+    }
+
     /// Where carriers bring things (`getGoalPos`).
     pub fn goal_pos(&self) -> Vec3 {
         self.ship.as_ref().map_or(self.pos, |s| s.goal)
@@ -100,7 +118,10 @@ impl Onion {
             self.queue
                 .extend(std::iter::repeat_n(color, seeds as usize));
         }
-        self.anim = OnionAnim::Suction { frame: 0.0 };
+        // Something finishing going in as it leaves: the seeds wait for it to land.
+        if self.grounded() {
+            self.anim = OnionAnim::Suction { frame: 0.0 };
+        }
     }
 }
 
@@ -279,12 +300,73 @@ impl Sim {
             + self.onions.iter().map(|o| o.exits.len()).sum::<usize>()
     }
 
+    /// Sends an Onion (or the ship) off the field, as at the end of the day
+    /// (`DemoEventOnion::Takeoff` / `DemoEventUFO::Takeoff`). Pikmin climbing in finish going
+    /// in; ones sliding out finish getting off. Seeds and Pikmin waiting to come out stay
+    /// inside until it lands.
+    pub fn onion_take_off(&mut self, onion: OnionId) {
+        let Some(o) = self.onions.get_mut(onion.0 as usize) else { return };
+        if !o.grounded() {
+            return;
+        }
+        o.anim = OnionAnim::TakeOff { frame: 0.0 };
+        for pi in 0..self.pikis.len() {
+            match self.pikis[pi].state {
+                PikiState::Enter { onion: on, .. } if on == onion => {
+                    // `GoalItem::enterGoal`
+                    let p = &mut self.pikis[pi];
+                    let (color, happa, id) = (p.color, p.happa, p.id);
+                    p.state = PikiState::Dead;
+                    self.onions[onion.0 as usize].stored[color.index()][happa as usize] += 1;
+                    self.events.push(Event::PikiEnteredOnion { piki: id, onion });
+                }
+                PikiState::Exit { onion: on, leg, .. } if on == onion => {
+                    let p = &mut self.pikis[pi];
+                    p.state = PikiState::Exit { onion, leg, ratio: 0.0 };
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Brings an Onion (or the ship) back down (`DemoEventOnion::Land`).
+    pub fn onion_land(&mut self, onion: OnionId) {
+        let Some(o) = self.onions.get_mut(onion.0 as usize) else { return };
+        if o.anim != OnionAnim::Away {
+            return;
+        }
+        if o.ship.is_some() {
+            o.anim = OnionAnim::Idle;
+            self.events.push(Event::OnionLanded { onion });
+        } else {
+            o.anim = OnionAnim::Landing { frame: 0.0 };
+        }
+    }
+
     pub(crate) fn update_onions(&mut self, dt: f32) {
         let anim = self.params.anim.clone();
         for oi in 0..self.onions.len() {
             let o = &mut self.onions[oi];
+            let colour = o.colors.first().map_or(0, |c| c.index());
             match o.anim {
-                OnionAnim::Idle => {}
+                OnionAnim::Idle | OnionAnim::Away => {}
+                OnionAnim::TakeOff { frame } => {
+                    let f = frame + anim.fps * dt;
+                    let end = if o.ship.is_some() { anim.ship_takeoff } else { anim.goal_takeoff[colour] };
+                    o.anim = if f >= end { OnionAnim::Away } else { OnionAnim::TakeOff { frame: f } };
+                }
+                OnionAnim::Landing { frame } => {
+                    let f = frame + anim.fps * dt;
+                    if f >= anim.goal_land[colour] {
+                        // Seeds it was holding come out now.
+                        let busy = !o.queue.is_empty() || o.fireworks > 0;
+                        o.anim = if busy { OnionAnim::Emitting { frame: 0.0 } } else { OnionAnim::Idle };
+                        let onion = o.id;
+                        self.events.push(Event::OnionLanded { onion });
+                    } else {
+                        o.anim = OnionAnim::Landing { frame: f };
+                    }
+                }
                 OnionAnim::Suction { frame } => {
                     let f = frame + anim.fps * dt;
                     o.anim = if f >= anim.goal_suction.end {
