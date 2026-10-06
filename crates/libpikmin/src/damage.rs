@@ -276,6 +276,13 @@ impl Sim {
                 }
                 self.pikis[pi].state = PikiState::Dead;
                 let p = &self.pikis[pi];
+                // `Piki::doKill`: the ghost and `SE_PIKI_DEAD` at the shadow (the ground below).
+                let ground = host.ground_height(p.pos + Vec3::Y * 20.0).unwrap_or(p.pos.y);
+                self.events.push(Event::PikiGone {
+                    piki: p.id,
+                    pos: p.pos.with_y(ground.min(p.pos.y)),
+                });
+                let p = &self.pikis[pi];
                 // A dead flower may leave a seed: rand >= mPikiLeaveSeedChance (so 20% at 0.8).
                 // The original saves it for the next day; we bury it right away.
                 if p.happa == Happa::Flower

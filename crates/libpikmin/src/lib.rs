@@ -31,7 +31,7 @@ pub use host::{CreatureFrame, CreatureId, CreaturePart, DamageSource, Host};
 pub use nectar::{NectarDrop, NectarId, Puddle, PuddleState};
 pub use onion::{Onion, OnionId, Sprout, SproutId, SproutState};
 pub use params::Params;
-pub use piki::{Happa, Piki, PikiColor, PikiState};
+pub use piki::{Happa, KnockPhase, Piki, PikiColor, PikiState};
 pub use sim::Sim;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

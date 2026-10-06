@@ -106,6 +106,8 @@ pub struct Sprout {
     pub vel: Vec3,
     air_resist: f32,
     pub state: SproutState,
+    /// The Onion that shot it (`mParentOnion`): its sounds play on that Onion's emitter.
+    pub onion: Option<OnionId>,
     /// A captain is pulling this one.
     pub claimed_by: Option<CaptainId>,
 }
@@ -183,7 +185,7 @@ impl Sim {
     /// Plants a ready-to-pluck sprout directly (handy for hosts and tests).
     pub fn plant_sprout(&mut self, color: PikiColor, pos: Vec3) -> SproutId {
         let timer = self.params.piki.grow_up_time;
-        self.insert_sprout(color, pos, Vec3::ZERO, 0.0, SproutState::Ready { timer })
+        self.insert_sprout(color, pos, Vec3::ZERO, 0.0, SproutState::Ready { timer }, None)
     }
 
     fn insert_sprout(
@@ -193,6 +195,7 @@ impl Sim {
         vel: Vec3,
         air_resist: f32,
         state: SproutState,
+        onion: Option<OnionId>,
     ) -> SproutId {
         let slot = self
             .sprouts
@@ -208,6 +211,7 @@ impl Sim {
             vel,
             air_resist,
             state,
+            onion,
             claimed_by: None,
         };
         if slot == self.sprouts.len() {
@@ -280,7 +284,7 @@ impl Sim {
         let vel = Vec3::new(dir.sin() * 290.0, 800.0, dir.cos() * 290.0);
         // PikiHeadItem::startAI: enableAirResist(10 - 0.5 rand)
         let resist = 10.0 - 0.5 * self.rng.f32();
-        let sprout = self.insert_sprout(color, pos, vel, resist, SproutState::Flying);
+        let sprout = self.insert_sprout(color, pos, vel, resist, SproutState::Flying, Some(onion));
         self.events.push(Event::SeedLaunched {
             onion,
             sprout,

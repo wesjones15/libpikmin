@@ -144,6 +144,10 @@ pub struct WhistleFrame {
 pub struct Effects {
     beam: Vec<Def>,
     circle: Def,
+    /// One-shot effects by their table entry (the death ghost).
+    extra: Vec<(EffectDef, Def)>,
+    /// Running one-shots; each finishes on its own (`mMaxPasses`).
+    oneshots: Vec<Generator>,
     pipes: HashMap<(u8, u8), Material>,
     whistles: HashMap<CaptainId, Whistle>,
     /// `Navi::renderCircle`'s spinning angle (a static shared by every captain).
@@ -249,6 +253,11 @@ impl Effects {
         Some(Effects {
             beam,
             circle: Def::load(assets, effects::WHISTLE_CIRCLE)?,
+            extra: [effects::PIKI_DEAD_SOUL]
+                .into_iter()
+                .filter_map(|d| Some((d, Def::load(assets, d)?)))
+                .collect(),
+            oneshots: Vec::new(),
             pipes: HashMap::new(),
             whistles: HashMap::new(),
             ring_angle: 0.0,
@@ -260,6 +269,15 @@ impl Effects {
     fn generator(&mut self, pcr: &Arc<Pcr>, pos: Vec3) -> Generator {
         self.seed = self.seed.wrapping_mul(747796405).wrapping_add(2891336453);
         Generator::new(pcr.clone(), pos, self.seed)
+    }
+
+    /// `EffectMgr::create` for a one-shot effect at `pos`.
+    pub fn spawn(&mut self, def: EffectDef, pos: Vec3) {
+        let Some(pcr) = self.extra.iter().find(|(d, _)| *d == def).map(|(_, x)| x.pcr.clone()) else {
+            return;
+        };
+        let g = self.generator(&pcr, pos);
+        self.oneshots.push(g);
     }
 
     /// Starts, moves, steps and stops each captain's whistle effects.
@@ -312,6 +330,7 @@ impl Effects {
                     g.update(1.0, &mut |_| {});
                 }
             }
+            self.oneshots.retain_mut(|g| g.update(1.0, &mut |_| {}));
             // Effects of captains that have left the list still run down.
             for (id, w) in self.whistles.iter_mut() {
                 if frames.iter().any(|f| f.captain == *id) {
@@ -364,8 +383,14 @@ impl Effects {
             .beam
             .iter()
             .chain([&self.circle])
+            .chain(self.extra.iter().map(|(_, d)| d))
             .map(|d| (d.pcr.clone(), d.tex.clone(), d.child_tex.clone()))
             .collect();
+        for g in self.oneshots.iter_mut() {
+            if let Some(def) = defs.iter().find(|d| Arc::ptr_eq(&d.0, &g.pcr)).cloned() {
+                batches.push((def, g.quads(right, up)));
+            }
+        }
         for w in self.whistles.values_mut() {
             for g in w.beam.iter_mut().chain(w.circle.iter_mut()) {
                 let Some(def) = defs.iter().find(|d| Arc::ptr_eq(&d.0, &g.pcr)).cloned() else {

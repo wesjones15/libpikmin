@@ -297,6 +297,9 @@ enum Clock {
     Loop(f32),
     /// Play once and hold the last frame.
     Once(f32),
+    /// Start at this frame, then loop over the motion's loop keys (`Pick` while carrying:
+    /// `ActTransport` starts it at 11).
+    LoopFrom(f32, f32),
 }
 
 #[derive(Clone, Copy)]
@@ -330,14 +333,18 @@ fn advance_index<'a>(
     let (info, anim) = set.get(index)?;
     let start = *info.keys.first().unwrap_or(&0) as f32;
     let end = (*info.keys.last().unwrap_or(&0) as f32).max(start);
+    let first = match clock {
+        Clock::LoopFrom(_, from) => from,
+        _ => start,
+    };
     let p = players.entry(key).or_insert(Player {
         anim: index,
-        frame: start,
+        frame: first,
     });
     if p.anim != index {
         *p = Player {
             anim: index,
-            frame: start,
+            frame: first,
         };
     }
     match clock {
@@ -349,6 +356,17 @@ fn advance_index<'a>(
             }
         }
         Clock::Once(fps) => p.frame = (p.frame + fps * dt).min(end),
+        Clock::LoopFrom(fps, _) => {
+            let key = |ty: u8| {
+                let (n, _) = info.info_keys.iter().find(|(_, t)| *t == ty)?;
+                info.keys.get(*n as usize).map(|&f| f as f32)
+            };
+            let (lo, hi) = key(0).zip(key(1)).unwrap_or((start, end));
+            p.frame += fps * dt;
+            if hi > lo && p.frame >= hi {
+                p.frame = lo + (p.frame - lo) % (hi - lo);
+            }
+        }
     }
     let last = anim.frames.saturating_sub(1) as f32;
     Some((anim, p.frame.clamp(0.0, last)))
@@ -424,6 +442,8 @@ pub struct Scene3d {
     drop: GpuModel,
     drop_anims: AnimSet,
     sprouts: HashMap<libpikmin::onion::SproutId, SproutTrack>,
+    /// Sprout animation sound keys hit this frame: (parent Onion, value, position).
+    pub sprout_sounds: Vec<(Option<libpikmin::onion::OnionId>, u8, Vec3)>,
     piki_anims: AnimSet,
     onion_anims: AnimSet,
     tev: Tev,
@@ -492,6 +512,7 @@ impl Scene3d {
             drop_anims: AnimSet::load(assets, paths::FALL_WATER_ANIM_MGR, paths::FALL_WATER_BUNDLE)?,
             pikihead_anims: AnimSet::load(assets, paths::PIKIHEAD_ANIM_MGR, paths::PIKIHEAD_BUNDLE)?,
             sprouts: HashMap::new(),
+            sprout_sounds: Vec::new(),
             piki_anims: AnimSet::load(assets, paths::PIKI_ANIM_MGR, paths::PIKI_BUNDLE)?,
             onion_anims: AnimSet::load(assets, paths::ONION_ANIM_MGR, paths::ONION_BUNDLE)?,
             tev: Tev::new(),
@@ -507,8 +528,17 @@ impl Scene3d {
     }
 
     pub fn on_event(&mut self, e: &Event) {
-        if let Event::Thrown { captain, .. } = e {
-            self.throw_timer.insert(*captain, 9.0 / 30.0);
+        match e {
+            Event::Thrown { captain, .. } => {
+                self.throw_timer.insert(*captain, 9.0 / 30.0);
+            }
+            // `Piki::doKill`: the ghost rises from where it died.
+            Event::PikiGone { pos, .. } => {
+                if let Some(fx) = self.effects.as_mut() {
+                    fx.spawn(libpikmin_assets::particle::effects::PIKI_DEAD_SOUL, *pos);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -732,7 +762,27 @@ impl Scene3d {
                 PikiHeadMotion::TaneFall | PikiHeadMotion::UgWait => Clock::Loop(30.0),
                 _ => Clock::Once(30.0),
             };
+            let before = self.players.get(&key).copied();
             let anim = advance_index(&mut self.players, key, &self.pikihead_anims, motion as usize, clock, dt);
+            // Sound keys crossed this frame (`AICreature::animationKeyUpdated` →
+            // `PikiHeadItem::playSound`).
+            if let (Some(after), Some((info, _))) =
+                (self.players.get(&key).copied(), self.pikihead_anims.get(motion as usize))
+            {
+                let start = *info.keys.first().unwrap_or(&0) as f32;
+                let end = *info.keys.last().unwrap_or(&0) as f32;
+                let ranges: Vec<(f32, f32)> = match before {
+                    Some(b) if b.anim == after.anim && after.frame >= b.frame => vec![(b.frame, after.frame)],
+                    Some(b) if b.anim == after.anim => vec![(b.frame, end), (start, after.frame)],
+                    _ => vec![(start, after.frame + 1e-3)],
+                };
+                for e in info.event_keys.iter().filter(|e| e.event == 0) {
+                    let f = e.frame as f32;
+                    if ranges.iter().any(|&(a, b)| f >= a && f < b) {
+                        self.sprout_sounds.push((sp.onion, e.value, sp.pos));
+                    }
+                }
+            }
             let root = if matches!(sp.state, SproutState::Flying) && sp.vel.length() > 0.0 {
                 // Flying seeds point their Y axis against their velocity.
                 let y = -sp.vel.normalize();
@@ -847,11 +897,19 @@ impl Scene3d {
                     AttackMode::Swing { frame, .. } => (Motion::Attack, Clock::Sim(frame)),
                     AttackMode::Latched { frame, .. } => (Motion::Kuttuku, Clock::Sim(frame)),
                 },
-                PikiState::Knocked { .. } => (Motion::JKoke, Clock::Once(30.0)),
+                // `PikiFlickState`: JHIT flying, JKOKE landing (held while lying), GETUP.
+                PikiState::Knocked { phase, .. } => match phase {
+                    libpikmin::KnockPhase::Flying { frame } => (Motion::JHit, Clock::Sim(frame)),
+                    libpikmin::KnockPhase::Landing { frame } => (Motion::JKoke, Clock::Sim(frame)),
+                    libpikmin::KnockPhase::Down { .. } => (Motion::JKoke, Clock::Sim(params.anim.jkoke.end)),
+                    libpikmin::KnockPhase::GettingUp { frame } => (Motion::GetUp, Clock::Sim(frame)),
+                },
                 PikiState::Carry(c) => match c.phase {
                     libpikmin::carry::CarryPhase::Lift { frame, .. } => {
                         (Motion::PickLoop, Clock::Sim(frame))
                     }
+                    // `ActTransport::doLift`: PICK from frame 11, looping while it moves.
+                    libpikmin::carry::CarryPhase::Move => (Motion::Pick, Clock::LoopFrom(30.0, 11.0)),
                     _ => walk,
                 },
                 PikiState::Pressed { .. } => {

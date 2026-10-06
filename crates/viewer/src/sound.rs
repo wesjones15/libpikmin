@@ -26,6 +26,8 @@ pub struct Audio {
     _stream: cpal::Stream,
     whistling: bool,
     bgm: usize,
+    /// Pellets whose `SE_LIFT_TRY` loop is on (`Pellet::mIsPlayTrySound`).
+    trying: Vec<libpikmin::PelletId>,
 }
 
 /// Emitter ids for creatures: kind in the top byte.
@@ -37,6 +39,9 @@ fn teki_owner(id: libpikmin::host::CreatureId) -> u64 {
 }
 fn onion_owner(id: libpikmin::onion::OnionId) -> u64 {
     3 << 56 | id.0 as u64
+}
+fn pellet_owner(id: libpikmin::PelletId) -> u64 {
+    4 << 56 | id.0 as u64
 }
 
 impl Audio {
@@ -94,6 +99,7 @@ impl Audio {
             _stream: stream,
             whistling: false,
             bgm: 0,
+            trying: Vec::new(),
         })
     }
 
@@ -122,7 +128,15 @@ impl Audio {
 
     /// Once per game frame: the camera, emitter positions, enemy animation sounds, and
     /// whether the active captain is whistling.
-    pub fn frame(&mut self, view: Mat4, listener: Vec3, sim: &Sim, tekis: &mut Tekis, whistling: bool) {
+    pub fn frame(
+        &mut self,
+        view: Mat4,
+        listener: Vec3,
+        sim: &Sim,
+        tekis: &mut Tekis,
+        whistling: bool,
+        sprout_sounds: &[(Option<libpikmin::onion::OnionId>, u8, Vec3)],
+    ) {
         let squad = sim.pikis().iter().filter(|p| p.captain.is_some()).count();
         let whistle_started = whistling && !self.whistling;
         let whistle_stopped = self.whistling && !whistling;
@@ -136,11 +150,44 @@ impl Audio {
             })
             .collect();
         let teki_pos: Vec<(u64, Vec3)> = tekis.list.iter().map(|t| (teki_owner(t.id), t.pos)).collect();
+        // `ActTransport::cleanup`: the last carrier letting go stops the try loop.
+        let (keep, stop): (Vec<_>, Vec<_>) = std::mem::take(&mut self.trying).into_iter().partition(|&p| {
+            let pel = sim.pellet(p);
+            !pel.carriers.is_empty() && matches!(pel.state, libpikmin::PelletState::Idle)
+        });
+        self.trying = keep;
+        let pellets: Vec<(u64, Vec3)> = sim
+            .pellets()
+            .iter()
+            .filter(|p| !matches!(p.state, libpikmin::PelletState::Gone))
+            .map(|p| (pellet_owner(p.id), p.pos))
+            .collect();
+        let onions: Vec<Vec3> = sim.onions().iter().map(|o| o.pos).collect();
         self.with(|s| {
             s.set_listener(view, listener);
             s.set_piki_count(squad as u32);
-            for (owner, pos) in teki_pos {
+            for (owner, pos) in teki_pos.into_iter().chain(pellets) {
                 s.move_emitter(owner, pos);
+            }
+            for p in stop {
+                s.stop_from(pellet_owner(p), "SE_LIFT_TRY");
+            }
+            // `PikiHeadItem::playSound`: key value v is `SE` 0xCC + v on the parent Onion, else
+            // `SEF` 0x108 + v (only for v > 0).
+            for &(onion, v, pos) in sprout_sounds {
+                match onion {
+                    Some(o) => {
+                        if let Some(name) = s.tables.sound_by_id(0xCC + v as i32).map(|e| e.name.clone()) {
+                            s.play_from(onion_owner(o), &name, onions.get(o.0 as usize).copied().unwrap_or(pos));
+                        }
+                    }
+                    None if v > 0 => {
+                        if let Some(name) = s.tables.sound_by_id(0x108 + v as i32).map(|e| e.name.clone()) {
+                            s.play(&name, pos);
+                        }
+                    }
+                    None => {}
+                }
             }
             for (owner, base, i, pos) in teki_sounds {
                 // `BTeki::playTableSound`: the table's sounds are consecutive `SE_*` ids.
@@ -166,6 +213,7 @@ impl Audio {
     pub fn on_event(&mut self, e: &Event, sim: &Sim, tekis: &Tekis) {
         let piki_pos = |id: libpikmin::PikiId| sim.piki(id).pos;
         let teki_pos = |id: libpikmin::host::CreatureId| tekis.list.iter().find(|t| t.id == id).map_or(Vec3::ZERO, |t| t.pos);
+        let mut trying = std::mem::take(&mut self.trying);
         self.with(|s| match *e {
             Event::Recruited { piki, .. } => {
                 // `PikiLookAtState::init` (pikiState.cpp): the call and the Pikmin's answer.
@@ -196,10 +244,16 @@ impl Audio {
             Event::Swallowed { piki, .. } => {
                 s.play_from(piki_owner(piki), "SE_PIKI_EATEN", piki_pos(piki));
             }
+            // `InteractPress` (interactBattle.cpp) when crushed.
             Event::PikiDied { piki, cause } => {
-                // `InteractPress` (interactBattle.cpp) for crushing; `pikidoKill.cpp` otherwise.
-                let name = if matches!(cause, DeathCause::Crushed) { "SE_PIKI_PRESSED" } else { "SE_PIKI_DEAD" };
-                s.play(name, piki_pos(piki));
+                if matches!(cause, DeathCause::Crushed) {
+                    s.play("SE_PIKI_PRESSED", piki_pos(piki));
+                }
+            }
+            // `Piki::doKill` (pikidoKill.cpp): `playSoundDirect(1, SE_PIKI_DEAD)` as the ghost
+            // rises.
+            Event::PikiGone { piki, pos } => {
+                s.play("SE_PIKI_DEAD", pos);
                 s.release_emitter(piki_owner(piki));
             }
             // `NaviPluckState` (naviState.cpp): `SE_PIKI_PULLED` once out.
@@ -223,12 +277,33 @@ impl Audio {
             Event::CaptainDown { .. } => {
                 s.play("SE_PLAYER_DOWN", Vec3::ZERO);
             }
-            // `ActTransport` lifting (aiTransport.cpp).
+            // `ActTransport::gotoLiftPos` (aiTransport.cpp): `SEF_PIKI_HANG` as each carrier takes
+            // hold, and the pellet's `SE_LIFT_TRY` loop while it isn't up yet
+            // (`Pellet::setTrySound`).
+            Event::CarrierGrabbed { piki, pellet } => {
+                s.play("SEF_PIKI_HANG", piki_pos(piki));
+                let pel = sim.pellet(pellet);
+                if matches!(pel.state, libpikmin::PelletState::Idle) && !trying.contains(&pellet) {
+                    s.play_from(pellet_owner(pellet), "SE_LIFT_TRY", pel.pos);
+                    trying.push(pellet);
+                }
+            }
+            // `Pellet::startPick` stops the try loop; the stick leader starts `SE_LIFT_MOVE`
+            // (`ActTransport::doLift`).
             Event::PelletLifted { pellet, .. } => {
-                s.play("SEF_PIKI_HANG", sim.pellet(pellet).pos);
+                trying.retain(|&p| p != pellet);
+                s.stop_from(pellet_owner(pellet), "SE_LIFT_TRY");
+                s.play_from(pellet_owner(pellet), "SE_LIFT_MOVE", sim.pellet(pellet).pos);
+            }
+            // `Pellet::finishPick`: both loops stop.
+            Event::PelletDropped { pellet } => {
+                s.stop_from(pellet_owner(pellet), "SE_LIFT_MOVE");
+                s.stop_from(pellet_owner(pellet), "SE_LIFT_TRY");
             }
             // `PelletGoalState` (pelletState.cpp): on the Onion's emitter.
-            Event::PelletArrived { onion, .. } => {
+            Event::PelletArrived { onion, pellet } => {
+                // `ActTransport` at the goal: `stopEventSound(pel, SE_LIFT_MOVE)`.
+                s.stop_from(pellet_owner(pellet), "SE_LIFT_MOVE");
                 let pos = sim.onions()[onion.0 as usize].pos;
                 s.play_from(onion_owner(onion), "SE_CONTAINER_PELLETIN", pos);
             }
@@ -237,29 +312,33 @@ impl Audio {
                 let pos = sim.onions()[onion.0 as usize].pos;
                 s.play_from(onion_owner(onion), "SE_CONTAINER_PELLETIN2", pos);
             }
+            // `GoalAI::EmitPiki` (itemAI.cpp): each seed shot.
             Event::SeedLaunched { onion, .. } => {
                 let pos = sim.onions()[onion.0 as usize].pos;
-                s.play_from(onion_owner(onion), "SE_CONTAINER_HANABI", pos);
+                s.play_from(onion_owner(onion), "SE_CONTAINER_PIKIBORN", pos);
             }
             // `PikiHeadAI::BounceSound` (itemAI.cpp): on the parent Onion's emitter.
             Event::SproutPlanted { sprout } => {
                 if let Some(sp) = sim.sprouts().find(|x| x.id == sprout) {
-                    let pos = sp.pos;
-                    match sim.onions().iter().min_by(|a, b| (a.pos - pos).length().total_cmp(&(b.pos - pos).length())) {
-                        Some(o) => s.play_from(onion_owner(o.id), "SE_PIKI_GROW0", pos),
-                        None => s.play("SEF_PIKI_GROW0", pos),
+                    match sp.onion {
+                        Some(o) => s.play_from(onion_owner(o), "SE_PIKI_GROW0", sim.onions()[o.0 as usize].pos),
+                        None => s.play("SEF_PIKI_GROW0", sp.pos),
                     };
                 }
             }
-            // `PikiHeadAI::GrowupedExec` (itemAI.cpp): leaf -> bud -> flower.
+            // `PikiHeadAI::GrowupedExec` (itemAI.cpp): leaf -> bud -> flower, on the parent Onion's
+            // emitter (`SE_PIKI_GROW*`) or the sprout's own (`SEF_PIKI_GROW*`).
             Event::SproutGrew { sprout, happa } => {
                 if let Some(sp) = sim.sprouts().find(|x| x.id == sprout) {
-                    let name = match happa as u8 {
-                        1 => "SEF_PIKI_GROW2",
-                        2 => "SEF_PIKI_GROW4",
-                        _ => "SEF_PIKI_GROW3",
+                    let n = match happa as u8 {
+                        1 => 2,
+                        2 => 4,
+                        _ => 3,
                     };
-                    s.play(name, sp.pos);
+                    match sp.onion {
+                        Some(o) => s.play_from(onion_owner(o), &format!("SE_PIKI_GROW{n}"), sim.onions()[o.0 as usize].pos),
+                        None => s.play(&format!("SEF_PIKI_GROW{n}"), sp.pos),
+                    };
                 }
             }
             // `GoalItem::enterGoal` / `exitPiki` (goalItem.cpp).
@@ -280,5 +359,6 @@ impl Audio {
             }
             _ => {}
         });
+        self.trying = trying;
     }
 }

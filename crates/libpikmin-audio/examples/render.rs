@@ -24,6 +24,15 @@ const SOUNDS: &[&str] = &[
     "SE_PIKI_ATTACK_VOICE",
     "SYSSE_DECIDE1",
     "SYSSE_CMENU_ON",
+    "SE_LIFT_TRY",
+    "SE_LIFT_MOVE",
+    "SEF_PIKI_HANG",
+    "SE_CONTAINER_PIKIBORN",
+    "SE_PIKI_GROW0",
+    "SE_PIKI_GROW1",
+    "SE_PIKI_GROW2",
+    "SE_PIKI_GROW5",
+    "SE_PIKI_DEAD",
 ];
 
 fn write_wav(path: &std::path::Path, rate: u32, samples: &[f32]) {

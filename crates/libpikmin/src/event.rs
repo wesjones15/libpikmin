@@ -62,6 +62,22 @@ pub enum Event {
         piki: PikiId,
         damage: f32,
     },
+    /// A carrier reached its slot and took hold (`ActTransport::gotoLiftPos`: `SEF_PIKI_HANG`,
+    /// and the pellet's `SE_LIFT_TRY` loop if it isn't lifted yet).
+    CarrierGrabbed {
+        piki: PikiId,
+        pellet: PelletId,
+    },
+    /// Got up from being knocked down and lost a leaf stage (`PikiFlickState`).
+    Deflowered {
+        piki: PikiId,
+    },
+    /// Removed after the death shrink (`Piki::doKill`): the ghost rises from `pos` on the
+    /// ground (`EFF_Piki_DeadSoul`) and `SE_PIKI_DEAD` plays.
+    PikiGone {
+        piki: PikiId,
+        pos: Vec3,
+    },
     /// Started dying. It plays a death animation and fades, unless crushed or eaten (fades at once).
     PikiDied {
         piki: PikiId,

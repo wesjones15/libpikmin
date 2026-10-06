@@ -17,7 +17,8 @@
 //! walks the active captain at the nearest creature and keeps throwing, `PIKMIN_TRACE=1` prints
 //! enemy AI states once a second, `PIKMIN_MENU=1` opens an Onion window, `PIKMIN_PUTAWAY=n`
 //! sends n squad Pikmin of each colour home and `PIKMIN_KILL=1` kills every creature at the
-//! start (autoplay then throws at the corpses), `PIKMIN_WHISTLE=1` holds the whistle.
+//! start (autoplay then throws at the corpses), `PIKMIN_WHISTLE=1` holds the whistle and
+//! `PIKMIN_DIE=n` kills n of the active squad at the start (for the ghosts).
 
 use std::path::PathBuf;
 
@@ -465,6 +466,21 @@ async fn main() {
                 g.world.tekis.damage(id, 1e9);
             }
         }
+        if frames == 1
+            && let Some(n) = std::env::var("PIKMIN_DIE").ok().and_then(|v| v.parse::<usize>().ok())
+        {
+            let ids: Vec<_> = g
+                .sim
+                .pikis()
+                .iter()
+                .filter(|p| p.captain == Some(g.captains[g.active]))
+                .take(n)
+                .map(|p| p.id)
+                .collect();
+            for id in ids {
+                g.sim.kill_piki(id);
+            }
+        }
         if frames == 1 && std::env::var_os("PIKMIN_NECTAR").is_some() {
             let at = g.sim.captain(active).pos + Vec3::new(0.0, 0.0, -45.0);
             g.sim.spawn_nectar(Vec3::new(at.x, 150.0, at.z));
@@ -534,6 +550,7 @@ async fn main() {
             }
         }
 
+        let sprout_sounds = scene.as_mut().map(|sc| std::mem::take(&mut sc.sprout_sounds)).unwrap_or_default();
         match audio.as_mut() {
             Some(a) => {
                 let me = g.sim.captain(active);
@@ -543,7 +560,7 @@ async fn main() {
                     None => ::glam::Mat4::look_at_rh(me.pos + ::glam::Vec3::Y * 500.0, me.pos, -::glam::Vec3::Z),
                 };
                 let whistling = matches!(me.whistle, libpikmin::captain::WhistleState::Calling { .. });
-                a.frame(view, me.pos, &g.sim, &mut g.world.tekis, whistling);
+                a.frame(view, me.pos, &g.sim, &mut g.world.tekis, whistling, &sprout_sounds);
             }
             None => {
                 for t in g.world.tekis.list.iter_mut() {

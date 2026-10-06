@@ -66,6 +66,19 @@ pub struct Attack {
     pub mode: AttackMode,
 }
 
+/// `PikiFlickState`'s phases, each timed by its motion.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum KnockPhase {
+    /// `FLS_FlyingBack`: JHIT.
+    Flying { frame: f32 },
+    /// `FLS_Landing`: JKOKE.
+    Landing { frame: f32 },
+    /// `FLS_Downed`: lying there.
+    Down { timer: f32 },
+    /// `FLS_GettingUp`: GETUP.
+    GettingUp { frame: f32 },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PikiState {
     /// Free and standing around (`PikiMode::FreeMode`).
@@ -91,9 +104,11 @@ pub enum PikiState {
         ground_frames: u8,
     },
     Attack(Attack),
-    /// Shaken off and lying on the ground (`PikiFlickState`).
+    /// Shaken off (`PikiFlickState`): flying back, landing, lying down, getting up.
     Knocked {
-        timer: f32,
+        phase: KnockPhase,
+        /// Whistled while down (`mIsWhistlePending`): gets up at once and joins this captain.
+        whistled: Option<CaptainId>,
     },
     /// Carrying a pellet or corpse (`ActTransport`).
     Carry(crate::carry::Carry),
@@ -259,21 +274,7 @@ impl Sim {
             PikiState::Attack(a) => self.piki_attack(pi, a, host, dt),
             PikiState::Absorb { .. } | PikiState::GrowUp { .. } => self.piki_nectar(pi, host, dt),
             PikiState::Enter { .. } | PikiState::Exit { .. } => self.piki_onion_travel(pi, host, dt),
-            PikiState::Knocked { timer } => {
-                let t = timer - dt;
-                self.physics(pi, host, dt);
-                let p = &mut self.pikis[pi];
-                p.target_vel = Vec3::ZERO;
-                if t <= 0.0 && p.on_ground {
-                    if p.health <= 0.0 {
-                        self.start_dying(pi, crate::damage::DeathCause::Attacked);
-                    } else {
-                        p.state = PikiState::Idle;
-                    }
-                } else {
-                    p.state = PikiState::Knocked { timer: t };
-                }
-            }
+            PikiState::Knocked { phase, whistled } => self.piki_knocked(pi, phase, whistled, host, dt),
         }
     }
 
@@ -840,20 +841,87 @@ impl Sim {
         self.knock_from(pi, from_pos, Some(from));
     }
 
-    /// Thrown outward from `from` (120 out, 150 up) and down for a random time between
-    /// `mMinFlickKnockDownTime` and `mMaxFlickKnockDownTime`.
+    /// `PikiFlickState`: JHIT while flying back, JKOKE on landing, then down for a random time
+    /// between `mMinFlickKnockDownTime` and `mMaxFlickKnockDownTime` (dead at that point if
+    /// health is gone, straight to `PikiDeadState`), then GETUP. Each phase ends with its
+    /// motion (`procAnimMsg` on `KEY_Finished`). A whistle cuts the lying short.
+    fn piki_knocked(
+        &mut self,
+        pi: usize,
+        phase: KnockPhase,
+        whistled: Option<CaptainId>,
+        host: &mut dyn Host,
+        dt: f32,
+    ) {
+        let anim = self.params.anim.clone();
+        let step = anim.fps * dt;
+        self.physics(pi, host, dt);
+        let p = &mut self.pikis[pi];
+        p.target_vel = Vec3::ZERO;
+        if !matches!(phase, KnockPhase::Flying { .. }) {
+            p.vel.x *= 0.9;
+            p.vel.z *= 0.9;
+        }
+        let next = match phase {
+            KnockPhase::Flying { frame } if frame + step >= anim.jhit.end => KnockPhase::Landing { frame: 0.0 },
+            KnockPhase::Flying { frame } => KnockPhase::Flying { frame: frame + step },
+            KnockPhase::Landing { frame } if frame + step >= anim.jkoke.end => {
+                if p.health <= 0.0 {
+                    let id = p.id;
+                    p.state = PikiState::Fading { timer: 1.5 };
+                    self.events.push(Event::PikiDied {
+                        piki: id,
+                        cause: crate::damage::DeathCause::Attacked,
+                    });
+                    return;
+                }
+                let pp = &self.params.piki;
+                KnockPhase::Down {
+                    timer: self.rng.range(pp.min_flick_knockdown_time, pp.max_flick_knockdown_time),
+                }
+            }
+            KnockPhase::Landing { frame } => KnockPhase::Landing { frame: frame + step },
+            KnockPhase::Down { timer } if timer - dt < 0.0 || whistled.is_some() => {
+                KnockPhase::GettingUp { frame: 0.0 }
+            }
+            KnockPhase::Down { timer } => KnockPhase::Down { timer: timer - dt },
+            KnockPhase::GettingUp { frame } if frame + step >= anim.getup.end => {
+                // Up again; a bud or flower may lose a stage (25%).
+                let id = p.id;
+                if p.happa != Happa::Leaf && self.rng.f32() < 0.25 {
+                    let p = &mut self.pikis[pi];
+                    p.happa = if p.happa == Happa::Flower { Happa::Bud } else { Happa::Leaf };
+                    self.events.push(Event::Deflowered { piki: id });
+                }
+                self.pikis[pi].state = PikiState::Idle;
+                if let Some(cid) = whistled {
+                    // `PikiFlickState::cleanup`: the booked whistle takes effect.
+                    self.join_squad(id, cid);
+                    self.events.push(Event::Recruited {
+                        piki: id,
+                        captain: cid,
+                        stolen_from: None,
+                    });
+                }
+                return;
+            }
+            KnockPhase::GettingUp { frame } => KnockPhase::GettingUp { frame: frame + step },
+        };
+        self.pikis[pi].state = PikiState::Knocked { phase: next, whistled };
+    }
+
+    /// Thrown outward from `from` (120 out, 150 up) into [`Sim::piki_knocked`].
     pub(crate) fn knock_from(&mut self, pi: usize, from: Vec3, creature: Option<CreatureId>) {
-        let pp = &self.params.piki;
-        let down = self
-            .rng
-            .range(pp.min_flick_knockdown_time, pp.max_flick_knockdown_time);
         let p = &mut self.pikis[pi];
         let out = p.pos - from;
         let out = Vec3::new(out.x, 0.0, out.z).normalize_or(Vec3::X);
         p.vel = out * 120.0 + Vec3::new(0.0, 150.0, 0.0);
         p.target_vel = Vec3::ZERO;
         p.on_ground = false;
-        p.state = PikiState::Knocked { timer: down };
+        p.state = PikiState::Knocked {
+            phase: KnockPhase::Flying { frame: 0.0 },
+            whistled: None,
+        };
         self.events.push(Event::KnockedOff {
             piki: p.id,
             creature,

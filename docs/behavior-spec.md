@@ -308,6 +308,9 @@ pikiState.cpp:
   - Subtracts health and knocks the Pikmin away like a shake-off.
   - A Pikmin at ≤ 0 health dies when it gets up.
   - Knocked-down Pikmin with health left can be whistled awake.
+  - Phases, each ending with its motion (`PikiFlickState`): JHIT flying back, JKOKE landing
+    (dead here if health is gone, straight to the shrink), lying for the knock-down time (or
+    until whistled), GETUP. Getting up costs a bud or flower a stage 25% of the time.
 - **Swallow** (`InteractSwallow::actPiki`, `PikiSwallowedState`, `Sim::swallow_pikis`).
   - Up to `max` Pikmin near the mouth stick to the given creature part and ride along.
   - `Sim::chew` kills them; the enemy's AI decides when, through `InteractKill` in the original.

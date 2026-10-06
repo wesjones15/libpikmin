@@ -551,6 +551,10 @@ impl Sim {
                 let pel = &mut self.pellets[c.pellet.0 as usize];
                 pel.slots[slot as usize] = Some(id);
                 pel.carriers.push(id);
+                self.events.push(Event::CarrierGrabbed {
+                    piki: id,
+                    pellet: c.pellet,
+                });
                 let p = &mut self.pikis[pi];
                 p.pos = slot_pos;
                 p.vel = Vec3::ZERO;

@@ -33,6 +33,11 @@ pub const ANIM_KUTTUKU: usize = 71;
 pub const ANIM_MIZUNOMI: usize = 67;
 /// `PIKIANIM_GrowUp1` / `GrowUp2` (17, 18) → 39, 40: blooming after nectar (`PikiGrowupState`).
 pub const ANIM_GROW_UP: [usize; 2] = [39, 40];
+/// `PIKIANIM_JHit` / `JKoke` / `GetUp` (31, 30, 32) → 58, 57, 59: knocked flying, landing and
+/// getting up (`PikiFlickState`).
+pub const ANIM_JHIT: usize = 58;
+pub const ANIM_JKOKE: usize = 57;
+pub const ANIM_GETUP: usize = 59;
 /// Onion motion 0, "flowrot.dck": seeds are emitted at each loop end (`GoalAI`).
 pub const ANIM_GOAL_FLOWROT: usize = 0;
 /// Onion motion 2, "suction.dck": played when something is sucked in (`GOAL_Effect`).
@@ -91,6 +96,10 @@ pub struct AnimTimings {
     /// Blooming: `KEY_Action0` makes the flower. First bloom and later ones.
     pub grow_up1: AnimTiming,
     pub grow_up2: AnimTiming,
+    /// Knocked away, landing, and getting up again (`PikiFlickState` moves on at each end).
+    pub jhit: AnimTiming,
+    pub jkoke: AnimTiming,
+    pub getup: AnimTiming,
 }
 
 impl Default for AnimTimings {
@@ -113,6 +122,9 @@ impl Default for AnimTimings {
             mizunomi: AnimTiming::new(INF, INF, Some((10.0, 30.0)), 39.0),
             grow_up1: AnimTiming::new(49.0, INF, None, 84.0),
             grow_up2: AnimTiming::new(32.0, INF, None, 69.0),
+            jhit: AnimTiming::new(1.0, INF, None, 9.0),
+            jkoke: AnimTiming::new(INF, INF, None, 15.0),
+            getup: AnimTiming::new(INF, INF, None, 10.0),
         }
     }
 }
@@ -229,6 +241,9 @@ impl AnimTimings {
         self.mizunomi = timing_at(&infos, ANIM_MIZUNOMI)?;
         self.grow_up1 = timing_at(&infos, ANIM_GROW_UP[0])?;
         self.grow_up2 = timing_at(&infos, ANIM_GROW_UP[1])?;
+        self.jhit = timing_at(&infos, ANIM_JHIT)?;
+        self.jkoke = timing_at(&infos, ANIM_JKOKE)?;
+        self.getup = timing_at(&infos, ANIM_GETUP)?;
         for (slot, idx) in self.dead.iter_mut().zip(ANIM_DEAD) {
             *slot = timing_at(&infos, idx)?.end;
         }

@@ -463,8 +463,56 @@ fn shake_off_knocks_pikmin_down_then_they_get_up() {
     sim.shake_off(target);
     run(&mut sim, &mut host, 0.1, &mut ev);
     assert!(matches!(sim.piki(stuck).state, PikiState::Knocked { .. }));
-    run(&mut sim, &mut host, 1.5, &mut ev); // knockdown is 0.7 s with code defaults
+    // JHIT 9 + JKOKE 15 frames, down 0.7 s (code defaults), GETUP 10 frames: about 1.8 s.
+    run(&mut sim, &mut host, 1.5, &mut ev);
+    assert!(matches!(sim.piki(stuck).state, PikiState::Knocked { .. }));
+    run(&mut sim, &mut host, 0.6, &mut ev);
     assert!(!matches!(sim.piki(stuck).state, PikiState::Knocked { .. }));
+}
+
+#[test]
+fn whistled_while_down_pikmin_get_up_then_join() {
+    let mut sim = Sim::new(retail_params(), 11);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    squad(&mut sim, c, 3, Vec3::ZERO);
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 2.0, &mut ev);
+    let target = creature_at_cursor(&mut sim, &mut host, c, 1000.0);
+    throw_once(&mut sim, &mut host, c, &mut ev);
+    run(&mut sim, &mut host, 1.5, &mut ev);
+    let stuck = sim
+        .pikis()
+        .iter()
+        .find(|p| p.state.latched_to() == Some(target))
+        .map(|p| p.id)
+        .expect("latched");
+    sim.shake_off(target);
+    // Flying back and landing take 24 frames; whistle once it's lying there.
+    run(&mut sim, &mut host, 0.9, &mut ev);
+    assert!(matches!(
+        sim.piki(stuck).state,
+        PikiState::Knocked { phase: libpikmin::KnockPhase::Down { .. }, .. }
+    ));
+    // The cursor is still on the creature, next to where it landed.
+    host.creatures.clear();
+    ev.clear();
+    sim.set_input(c, CaptainInput { whistle: true, ..Default::default() });
+    let full = sim.params().navi.whistle_expand_time;
+    run(&mut sim, &mut host, full + 0.05, &mut ev);
+    sim.set_input(c, CaptainInput::default());
+    run(&mut sim, &mut host, TICK_DT, &mut ev);
+    assert!(
+        matches!(sim.piki(stuck).state, PikiState::Knocked { whistled: Some(w), .. } if w == c)
+            || ev.iter().any(|e| matches!(e, Event::Recruited { piki, .. } if *piki == stuck)),
+        "the whistle is booked: {:?} at {} from the cursor, whistle {:?}",
+        sim.piki(stuck).state,
+        (sim.piki(stuck).pos - sim.captain(c).cursor_world).length(),
+        sim.captain(c).whistle
+    );
+    run(&mut sim, &mut host, 0.5, &mut ev);
+    assert!(ev.iter().any(|e| matches!(e, Event::Recruited { piki, .. } if *piki == stuck)));
+    assert!(sim.piki(stuck).state.in_squad());
 }
 
 #[test]

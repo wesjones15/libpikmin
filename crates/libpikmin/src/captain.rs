@@ -449,9 +449,21 @@ impl Sim {
             if !p.is_alive() || dist_xz(p.pos, centre) >= radius {
                 continue;
             }
+            // `mIsWhistlePending`: a knocked-down Pikmin gets up first, then joins
+            // (`PikiFlickState`).
+            if matches!(p.state, PikiState::Knocked { .. }) {
+                let alive = p.health > 0.0;
+                if let PikiState::Knocked { whistled, .. } = &mut self.pikis[pi].state
+                    && alive
+                {
+                    *whistled = Some(me);
+                }
+                continue;
+            }
             let eligible = match p.state {
                 PikiState::Idle | PikiState::Attack(_) | PikiState::Carry(_) => true,
-                PikiState::Knocked { .. } => p.health > 0.0,
+                // Booked below instead.
+                PikiState::Knocked { .. } => false,
                 PikiState::Pressed { .. }
                 | PikiState::Swallowed { .. }
                 | PikiState::Dying { .. }

@@ -42,6 +42,12 @@ pub mod effects {
             child_tex: Some("effects/tex/ps_ball.bti"),
         },
     ];
+    /// `EFF_Piki_DeadSoul`: the ghost that rises where a Pikmin died (`Piki::doKill`).
+    pub const PIKI_DEAD_SOUL: EffectDef = EffectDef {
+        pcr: "effects/pcr/pk_dead.pcr",
+        tex: "effects/tex/deadpiki.bti",
+        child_tex: Some("effects/tex/deadpiki.bti"),
+    };
     /// `EFF_Navi_WhistleCursor`: one of the 24 sparkles around the whistle circle
     /// (`NaviFue::emit`).
     pub const WHISTLE_CIRCLE: EffectDef =
