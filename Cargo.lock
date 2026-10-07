@@ -508,6 +508,7 @@ name = "libpikmin-ffi"
 version = "0.1.0"
 dependencies = [
  "libpikmin",
+ "libpikmin-assets",
 ]
 
 [[package]]
