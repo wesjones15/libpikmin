@@ -22,6 +22,8 @@ use crate::sim::{Sim, integrate};
 
 /// `Creature::getSize` default: the puddle's collision radius.
 pub const PUDDLE_RADIUS: f32 = 15.0;
+/// The drop is a `MizuItem` too, with the same `getSize`.
+const DROP_RADIUS: f32 = PUDDLE_RADIUS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NectarId(pub u32);
@@ -158,7 +160,7 @@ impl Sim {
                     }
                     let mut on_ground = false;
                     let target = d.vel;
-                    integrate(&*host, &mut d.pos, &mut d.vel, target, &mut on_ground, 1.0, gravity, dt);
+                    integrate(&*host, &mut d.pos, &mut d.vel, target, &mut on_ground, DROP_RADIUS, 1.0, gravity, dt);
                     if on_ground {
                         // `CollideInit`: finishMotion(29)
                         d.state = DropState::Splash {

@@ -24,6 +24,10 @@ pub struct CaptainInput {
     /// When set, the host drives the captain's body (a player avatar, libsm64...) and the sim
     /// only runs the cursor, whistle, throw and squad.
     pub pose: Option<CaptainPose>,
+    /// A world point to put the cursor on (a mouse or camera aim), kept within the cursor's
+    /// reach (`NaviParms` cursor max radius). Not in the game, where only the stick moves the
+    /// cursor; hosts that aim with a camera use it instead.
+    pub cursor: Option<Vec3>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -256,6 +260,10 @@ impl Sim {
             next = c.cursor + cursor_vel * dt;
         }
         c.cursor = next;
+        if let Some(aim) = input.cursor {
+            let off = Vec3::new(aim.x - c.pos.x, 0.0, aim.z - c.pos.z);
+            c.cursor = off.clamp_length_max(navi.cursor_max_radius);
+        }
 
         if stick_mag > navi.neutral_stick_threshold {
             c.neutral_time = 0.0;
@@ -291,6 +299,7 @@ impl Sim {
                 &mut c.vel,
                 c.target_vel,
                 &mut on_ground,
+                navi.body_collision_radius,
                 accel,
                 gravity,
                 dt,

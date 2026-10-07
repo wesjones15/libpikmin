@@ -299,7 +299,13 @@ fn push_out(pos: &mut Vec3, from: Vec3, min: f32) {
     }
 }
 
-/// One tick of creature motion: `Creature::moveVelocity` easing on XZ, gravity, ground snap.
+/// One tick of creature motion: `Creature::moveVelocity` easing on XZ, gravity, the move
+/// itself against walls, then the ground snap.
+///
+/// The move is split the way `MapMgr::traceMove` (mapMgr.cpp) splits it: the step count
+/// doubles until each step travels less than the body's `radius`, so nothing tunnels through
+/// a wall, and after each step the host pushes the body's sphere out of walls
+/// ([`Host::walls`]). Whatever velocity pointed into the wall is dropped.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn integrate(
     host: &dyn Host,
@@ -307,6 +313,7 @@ pub(crate) fn integrate(
     vel: &mut Vec3,
     target: Vec3,
     on_ground: &mut bool,
+    radius: f32,
     accel: f32,
     gravity: f32,
     dt: f32,
@@ -316,7 +323,29 @@ pub(crate) fn integrate(
     vel.x += (target.x - vel.x) * k;
     vel.z += (target.z - vel.z) * k;
     vel.y -= gravity * dt;
-    *pos += *vel * dt;
+
+    let radius = radius.max(1.0);
+    let mut steps = 1u32;
+    let mut travel = vel.length() * dt;
+    while steps < 64 && travel >= radius {
+        steps *= 2;
+        travel *= 0.5;
+    }
+    let sub = dt / steps as f32;
+    for _ in 0..steps {
+        *pos += *vel * sub;
+        let centre = *pos + Vec3::Y * radius;
+        let moved = host.walls(centre, radius) - centre;
+        let push = Vec3::new(moved.x, 0.0, moved.z);
+        if push.length_squared() > 1e-8 {
+            *pos += push;
+            let n = push.normalize();
+            let into = vel.dot(n);
+            if into < 0.0 {
+                *vel -= n * into;
+            }
+        }
+    }
 
     match host.ground_height(*pos) {
         Some(g) if pos.y <= g => {

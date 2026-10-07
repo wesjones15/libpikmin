@@ -448,6 +448,10 @@ impl Sim {
         let to = Vec3::new(target.x - p.pos.x, 0.0, target.z - p.pos.z);
         let step = (speed * dt).min(to.length());
         p.pos += to.normalize_or_zero() * step;
+        // A carried pellet moves as a creature too (`Creature::moveVelocity`), so walls stop it.
+        let centre = p.pos + Vec3::Y * p.desc.radius;
+        let moved = host.walls(centre, p.desc.radius) - centre;
+        p.pos += Vec3::new(moved.x, 0.0, moved.z);
         let n = *next;
         if let PelletState::Carried { next, .. } = &mut p.state {
             *next = n;

@@ -112,6 +112,15 @@ pub trait Host {
     /// Ground height under `pos` (straight down), or `None` over a void.
     fn ground_height(&self, pos: Vec3) -> Option<f32>;
 
+    /// Push a sphere of `radius` centred at `centre` out of walls and return the corrected
+    /// centre. Floors are [`Host::ground_height`]'s job, so only push sideways. Stands in for
+    /// the map half of `MapMgr::traceMove` (mapMgr.cpp), which sweeps the same sphere, sitting
+    /// `radius` above the creature's feet, through the map's collision triangles. Default: no
+    /// walls.
+    fn walls(&self, centre: Vec3, _radius: f32) -> Vec3 {
+        centre
+    }
+
     /// Fill `out` with every creature Pikmin may interact with. Called once per tick.
     fn creatures(&mut self, out: &mut CreatureFrame) {
         out.clear();

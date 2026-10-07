@@ -290,6 +290,7 @@ impl Sim {
             &mut p.vel,
             p.target_vel,
             &mut on_ground,
+            p.size,
             accel,
             gravity,
             dt,
