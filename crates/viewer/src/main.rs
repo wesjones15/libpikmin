@@ -765,7 +765,7 @@ async fn main() {
             }
         }
 
-        let sprout_sounds = scene.as_mut().map(|sc| std::mem::take(&mut sc.sprout_sounds)).unwrap_or_default();
+        let sprout_sounds = scene.as_mut().map(|sc| std::mem::take(&mut sc.animator.sprout_sounds)).unwrap_or_default();
         let ship_sounds = scene.as_mut().map(|sc| std::mem::take(&mut sc.ship_sounds)).unwrap_or_default();
         let demo_sounds = scene.as_mut().map(|sc| std::mem::take(&mut sc.demo_sounds)).unwrap_or_default();
         if let Some(a) = audio.as_ref() {

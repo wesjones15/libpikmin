@@ -9,5 +9,6 @@ libpikmin.workspace = true
 macroquad = "0.4"
 libpikmin-assets.workspace = true
 libpikmin-audio.workspace = true
+libpikmin-present.workspace = true
 glam.workspace = true
 cpal = "0.15"
