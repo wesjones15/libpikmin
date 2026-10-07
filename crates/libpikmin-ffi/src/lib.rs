@@ -24,7 +24,7 @@ use libpikmin::carry::PelletState;
 use libpikmin::onion::{OnionAnim, SproutState};
 use libpikmin::{
     CaptainId, CaptainInput, CaptainPose, CreatureFrame, CreatureId, CreaturePart, DamageSource,
-    DeathCause, Event, Happa, Host, Params, PelletDesc, PikiColor, PikiId, PikiState, Sim, Vec2,
+    DeathCause, Event, Happa, Host, OnionId, Params, PelletDesc, PikiColor, PikiId, PikiState, Sim, Vec2,
     Vec3,
 };
 use libpikmin::host::CreatureView;
@@ -296,6 +296,19 @@ pub struct PikSprout {
     pub _pad: u8,
 }
 
+/// What the Onion window shows for one colour ([`libpikmin::onion_menu::OnionCounts`]).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PikOnionCounts {
+    /// Stored, not already on their way out.
+    pub in_onion: u32,
+    /// The captain's squad Pikmin of this colour.
+    pub in_squad: u32,
+    /// Pikmin and sprouts on the field plus pending exits, against `max_on_field`.
+    pub on_field: u32,
+    pub max_on_field: u32,
+}
+
 /// Event kinds ([`Event`] by variant). Field use per kind is listed on [`PikEvent`].
 pub mod event_kind {
     pub const PIKI_ENTERED_ONION: u32 = 0;
@@ -370,6 +383,7 @@ pub struct PikSizes {
     pub onion: u32,
     pub sprout: u32,
     pub event: u32,
+    pub onion_counts: u32,
 }
 
 /// # Safety
@@ -390,6 +404,7 @@ pub unsafe extern "C" fn pik_struct_sizes(out: *mut PikSizes) {
         onion: size_of::<PikOnion>() as u32,
         sprout: size_of::<PikSprout>() as u32,
         event: size_of::<PikEvent>() as u32,
+        onion_counts: size_of::<PikOnionCounts>() as u32,
     };
     // SAFETY: the caller promised a writable pointer.
     if let Some(o) = unsafe { out.as_mut() } {
@@ -914,6 +929,124 @@ pub unsafe extern "C" fn pik_sim_kill_piki(sim: *mut PikSim, piki: u32) {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The Onion menu (`NaviContainerState`, naviState.cpp; see `libpikmin::onion_menu`). The
+// original pauses the game while the window is up; a host that can't pause just doesn't.
+
+/// The Onion `captain` is standing under, or -1.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_onion_in_reach(sim: *mut PikSim, captain: u32) -> i32 {
+    // SAFETY: as documented.
+    unsafe { with(sim, -1, |s| s.sim.onion_in_reach(CaptainId(captain)).map_or(-1, |o| o.0 as i32)) }
+}
+
+/// Fills `out` with what the Onion window would show for `color`. Returns 0 for a bad id.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`]; `out` writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_onion_counts(
+    sim: *mut PikSim,
+    onion: u32,
+    captain: u32,
+    color: u32,
+    out: *mut PikOnionCounts,
+) -> u8 {
+    // SAFETY: as documented.
+    let Some(out) = (unsafe { out.as_mut() }) else {
+        return 0;
+    };
+    let Some(color) = color_arg(color) else {
+        return 0;
+    };
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, 0, |s| {
+            if !onion_ok(&s.sim, onion) {
+                return 0;
+            }
+            let c = s.sim.onion_counts(OnionId(onion), CaptainId(captain), color);
+            *out = PikOnionCounts {
+                in_onion: c.in_onion,
+                in_squad: c.in_squad,
+                on_field: c.on_field,
+                max_on_field: c.max_on_field,
+            };
+            1
+        })
+    }
+}
+
+/// Sends up to `n` of `captain`'s squad Pikmin of `color` into the Onion
+/// (`NaviContainerState::enterPikis`). Returns how many went.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_onion_put_away(sim: *mut PikSim, captain: u32, onion: u32, color: u32, n: u32) -> u32 {
+    let Some(color) = color_arg(color) else {
+        return 0;
+    };
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, 0, |s| {
+            if !onion_ok(&s.sim, onion) || captain as usize >= s.sim.captains().len() {
+                return 0;
+            }
+            s.sim.onion_put_away(CaptainId(captain), OnionId(onion), color, n)
+        })
+    }
+}
+
+/// Calls up to `n` Pikmin of `color` out of the Onion to join `captain` (`GoalItem::exitPikis`),
+/// within the stock and the field limit. Returns how many will come.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_onion_call_out(sim: *mut PikSim, captain: u32, onion: u32, color: u32, n: u32) -> u32 {
+    let Some(color) = color_arg(color) else {
+        return 0;
+    };
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, 0, |s| {
+            if !onion_ok(&s.sim, onion) || captain as usize >= s.sim.captains().len() {
+                return 0;
+            }
+            s.sim.onion_call_out(CaptainId(captain), OnionId(onion), color, n)
+        })
+    }
+}
+
+/// Puts `n` Pikmin of `color` at leaf stage `happa` (0 leaf, 1 bud, 2 flower) straight into an
+/// Onion's stock, for a host carrying Pikmin over from one level to the next.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_store_in_onion(sim: *mut PikSim, onion: u32, color: u32, happa: u32, n: u32) {
+    let (Some(color), Some(happa)) = (color_arg(color), happa_arg(happa)) else {
+        return;
+    };
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, (), |s| {
+            if onion_ok(&s.sim, onion) {
+                s.sim.store_in_onion(OnionId(onion), color, happa, n);
+            }
+        })
+    }
+}
+
+/// A real Onion (the ship has no menu).
+fn onion_ok(sim: &Sim, onion: u32) -> bool {
+    sim.onions().get(onion as usize).is_some_and(|o| o.ship.is_none())
+}
+
 /// # Safety
 /// `sim` from [`pik_sim_new`]; `out` writable.
 #[unsafe(no_mangle)]
@@ -1144,6 +1277,15 @@ unsafe fn slice<'a, T>(p: *const T, n: u32) -> &'a [T] {
 
 fn color_arg(i: u32) -> Option<PikiColor> {
     (i < 3).then(|| PikiColor::from_index(i as usize))
+}
+
+fn happa_arg(i: u32) -> Option<Happa> {
+    match i {
+        0 => Some(Happa::Leaf),
+        1 => Some(Happa::Bud),
+        2 => Some(Happa::Flower),
+        _ => None,
+    }
 }
 
 fn happa_code(h: Happa) -> u8 {

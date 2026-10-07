@@ -69,8 +69,8 @@ fn struct_sizes_are_what_hosts_mirror() {
         (12, 40, 64, 40, 20, 56)
     );
     assert_eq!(
-        (s.captain, s.piki, s.pellet, s.onion, s.sprout, s.event),
-        (60, 64, 64, 36, 20, 48)
+        (s.captain, s.piki, s.pellet, s.onion, s.sprout, s.event, s.onion_counts),
+        (60, 64, 64, 36, 20, 48, 16)
     );
 }
 
@@ -164,6 +164,50 @@ fn pellets_onions_and_bad_arguments() {
         assert_eq!(pik_sim_onions(sim, on.as_mut_ptr(), 2), 1);
         assert_eq!((on[0].colors, on[0].is_ship), (0b111, 0));
         assert!(!pik_sim_params_source(sim).is_null());
+        pik_sim_free(sim);
+    }
+}
+
+#[test]
+fn calling_pikmin_out_of_an_onion_and_putting_them_back() {
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        let sim = pik_sim_new(std::ptr::null(), 2);
+        let c = pik_sim_add_captain(sim, &PikVec3::default()) as u32;
+        let onion = pik_sim_add_onion(sim, &PikVec3 { x: 30.0, y: 0.0, z: 0.0 }, 0b010) as u32;
+        let red = PikiColor::Red.index() as u32;
+        let blue = PikiColor::Blue.index() as u32;
+        pik_sim_store_in_onion(sim, onion, red, 0, 5);
+        pik_sim_store_in_onion(sim, onion, red, 9, 5); // no such leaf stage: ignored
+        pik_sim_store_in_onion(sim, 9, red, 0, 5); // no such Onion: ignored
+
+        let mut world = World::default();
+        let h = host(&mut world);
+        pik_sim_advance(sim, &h, 0.1);
+        assert_eq!(pik_sim_onion_in_reach(sim, c), onion as i32);
+        let mut counts = PikOnionCounts::default();
+        assert_eq!(pik_sim_onion_counts(sim, onion, c, red, &mut counts), 1);
+        assert_eq!((counts.in_onion, counts.in_squad), (5, 0));
+        assert_eq!(pik_sim_onion_counts(sim, 9, c, red, &mut counts), 0);
+
+        assert_eq!(pik_sim_onion_call_out(sim, c, onion, blue, 3), 0, "a red Onion has no blues");
+        assert_eq!(pik_sim_onion_call_out(sim, c, onion, red, 3), 3);
+        for _ in 0..300 {
+            pik_sim_advance(sim, &h, 1.0 / 30.0);
+        }
+        let mut cap = PikCaptain::default();
+        pik_sim_captain(sim, c, &mut cap);
+        assert_eq!(cap.squad, 3, "the three called out should have joined");
+
+        assert_eq!(pik_sim_onion_put_away(sim, c, onion, red, 2), 2);
+        for _ in 0..600 {
+            pik_sim_advance(sim, &h, 1.0 / 30.0);
+        }
+        let mut on = [PikOnion::default(); 1];
+        pik_sim_onions(sim, on.as_mut_ptr(), 1);
+        assert_eq!(on[0].stored[red as usize], 4);
+        assert_eq!(pik_sim_onion_in_reach(sim, 99), -1);
+        assert_eq!(pik_sim_poisoned(sim), 0);
         pik_sim_free(sim);
     }
 }
