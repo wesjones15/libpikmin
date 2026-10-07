@@ -5,9 +5,11 @@
 //! once per texel over the mesh's texture coordinates, folding every texture map, colour
 //! register, konst colour and the material colour into one RGBA image: a leaf's green body and
 //! its veins, a pellet's colour, pattern and number. Maps a stage reads through an environment
-//! (normal-based) texgen, like the pellets' shine or Olimar's helmet, can't be baked per texel
-//! and count as their average colour. [`flat_color`] is the same with no texture over the
-//! mesh's coordinates, for untextured materials.
+//! (normal-based) texgen, like the pellets' shine, can't be baked over the mesh's coordinates
+//! and count as their average colour there. A material whose only maps are environment maps
+//! (Olimar's helmet) bakes over the environment map's own space instead ([`Baked::env`]), and
+//! the host gives that batch sphere-mapped coordinates each frame. [`flat_color`] is the same
+//! with no texture, for untextured materials.
 //!
 //! GX semantics as in `DGXGraphics::setMaterial` (sysDolphin/dgxGraphics.cpp): each stage
 //! computes `(d ± lerp(a, b, c) + bias) * scale` and writes it to PREV or a register.
@@ -89,6 +91,20 @@ pub struct Baked {
     /// 0 repeat, 1 clamp, 2 mirror.
     pub wrap: [u8; 2],
     pub rgba: Vec<u8>,
+    /// Baked over an environment map: sample it at the view-space normal's `(x, -y)` through
+    /// this matrix (`GX_TG_NRM` with a texture matrix; `None` is identity), not the mesh's
+    /// coordinates.
+    pub env: Option<Option<[[f32; 3]; 2]>>,
+}
+
+/// An environment-mapped texture coordinate: view-space normal `n` through `mtx`, as GX's
+/// normal texgen (the viewer's shader does the same).
+pub fn env_uv(n: glam::Vec3, mtx: Option<[[f32; 3]; 2]>) -> [f32; 2] {
+    let (x, y) = (n.x, -n.y);
+    match mtx {
+        Some(m) => [m[0][0] * x + m[0][1] * y + m[0][2], m[1][0] * x + m[1][1] * y + m[1][2]],
+        None => [x, y],
+    }
 }
 
 impl Baked {
@@ -224,7 +240,9 @@ enum Read {
     None,
     /// `TexAttr` `attr` over the mesh's coordinates, through a texture matrix.
     Uv { attr: usize, mtx: Option<[[f32; 3]; 2]> },
-    /// An environment map, as its average colour.
+    /// An environment map (`GX_TG_NRM`) through a texture matrix.
+    Env { attr: usize, mtx: Option<[[f32; 3]; 2]> },
+    /// Some other generated coordinate, as the map's average colour.
     Average(C4),
 }
 
@@ -257,6 +275,7 @@ fn reads(model: &Model, mi: usize, images: &Images) -> Vec<Read> {
             match gens.get(s.tex_coord as usize) {
                 // GX_TG_TEX0..7: the mesh has one set of coordinates.
                 Some(&(src, 1, mtx)) if (4..=11).contains(&src) => Read::Uv { attr, mtx },
+                Some(&(1, 1, mtx)) => Read::Env { attr, mtx },
                 Some(_) => images.average(model, attr).map_or(Read::None, Read::Average),
                 None => Read::None,
             }
@@ -312,15 +331,18 @@ pub fn flat_color(model: &Model, mi: usize, inputs: Inputs, images: &Images) -> 
     let (mat, regs) = resolve(model, mi, inputs);
     eval(model, mi, mat, regs, &|i| match rd.get(i) {
         Some(Read::Average(c)) => *c,
+        Some(Read::Env { attr, .. }) => images.average(model, *attr).unwrap_or([1.0; 4]),
         _ => [1.0; 4],
     })
 }
 
-/// Whether `material` reads a texture over the mesh's coordinates (so has a [`bake`]).
+/// Whether `material` reads a texture over the mesh's or an environment map's coordinates (so
+/// has a [`bake`]).
 pub fn textured(model: &Model, mi: usize, images: &Images) -> bool {
-    reads(model, mi, images)
-        .iter()
-        .any(|r| matches!(r, Read::Uv { attr, .. } if images.image(model, *attr).is_some()))
+    reads(model, mi, images).iter().any(|r| match r {
+        Read::Uv { attr, .. } | Read::Env { attr, .. } => images.image(model, *attr).is_some(),
+        _ => false,
+    })
 }
 
 /// GX bilinear filtering at `uv`, wrapping as the texture says.
@@ -353,17 +375,26 @@ fn sample(img: &Image, wrap: [u8; 2], u: f32, v: f32) -> C4 {
 }
 
 /// `material` with `inputs`, baked over the mesh's texture coordinates at the largest of its
-/// textures' sizes. `None` for a material with no texture over the mesh's coordinates.
+/// textures' sizes, or failing that over its environment maps' own space ([`Baked::env`]).
+/// `None` for an untextured material.
 pub fn bake(model: &Model, mi: usize, inputs: Inputs, images: &Images) -> Option<Baked> {
     let rd = reads(model, mi, images);
+    let uv_mapped = rd.iter().any(|r| matches!(r, Read::Uv { attr, .. } if images.image(model, *attr).is_some()));
     let mut size = (0u32, 0u32);
     let mut out_wrap = None;
+    let mut env = None;
     for r in &rd {
-        if let Read::Uv { attr, .. } = r
-            && let Some((img, w)) = images.image(model, *attr)
-        {
+        let (attr, env_mtx) = match *r {
+            Read::Uv { attr, .. } => (attr, None),
+            Read::Env { attr, mtx } if !uv_mapped => (attr, Some(mtx)),
+            _ => continue,
+        };
+        if let Some((img, w)) = images.image(model, attr) {
             size = (size.0.max(img.width), size.1.max(img.height));
             out_wrap.get_or_insert(w);
+            if env.is_none() {
+                env = env_mtx;
+            }
         }
     }
     let wrap = out_wrap?;
@@ -387,11 +418,18 @@ pub fn bake(model: &Model, mi: usize, inputs: Inputs, images: &Images) -> Option
                     }
                     None => [1.0; 4],
                 },
+                // Over the mesh's coordinates an environment map is its average; baked over its
+                // own space, it's read where the host's coordinates will point.
+                Some(Read::Env { attr, .. }) if uv_mapped => images.average(model, *attr).unwrap_or([1.0; 4]),
+                Some(Read::Env { attr, .. }) => match images.image(model, *attr) {
+                    Some((img, wr)) => sample(img, wr, u, v),
+                    None => [1.0; 4],
+                },
                 Some(Read::Average(c)) => *c,
                 _ => [1.0; 4],
             });
             rgba.extend(c.map(|v| (v * 255.0).round() as u8));
         }
     }
-    Some(Baked { width: w, height: h, wrap, rgba })
+    Some(Baked { width: w, height: h, wrap, rgba, env })
 }

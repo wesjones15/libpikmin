@@ -189,6 +189,9 @@ fn the_view_poses_a_sim_through_the_abi() {
         pik_view_model(view, last.model, &mut info);
         assert_eq!(last.first_vertex + info.vertex_count, vc);
         assert_eq!(last.first_color + info.batch_count, cc);
+        let mut uc = 0u32;
+        assert!(!pik_view_frame_uvs(view, &mut uc).is_null());
+        assert_eq!(uc, vc);
         let mut tc = 0u32;
         let ids = std::slice::from_raw_parts(pik_view_texture_ids(view, &mut tc), tc as usize);
         assert_eq!(tc, cc);

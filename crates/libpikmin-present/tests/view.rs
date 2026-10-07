@@ -210,3 +210,30 @@ fn whistle_and_ghosts_make_particles() {
     }
     assert!(ghost > 0, "no ghost after the Pikmin died");
 }
+
+/// Olimar's helmet is environment mapped: its texture coordinates follow the camera, stay on
+/// the map, and its alpha is lit.
+#[test]
+fn the_helmet_reflects_the_camera() {
+    let Some(assets) = assets() else { return };
+    let mut view = View::load(&assets).expect("models load");
+    let olimar = &view.models[models::OLIMAR as usize];
+    let env: Vec<usize> = (0..olimar.batches.len()).filter(|&b| olimar.batch_env[b].is_some()).collect();
+    assert!(!env.is_empty(), "nothing on Olimar is environment mapped");
+    assert!(env.iter().all(|&b| olimar.batch_light(b) & 2 != 0), "the helmet's alpha isn't lit");
+    let first: u32 = olimar.batches[..env[0]].iter().map(|b| b.vertices.len() as u32).sum();
+    let count = olimar.batches[env[0]].vertices.len();
+
+    let mut sim = Sim::new(Params::default(), 1);
+    sim.add_captain(Vec3::ZERO);
+    let uvs_from = |view: &mut View, right: Vec3, up: Vec3, fwd: Vec3| {
+        view.set_camera(right, up, fwd);
+        view.update(&sim, 0.0, TICK_DT);
+        let d = view.draws.iter().find(|d| d.kind == kinds::CAPTAIN).unwrap();
+        view.uvs[(d.first_vertex + first) as usize..][..count].to_vec()
+    };
+    let front = uvs_from(&mut view, Vec3::X, Vec3::Y, Vec3::Z);
+    let above = uvs_from(&mut view, Vec3::X, Vec3::Z, -Vec3::Y);
+    assert!(front.iter().flatten().all(|c| (-0.01..=1.01).contains(c)), "off the map: {front:?}");
+    assert_ne!(front, above, "the reflection doesn't move with the camera");
+}

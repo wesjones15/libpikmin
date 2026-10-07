@@ -53,11 +53,14 @@ pub struct PikBatch {
     pub texture: i32,
     /// 0 opaque, 1 alpha tested (cutout), 2 blended and unlit.
     pub blend: u8,
-    /// 0: drawn unlit in the game.
+    /// Lit in the game: 1 its colour, 2 its alpha (opaque only where light falls; ambient
+    /// alpha is 0). 0: unlit.
     pub lit: u8,
     /// 0 back, 1 front, 2 none (GX faces are front when clockwise on screen).
     pub cull: u8,
-    pub _pad: u8,
+    /// 1: environment mapped: its texture coordinates change every frame
+    /// ([`pik_view_frame_uvs`]).
+    pub env: u8,
 }
 
 /// A texture's size and wrap modes (0 repeat, 1 clamp, 2 mirror).
@@ -288,9 +291,9 @@ pub unsafe extern "C" fn pik_view_batches(view: *mut PikView, model: u32, out: *
                     vertex_count: b.vertices.len() as u32,
                     texture: m.batch_texture[i],
                     blend: m.batch_blend[i],
-                    lit: m.batch_lit(i) as u8,
+                    lit: m.batch_light(i),
                     cull,
-                    _pad: 0,
+                    env: m.batch_env.get(i).is_some_and(|e| e.is_some()) as u8,
                 });
                 index += b.indices.len() as u32;
                 vertex += b.vertices.len() as u32;
@@ -430,11 +433,13 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
                 }
             }
             let dt = f.dt.clamp(0.0, 0.25);
-            v.view.update(&s.sim, s.sim.alpha(), dt);
-            // Billboards face the camera: the same axes the listener uses.
+            // The camera, for environment maps and billboards: the same axes the listener uses.
             let fwd = Vec3::from(f.forward).normalize_or(Vec3::Z);
             let right = Vec3::from(f.up).cross(fwd).normalize_or(Vec3::X);
-            v.view.particles(right, fwd.cross(right));
+            let up = fwd.cross(right);
+            v.view.set_camera(right, up, fwd);
+            v.view.update(&s.sim, s.sim.alpha(), dt);
+            v.view.particles(right, up);
             v.particles.clear();
             v.particles.extend(v.view.particles.quads.iter().map(|q| PikParticle {
                 corners: q.corners.map(PikVec3::from),
@@ -564,6 +569,25 @@ pub unsafe extern "C" fn pik_view_texture_ids(view: *mut PikView, count: *mut u3
                 *c = v.view.texture_ids.len() as u32;
             }
             v.view.texture_ids.as_ptr()
+        })
+    }
+}
+
+/// This frame's texture coordinates for every instance, alongside [`pik_view_positions`]:
+/// the model's own, except environment-mapped batches' ([`PikBatch::env`]), which follow the
+/// camera. Valid as [`pik_view_positions`].
+///
+/// # Safety
+/// As [`pik_view_positions`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_frame_uvs(view: *mut PikView, count: *mut u32) -> *const [f32; 2] {
+    // SAFETY: as above.
+    unsafe {
+        with_view(view, std::ptr::null(), |v| {
+            if let Some(c) = count.as_mut() {
+                *c = v.view.uvs.len() as u32;
+            }
+            v.view.uvs.as_ptr()
         })
     }
 }

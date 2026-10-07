@@ -85,6 +85,9 @@ pub struct ViewModel {
     pub batch_texture: Vec<i32>,
     /// Per batch: [`blend`].
     pub batch_blend: Vec<u8>,
+    /// Per batch: environment mapped ([`tev::Baked::env`]): its texture coordinates come from
+    /// the view-space normals each frame ([`View::uvs`]), through this matrix.
+    pub batch_env: Vec<Option<Option<[[f32; 3]; 2]>>>,
 }
 
 impl ViewModel {
@@ -115,6 +118,7 @@ impl ViewModel {
             textured,
             batch_texture: Vec::new(),
             batch_blend: Vec::new(),
+            batch_env: Vec::new(),
         })
     }
 
@@ -126,8 +130,12 @@ impl ViewModel {
             .max(0.01)
     }
 
-    pub fn batch_lit(&self, b: usize) -> bool {
-        self.model.materials[self.batches[b].material].lit()
+    /// How batch `b` is lit: 1 its colour, 2 its alpha (`LightingControlFlags::EnableAlpha0`:
+    /// with the stages' ambient alpha of 0, Olimar's helmet is only opaque where light falls).
+    pub fn batch_light(&self, b: usize) -> u8 {
+        let m = &self.model.materials[self.batches[b].material];
+        let alpha = m.flags & libpikmin_assets::model::mat_flags::PVW != 0 && m.lighting & 4 != 0;
+        m.lit() as u8 | (alpha as u8) << 1
     }
 }
 
@@ -209,6 +217,11 @@ pub struct View {
     pub colors: Vec<[f32; 4]>,
     /// Per batch of every draw: its texture in [`View::textures`], or -1.
     pub texture_ids: Vec<i32>,
+    /// Every instance's texture coordinates this frame, alongside [`View::positions`]: the
+    /// model's own, except environment-mapped batches' ([`ViewModel::batch_env`]).
+    pub uvs: Vec<[f32; 2]>,
+    /// The camera's right, up and backward axes (GX view space), for environment maps.
+    camera: [Vec3; 3],
     pub textures: Textures,
     /// The whistle and dead Pikmin's ghosts (none if the effect files didn't load).
     pub effects: Option<Effects>,
@@ -239,6 +252,7 @@ impl View {
         for (mi, vm) in models.iter_mut().enumerate() {
             let mut ids = Vec::new();
             let mut blends = Vec::new();
+            let mut envs = Vec::new();
             for b in &vm.batches {
                 let id = textures.get(mi as u32, vm, b.material, Inputs::default());
                 let floor = match usize::try_from(id) {
@@ -251,10 +265,12 @@ impl View {
                     Blend::AlphaBlend | Blend::Inverse if floor >= OPAQUE_ENOUGH => blend::OPAQUE,
                     Blend::AlphaBlend | Blend::Inverse => blend::TRANSLUCENT,
                 });
+                envs.push(usize::try_from(id).ok().and_then(|i| textures.list[i].env));
                 ids.push(id);
             }
             vm.batch_texture = ids;
             vm.batch_blend = blends;
+            vm.batch_env = envs;
         }
         let ante = models[models::OLIMAR as usize].model.coll.iter().find(|c| c.id == "ante").cloned();
         Ok(View {
@@ -268,6 +284,8 @@ impl View {
             normals: Vec::new(),
             colors: Vec::new(),
             texture_ids: Vec::new(),
+            uvs: Vec::new(),
+            camera: [Vec3::X, Vec3::Y, Vec3::Z],
             textures,
             effects: Effects::load(assets),
             particles: Flat::default(),
@@ -286,6 +304,12 @@ impl View {
         {
             fx.spawn(fx_defs::PIKI_DEAD_SOUL, *pos);
         }
+    }
+
+    /// The camera's world axes (`forward` is where it looks), for environment maps and
+    /// particles. Call before [`View::update`].
+    pub fn set_camera(&mut self, right: Vec3, up: Vec3, forward: Vec3) {
+        self.camera = [right, up, -forward];
     }
 
     /// This frame's particles as quads facing a camera whose world axes are `right` and `up`
@@ -326,11 +350,21 @@ impl View {
         let vm = &self.models[model as usize];
         let first_vertex = self.positions.len() as u32;
         let first_color = self.colors.len() as u32;
-        for b in &vm.batches {
+        for (bi, b) in vm.batches.iter().enumerate() {
+            let env = vm.batch_env.get(bi).copied().flatten();
             for v in &b.vertices {
                 let (p, n) = pose.skin(v);
+                let n = n.normalize_or_zero();
                 self.positions.push(p);
-                self.normals.push(n.normalize_or_zero());
+                self.normals.push(n);
+                self.uvs.push(match env {
+                    Some(mtx) => {
+                        let w = rot * n;
+                        let [r, u, back] = self.camera;
+                        tev::env_uv(Vec3::new(w.dot(r), w.dot(u), w.dot(back)), mtx)
+                    }
+                    None => [v.uv.x, v.uv.y],
+                });
             }
             let inp = inputs(b.material);
             let id = self.textures.get(model, vm, b.material, inp);
@@ -350,6 +384,7 @@ impl View {
         self.normals.clear();
         self.colors.clear();
         self.texture_ids.clear();
+        self.uvs.clear();
         self.whistles.clear();
         self.time += dt;
         self.animator.begin_frame(dt);
