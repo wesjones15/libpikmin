@@ -1,13 +1,16 @@
 # libpikmin
 
 Goal: reimplement Pikmin 1 mechanics (Olimar, Pikmin swarm, Onion, corpse carrying) as a
-game-agnostic Rust library. Hosts: Elden Ring (via a fork of er-mario) and Minecraft Java Edition.
+game-agnostic Rust library. Host: Risk of Rain 2, 2023 build (`../ror2-olimar/`). Minecraft
+Java Edition is a possible later host; Elden Ring is shelved.
 
 ## Layout
 This folder is the repo root. All work happens here. Sibling folders are read-only references:
 - `../pikmin-main/`: projectPiki decomp, GPIE01_01. READ-ONLY spec. It builds
   100% matching against the user's disc (`orig/GPIE01_01/*.ciso`).
-- `../er-mario-master/`: reference for the later Elden Ring host (me3 DLL, libsm64, fromsoftware-rs @ 59fbd3b).
+- `../ror2-olimar/`: the Risk of Rain 2 host (its own git repo, BepInEx plugin + `pikmin.dll`).
+- `../ror2-mario/`: the Super Mario Sunshine RoR2 host it was modelled on (another session's work).
+- `../er-mario-master/`: reference for the shelved Elden Ring host (me3 DLL, libsm64, fromsoftware-rs @ 59fbd3b).
 - `../pikmin2-main/`: projectPiki Pikmin 2 decomp, GPVE01. READ-ONLY secondary spec. Builds
   against the user's disc (game code 99.82% matched; gameplay code is in `src/plugProjectKandoU/`).
 - `../extracted/p2/`: Pikmin 2 text parms copied off the user's disc with dtk (reference only).
@@ -30,7 +33,9 @@ Workspace:
   device. Banks, sequences and the game's sound tables come from `assets/SndData/` (the extractor
   copies `pikiseq.hed`, `jaudio_tables.bin` and `sound_table.txt` out of `main.dol` by per-release
   symbol addresses). The DSP's reverb and filters aren't emulated.
-- `crates/libpikmin-ffi/`: C ABI (cdylib/staticlib) for hosts.
+- `crates/libpikmin-ffi/`: C ABI for hosts: `pikmin.dll`, `pik_*` functions, `PIK_ABI_VERSION`.
+  ror2-olimar's `Native.cs` mirrors its structs and checks `pik_struct_sizes` at load; change
+  both together (and the size test in `src/tests.rs`).
 - `crates/viewer/`: test host (macroquad) for play-testing without a game. Its enemies (Dwarf/Spotty
   Bulborbs, Honeywisps) are host-side ports of the Pikmin 1 strategies in `viewer/src/teki.rs`. 3D with the disc's
   models and animations (CPU skinning, a GLSL TEV interpreter for PVW materials); V switches to
@@ -86,7 +91,13 @@ Workspace:
   Bulbmin resist all. The host reports hazards, and the core applies immunities and panic/death behavior.
 
 ## Hosts
-- **Elden Ring** (planned first): DLL via me3, offline only.
+- **Risk of Rain 2, 2023 build** (current): 1.2.4.4, Unity 2019.4.37, Mono, BepInEx 5.4.21,
+  no R2API. The user plays co-op with friends on that build. `../ror2-olimar/` (OlimarTest):
+  the sim runs on the server; RoR2 enemies' hurtboxes are creature parts; Pikmin hits are RoR2
+  damage; corpses become pellets. Non-VR uses Pikmin controls (the sim moves Olimar, pad read
+  by button position); VR (VRMod) uses aim controls with a host pose and cursor. Don't launch
+  the game unasked; the user tests and Claude reads `BepInEx/LogOutput.log`.
+- **Elden Ring**: shelved (the user doesn't like the game). DLL via me3, offline only.
 - **Minecraft Java Edition**: a Fabric/NeoForge mod in Java that loads the `libpikmin-ffi`
   cdylib over JNI (MC 1.21 targets Java 21, where FFM is still preview). The server
   runs the sim and clients render. No Nintendo models or textures in git; build a resource
@@ -105,4 +116,5 @@ Workspace:
 2. Crate, Host trait, headless host, disc parm loader.
 3. Follow/whistle/throw, then attack, then carry/Onion.
 4. Viewer play-test.
-5. ER host (later): 100 dummy entities doing raycasts and drawing, then the investigations.
+5. RoR2 host (`../ror2-olimar/`): play-test in game, then networking (snapshots to clients),
+   models/animation/sound from the user's disc, hazards.
