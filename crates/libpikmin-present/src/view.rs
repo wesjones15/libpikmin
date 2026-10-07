@@ -232,6 +232,9 @@ pub struct View {
     whistles: Vec<WhistleFrame>,
     interp: HashMap<u64, Interp>,
     time: f32,
+    /// Draw each captain's cursor and marker (on by default; off for a captain shown on his
+    /// own, like a host's character select screen).
+    pub show_cursors: bool,
 }
 
 impl View {
@@ -293,6 +296,7 @@ impl View {
             whistles: Vec::new(),
             interp: HashMap::new(),
             time: 0.0,
+            show_cursors: true,
         })
     }
 
@@ -520,6 +524,9 @@ impl View {
                 radius: c.whistle_radius(&params),
             });
             self.push(k, kinds::CAPTAIN, models::OLIMAR, pos, rot, pose, &no_inputs, 1.0, f);
+            if !self.show_cursors {
+                continue;
+            }
 
             // On the ground 1 above, Z pointing away from the captain.
             let kc = key(kinds::CURSOR, c.id.0 as u64);

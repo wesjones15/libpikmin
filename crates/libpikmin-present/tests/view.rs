@@ -237,3 +237,15 @@ fn the_helmet_reflects_the_camera() {
     assert!(front.iter().flatten().all(|c| (-0.01..=1.01).contains(c)), "off the map: {front:?}");
     assert_ne!(front, above, "the reflection doesn't move with the camera");
 }
+
+#[test]
+fn cursors_can_be_hidden() {
+    let Some(assets) = assets() else { return };
+    let mut view = View::load(&assets).expect("models load");
+    let sim = world(&assets);
+    view.show_cursors = false;
+    view.update(&sim, 0.5, TICK_DT);
+    let count = |k: u8| view.draws.iter().filter(|d| d.kind == k).count();
+    assert_eq!(count(kinds::CAPTAIN), 1);
+    assert_eq!(count(kinds::CURSOR) + count(kinds::MARKER), 0);
+}

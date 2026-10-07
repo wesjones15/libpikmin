@@ -207,6 +207,17 @@ pub unsafe extern "C" fn pik_view_status(view: *const PikView) -> *const c_char 
     }
 }
 
+/// Whether to draw each captain's cursor and marker (`show` nonzero; the default). Off for a
+/// captain shown on his own, like on a character select screen.
+///
+/// # Safety
+/// `view` from [`pik_view_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_show_cursors(view: *mut PikView, show: u8) {
+    // SAFETY: as documented.
+    unsafe { with_view(view, (), |v| v.view.show_cursors = show != 0) }
+}
+
 /// Runs `f` on a live view, poisoning it if `f` panics.
 ///
 /// # Safety
