@@ -33,10 +33,15 @@ Workspace:
   device. Banks, sequences and the game's sound tables come from `assets/SndData/` (the extractor
   copies `pikiseq.hed`, `jaudio_tables.bin` and `sound_table.txt` out of `main.dol` by per-release
   symbol addresses). The DSP's reverb and filters aren't emulated.
-- `crates/libpikmin-ffi/`: C ABI for hosts: `pikmin.dll`, `pik_*` functions, `PIK_ABI_VERSION`.
-  ror2-olimar's `Native.cs` mirrors its structs and checks `pik_struct_sizes` at load; change
-  both together (and the size test in `src/tests.rs`).
-- `crates/viewer/`: test host (macroquad) for play-testing without a game. Its enemies (Dwarf/Spotty
+- `crates/libpikmin-present/`: presentation shared by every host: `animator` (which animation
+  each object plays, from sim state), `audio` (the sim's events mapped to the game's sounds, on
+  a cpal stream), and for engines that draw themselves `view` (models posed and CPU-skinned
+  each frame into one vertex buffer) with `tev` (each material's TEV run on the CPU for a flat
+  colour, since host shaders take one texture times one colour). No music: hosts keep theirs.
+- `crates/libpikmin-ffi/`: C ABI for hosts: `pikmin.dll`, `pik_*` functions (`pik_view_*` for
+  drawing and sound), `PIK_ABI_VERSION`. ror2-olimar's `Native.cs` mirrors its structs and
+  checks `pik_struct_sizes` at load; change both together (and the size test in `src/tests.rs`).
+- `crates/viewer/`: test host (macroquad) for play-testing without a game. Uses `libpikmin-present`'s animator and audio. Its enemies (Dwarf/Spotty
   Bulborbs, Honeywisps) are host-side ports of the Pikmin 1 strategies in `viewer/src/teki.rs`. 3D with the disc's
   models and animations (CPU skinning, a GLSL TEV interpreter for PVW materials); V switches to
   the 2D top-down debug view.

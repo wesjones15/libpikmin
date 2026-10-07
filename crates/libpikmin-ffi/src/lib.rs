@@ -10,12 +10,17 @@
 //!    [`PikHost`] of world callbacks.
 //! 4. Read back [`pik_sim_captain`], [`pik_sim_pikis`], [`pik_sim_pellets`], [`pik_sim_onions`],
 //!    [`pik_sim_sprouts`] and drain [`pik_sim_events`].
+//! 5. To draw with the disc's models and play its sounds: [`pik_view_new`], build meshes from
+//!    [`pik_view_model`], [`pik_view_batches`], [`pik_view_indices`], [`pik_view_uvs`] and
+//!    [`pik_view_texture`]; each frame [`pik_view_update`], then [`pik_view_draws`] with
+//!    [`pik_view_positions`], [`pik_view_normals`] and [`pik_view_colors`].
 //!
 //! Units and axes are the sim's (the decomp's, roughly cm, Y up; a facing angle `a` points
 //! along `(sin a, 0, cos a)`); hosts convert. Every struct is `#[repr(C)]` plain data, and
 //! [`pik_struct_sizes`] reports their sizes so a host can refuse a mismatched build. Nothing
 //! unwinds into the caller: a panic poisons that sim and later calls on it do nothing.
 
+use std::collections::VecDeque;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
@@ -29,8 +34,11 @@ use libpikmin::{
 };
 use libpikmin::host::CreatureView;
 
+mod view;
+pub use view::*;
+
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 1;
+pub const PIK_ABI_VERSION: u32 = 2;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_abi_version() -> u32 {
@@ -384,6 +392,11 @@ pub struct PikSizes {
     pub sprout: u32,
     pub event: u32,
     pub onion_counts: u32,
+    pub model_info: u32,
+    pub batch: u32,
+    pub texture: u32,
+    pub draw: u32,
+    pub view_frame: u32,
 }
 
 /// # Safety
@@ -405,6 +418,11 @@ pub unsafe extern "C" fn pik_struct_sizes(out: *mut PikSizes) {
         sprout: size_of::<PikSprout>() as u32,
         event: size_of::<PikEvent>() as u32,
         onion_counts: size_of::<PikOnionCounts>() as u32,
+        model_info: size_of::<PikModelInfo>() as u32,
+        batch: size_of::<PikBatch>() as u32,
+        texture: size_of::<PikTexture>() as u32,
+        draw: size_of::<PikDraw>() as u32,
+        view_frame: size_of::<PikViewFrame>() as u32,
     };
     // SAFETY: the caller promised a writable pointer.
     if let Some(o) = unsafe { out.as_mut() } {
@@ -512,11 +530,18 @@ unsafe fn write_str(s: &str, out: *mut u8, len: u32) -> u8 {
 // ---------------------------------------------------------------------------------------------
 // The sim
 
+/// Most events kept for a reader that hasn't caught up.
+const EVENT_BACKLOG: usize = 16384;
+
 /// An opaque sim handle.
 pub struct PikSim {
     sim: Sim,
     /// The creatures the host gave last, copied into the sim each tick.
     frame: CreatureFrame,
+    /// Events for [`pik_sim_events`].
+    pending: VecDeque<Event>,
+    /// Events for [`pik_view_update`] (animations, sounds).
+    view_log: Vec<Event>,
     params_source: CString,
     poisoned: bool,
 }
@@ -617,6 +642,8 @@ pub unsafe extern "C" fn pik_sim_new(assets_dir: *const c_char, seed: u64) -> *m
         Ok((sim, source)) => Box::into_raw(Box::new(PikSim {
             sim,
             frame: CreatureFrame::default(),
+            pending: VecDeque::new(),
+            view_log: Vec::new(),
             params_source: CString::new(source).unwrap_or_default(),
             poisoned: false,
         })),
@@ -861,7 +888,17 @@ pub unsafe extern "C" fn pik_sim_advance(sim: *mut PikSim, host: *const PikHost,
     unsafe {
         with(sim, 0, |s| {
             let mut h = FfiHost { host, frame: &s.frame, path: Vec::new() };
-            s.sim.advance(&mut h, dt.clamp(0.0, 0.25))
+            let ticks = s.sim.advance(&mut h, dt.clamp(0.0, 0.25));
+            let events: Vec<Event> = s.sim.drain_events().collect();
+            // Nobody reading either queue mustn't grow it forever: keep the newest.
+            if s.view_log.len() + events.len() <= EVENT_BACKLOG {
+                s.view_log.extend_from_slice(&events);
+            }
+            s.pending.extend(events);
+            while s.pending.len() > EVENT_BACKLOG {
+                s.pending.pop_front();
+            }
+            ticks
         })
     }
 }
@@ -1251,7 +1288,9 @@ pub unsafe extern "C" fn pik_sim_events(sim: *mut PikSim, out: *mut PikEvent, ma
     unsafe {
         with(sim, 0, |s| {
             let mut n = 0;
-            for e in s.sim.drain_events().take(max as usize) {
+            while n < max as usize
+                && let Some(e) = s.pending.pop_front()
+            {
                 // SAFETY: `n < max`, which the caller promised is writable.
                 out.add(n).write(event(e));
                 n += 1;

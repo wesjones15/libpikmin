@@ -11,3 +11,5 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 libpikmin.workspace = true
 libpikmin-assets.workspace = true
+libpikmin-present.workspace = true
+glam.workspace = true

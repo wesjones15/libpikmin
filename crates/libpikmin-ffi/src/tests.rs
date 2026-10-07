@@ -72,6 +72,129 @@ fn struct_sizes_are_what_hosts_mirror() {
         (s.captain, s.piki, s.pellet, s.onion, s.sprout, s.event, s.onion_counts),
         (60, 64, 64, 36, 20, 48, 16)
     );
+    assert_eq!((s.model_info, s.batch, s.texture, s.draw, s.view_frame), (40, 24, 12, 64, 48));
+}
+
+#[test]
+fn events_past_one_read_wait_for_the_next() {
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        let sim = pik_sim_new(std::ptr::null(), 3);
+        let c = pik_sim_add_captain(sim, &PikVec3::default());
+        for i in 0..20 {
+            let at = PikVec3 { x: -20.0 - i as f32 * 2.0, y: 0.0, z: 0.0 };
+            pik_sim_spawn_piki(sim, PikiColor::Red.index() as u32, &at, c);
+        }
+        let mut world = World::default();
+        let h = host(&mut world);
+        // Dismiss: one event per Pikmin and more, all in one tick.
+        pik_sim_set_input(sim, 0, &PikInput { dismiss: 1, ..Default::default() });
+        pik_sim_advance(sim, &h, 1.0 / 30.0);
+        let mut buf = [PikEvent::default(); 2];
+        let mut total = 0;
+        loop {
+            let n = pik_sim_events(sim, buf.as_mut_ptr(), 2);
+            total += n;
+            if n < 2 {
+                break;
+            }
+        }
+        assert!(total >= 1, "no events");
+        // Read in twos, nothing may be lost compared with one big read of a replay.
+        let sim2 = pik_sim_new(std::ptr::null(), 3);
+        let c2 = pik_sim_add_captain(sim2, &PikVec3::default());
+        for i in 0..20 {
+            let at = PikVec3 { x: -20.0 - i as f32 * 2.0, y: 0.0, z: 0.0 };
+            pik_sim_spawn_piki(sim2, PikiColor::Red.index() as u32, &at, c2);
+        }
+        pik_sim_set_input(sim2, 0, &PikInput { dismiss: 1, ..Default::default() });
+        pik_sim_advance(sim2, &h, 1.0 / 30.0);
+        assert_eq!(events(sim2).len() as u32, total);
+        let mut big = [PikEvent::default(); 256];
+        assert_eq!(pik_sim_events(sim2, big.as_mut_ptr(), 256), 0, "already drained");
+        pik_sim_free(sim);
+        pik_sim_free(sim2);
+    }
+}
+
+#[test]
+fn the_view_poses_a_sim_through_the_abi() {
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else {
+        eprintln!("no extracted assets; skipping");
+        return;
+    };
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        let view = pik_view_new(dir.as_ptr(), 0);
+        assert!(!view.is_null());
+        assert_eq!(pik_view_model_count(view), 15);
+        for m in 0..15 {
+            let mut info = PikModelInfo::default();
+            assert_eq!(pik_view_model(view, m, &mut info), 1);
+            let mut batches = vec![PikBatch::default(); info.batch_count as usize];
+            assert_eq!(pik_view_batches(view, m, batches.as_mut_ptr(), info.batch_count), info.batch_count);
+            let mut idx = vec![0u32; info.index_count as usize];
+            assert_eq!(pik_view_indices(view, m, idx.as_mut_ptr(), info.index_count), info.index_count);
+            assert!(idx.iter().all(|&i| i < info.vertex_count), "model {m}: index out of range");
+            let last = batches.last().unwrap();
+            assert_eq!(last.first_index + last.index_count, info.index_count);
+            assert_eq!(last.first_vertex + last.vertex_count, info.vertex_count);
+            let mut uv = vec![[0f32; 2]; info.vertex_count as usize];
+            assert_eq!(pik_view_uvs(view, m, uv.as_mut_ptr(), info.vertex_count), info.vertex_count);
+            for b in &batches {
+                if b.texture < 0 {
+                    continue;
+                }
+                let mut t = PikTexture::default();
+                assert_eq!(pik_view_texture(view, m, b.texture as u32, &mut t, std::ptr::null_mut(), 0), 1);
+                let mut px = vec![0u8; (t.width * t.height * 4) as usize];
+                assert_eq!(pik_view_texture(view, m, b.texture as u32, &mut t, px.as_mut_ptr(), px.len() as u32), 1);
+            }
+        }
+
+        let sim = pik_sim_new(dir.as_ptr(), 1);
+        let c = pik_sim_add_captain(sim, &PikVec3::default());
+        for i in 0..4 {
+            let at = PikVec3 { x: -20.0 - i as f32 * 4.0, y: 0.0, z: 0.0 };
+            pik_sim_spawn_piki(sim, PikiColor::Blue.index() as u32, &at, c);
+        }
+        pik_sim_add_onion(sim, &PikVec3 { x: 200.0, y: 0.0, z: 0.0 }, 0b010);
+        let mut world = World::default();
+        let h = host(&mut world);
+        pik_sim_set_input(sim, 0, &PikInput { throw: 1, ..Default::default() });
+        let frame = PikViewFrame {
+            dt: 1.0 / 60.0,
+            forward: PikVec3 { x: 0.0, y: 0.0, z: 1.0 },
+            up: PikVec3 { x: 0.0, y: 1.0, z: 0.0 },
+            listener: 0,
+            volume: 1.0,
+            ..Default::default()
+        };
+        for _ in 0..30 {
+            pik_sim_advance(sim, &h, 1.0 / 60.0);
+            pik_view_update(view, sim, &frame);
+        }
+        let n = pik_view_draws(view, std::ptr::null_mut(), 0);
+        let mut draws = vec![PikDraw::default(); n as usize];
+        assert_eq!(pik_view_draws(view, draws.as_mut_ptr(), n), n);
+        // Olimar, 4 Pikmin with leaves, the Onion, cursor and marker.
+        assert_eq!(n, 1 + 8 + 1 + 2, "{draws:?}");
+        let (mut vc, mut cc) = (0u32, 0u32);
+        let pos = pik_view_positions(view, &mut vc);
+        let col = pik_view_colors(view, &mut cc);
+        assert!(!pos.is_null() && !col.is_null());
+        let last = draws.last().unwrap();
+        let mut info = PikModelInfo::default();
+        pik_view_model(view, last.model, &mut info);
+        assert_eq!(last.first_vertex + info.vertex_count, vc);
+        assert_eq!(last.first_color + info.batch_count, cc);
+        let pos = std::slice::from_raw_parts(pos, vc as usize);
+        assert!(pos.iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()));
+        assert!(!pik_view_status(view).is_null());
+        pik_sim_free(sim);
+        pik_view_free(view);
+    }
 }
 
 #[test]
