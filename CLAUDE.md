@@ -38,8 +38,10 @@ Workspace:
   a cpal stream), and for engines that draw themselves `view` (models posed and CPU-skinned
   each frame into one vertex buffer) with `tev` (each material's TEV run on the CPU per texel and
   baked into one RGBA texture, since host shaders take one texture times one colour; env-mapped
-  reads count as their average; blended materials are tagged opaque, cutout or translucent).
-  No music: hosts keep theirs.
+  reads count as their average; blended materials are tagged opaque, cutout or translucent),
+  and `effects` (the whistle and one-shots like the dead Pikmin's ghost, on the particle
+  generator port; `Flat` splits GX's additive colour modes into one-texture layers for host
+  shaders). No music: hosts keep theirs.
 - `crates/libpikmin-ffi/`: C ABI for hosts: `pikmin.dll`, `pik_*` functions (`pik_view_*` for
   drawing and sound), `PIK_ABI_VERSION`. ror2-olimar's `Native.cs` mirrors its structs and
   checks `pik_struct_sizes` at load; change both together (and the size test in `src/tests.rs`).

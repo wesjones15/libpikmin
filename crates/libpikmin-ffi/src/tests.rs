@@ -72,7 +72,7 @@ fn struct_sizes_are_what_hosts_mirror() {
         (s.captain, s.piki, s.pellet, s.onion, s.sprout, s.event, s.onion_counts),
         (60, 64, 64, 36, 20, 48, 16)
     );
-    assert_eq!((s.model_info, s.batch, s.texture, s.draw, s.view_frame), (40, 24, 12, 64, 48));
+    assert_eq!((s.model_info, s.batch, s.texture, s.draw, s.view_frame, s.particle), (40, 24, 12, 64, 48, 72));
 }
 
 #[test]
@@ -199,6 +199,23 @@ fn the_view_poses_a_sim_through_the_abi() {
         let pos = std::slice::from_raw_parts(pos, vc as usize);
         assert!(pos.iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()));
         assert!(!pik_view_status(view).is_null());
+
+        // Whistling makes particles, each with a texture.
+        pik_sim_set_input(sim, 0, &PikInput { whistle: 1, ..Default::default() });
+        for _ in 0..20 {
+            pik_sim_advance(sim, &h, 1.0 / 60.0);
+            pik_view_update(view, sim, &frame);
+        }
+        let mut pc = 0u32;
+        let ps = pik_view_particles(view, &mut pc);
+        assert!(pc > 0 && !ps.is_null(), "no whistle particles");
+        let ps = std::slice::from_raw_parts(ps, pc as usize);
+        for p in ps {
+            let mut t = PikTexture::default();
+            assert_eq!(pik_view_particle_texture(view, p.texture, &mut t, std::ptr::null_mut(), 0), 1);
+            let mut px = vec![0u8; (t.width * t.height * 4) as usize];
+            assert_eq!(pik_view_particle_texture(view, p.texture, &mut t, px.as_mut_ptr(), px.len() as u32), 1);
+        }
         pik_sim_free(sim);
         pik_view_free(view);
     }

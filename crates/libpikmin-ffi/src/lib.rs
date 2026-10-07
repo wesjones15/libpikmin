@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 3;
+pub const PIK_ABI_VERSION: u32 = 4;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_abi_version() -> u32 {
@@ -397,6 +397,7 @@ pub struct PikSizes {
     pub texture: u32,
     pub draw: u32,
     pub view_frame: u32,
+    pub particle: u32,
 }
 
 /// # Safety
@@ -423,6 +424,7 @@ pub unsafe extern "C" fn pik_struct_sizes(out: *mut PikSizes) {
         texture: size_of::<PikTexture>() as u32,
         draw: size_of::<PikDraw>() as u32,
         view_frame: size_of::<PikViewFrame>() as u32,
+        particle: size_of::<PikParticle>() as u32,
     };
     // SAFETY: the caller promised a writable pointer.
     if let Some(o) = unsafe { out.as_mut() } {

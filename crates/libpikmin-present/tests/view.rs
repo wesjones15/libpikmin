@@ -165,3 +165,48 @@ fn materials_bake_their_colours() {
     assert!(r[0] > r[2] * 1.5, "the red pellet isn't red: {r:?}");
     assert_eq!(view.texture_ids.len(), view.colors.len());
 }
+
+/// Whistling streams the whistle's particles; a Pikmin that dies leaves a rising ghost.
+#[test]
+fn whistle_and_ghosts_make_particles() {
+    use libpikmin::captain::CaptainInput;
+    let Some(assets) = assets() else { return };
+    let mut view = View::load(&assets).expect("models load");
+    assert!(view.effects.is_some(), "effects didn't load");
+    let mut sim = Sim::new(Params::default(), 3);
+    let c = sim.add_captain(Vec3::ZERO);
+    let p = sim.spawn_piki_in_squad(PikiColor::Red, Vec3::new(-20.0, 0.0, 0.0), c).expect("room for a Pikmin");
+    let mut host = FlatHost;
+    let (right, up) = (Vec3::X, Vec3::Y);
+    let mut step = |sim: &mut Sim, view: &mut View, input: CaptainInput| {
+        sim.set_input(c, input);
+        sim.step(&mut host);
+        for e in sim.drain_events() {
+            view.on_event(&e);
+        }
+        view.update(sim, 0.0, TICK_DT);
+        view.particles(right, up);
+    };
+
+    for _ in 0..10 {
+        step(&mut sim, &mut view, CaptainInput { whistle: true, ..Default::default() });
+    }
+    let whistle = view.particles.quads.len();
+    assert!(whistle > 0, "no whistle particles");
+    for q in &view.particles.quads {
+        assert!((q.texture as usize) < view.particles.textures.len());
+        assert!(q.corners.iter().all(|c| c.is_finite()));
+    }
+
+    // Let the whistle run down, then kill the Pikmin and wait for its ghost.
+    for _ in 0..90 {
+        step(&mut sim, &mut view, CaptainInput::default());
+    }
+    sim.kill_piki(p);
+    let mut ghost = 0;
+    for _ in 0..120 {
+        step(&mut sim, &mut view, CaptainInput::default());
+        ghost = ghost.max(view.particles.quads.len());
+    }
+    assert!(ghost > 0, "no ghost after the Pikmin died");
+}

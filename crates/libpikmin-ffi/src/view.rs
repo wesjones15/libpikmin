@@ -8,7 +8,9 @@
 //! vertices in [`pik_view_positions`] / [`pik_view_normals`] (in the instance's local frame, sim
 //! units) and per batch a colour in [`pik_view_colors`] and a texture in
 //! [`pik_view_texture_ids`]. Textures are each material's TEV baked into one RGBA image
-//! ([`pik_view_texture`]); new ones (a pellet's colour) can appear in any frame.
+//! ([`pik_view_texture`]); new ones (a pellet's colour) can appear in any frame. Particles (the
+//! whistle, dead Pikmin's ghosts) come as camera-facing quads in [`pik_view_particles`], each
+//! with a texture from [`pik_view_particle_texture`].
 //!
 //! No music plays: the host keeps its own soundtrack.
 
@@ -93,6 +95,21 @@ pub struct PikDraw {
     pub id: u32,
 }
 
+/// One particle: a camera-facing quad (corners top-left, top-right, bottom-right, bottom-left,
+/// texture (0,0) (1,0) (1,1) (0,1)), drawn as texture x `color`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PikParticle {
+    pub corners: [PikVec3; 4],
+    /// RGBA 0..1. Additive particles have their alpha folded in already.
+    pub color: [f32; 4],
+    /// A [`pik_view_particle_texture`] id.
+    pub texture: u32,
+    /// 1: added to the screen (`colour * texture`, no depth writes); 0: alpha blended.
+    pub additive: u8,
+    pub _pad: [u8; 3],
+}
+
 /// The frame's camera and listening for [`pik_view_update`].
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -114,6 +131,7 @@ pub struct PikView {
     view: View,
     audio: Option<Audio>,
     status: CString,
+    particles: Vec<PikParticle>,
     last_tick: Option<u64>,
     poisoned: bool,
 }
@@ -149,6 +167,7 @@ pub unsafe extern "C" fn pik_view_new(assets_dir: *const c_char, sound: u8) -> *
             view,
             audio,
             status: CString::new(status).unwrap_or_default(),
+            particles: Vec::new(),
             last_tick: None,
             poisoned: false,
         })
@@ -412,6 +431,18 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
             }
             let dt = f.dt.clamp(0.0, 0.25);
             v.view.update(&s.sim, s.sim.alpha(), dt);
+            // Billboards face the camera: the same axes the listener uses.
+            let fwd = Vec3::from(f.forward).normalize_or(Vec3::Z);
+            let right = Vec3::from(f.up).cross(fwd).normalize_or(Vec3::X);
+            v.view.particles(right, fwd.cross(right));
+            v.particles.clear();
+            v.particles.extend(v.view.particles.quads.iter().map(|q| PikParticle {
+                corners: q.corners.map(PikVec3::from),
+                color: q.color,
+                texture: q.texture,
+                additive: q.additive as u8,
+                _pad: [0; 3],
+            }));
             let tick = s.sim.tick();
             if let Some(a) = v.audio.as_mut() {
                 a.set_volume(f.volume);
@@ -533,6 +564,61 @@ pub unsafe extern "C" fn pik_view_texture_ids(view: *mut PikView, count: *mut u3
                 *c = v.view.texture_ids.len() as u32;
             }
             v.view.texture_ids.as_ptr()
+        })
+    }
+}
+
+/// This frame's particles; `count` gets how many. Valid as [`pik_view_positions`].
+///
+/// # Safety
+/// As [`pik_view_positions`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_particles(view: *mut PikView, count: *mut u32) -> *const PikParticle {
+    // SAFETY: as above.
+    unsafe {
+        with_view(view, std::ptr::null(), |v| {
+            if let Some(c) = count.as_mut() {
+                *c = v.particles.len() as u32;
+            }
+            v.particles.as_ptr()
+        })
+    }
+}
+
+/// Particle texture `id`, as [`pik_view_texture`] (RGBA8, rows top first; wrap 0 repeat, 1
+/// clamp). New ids can appear in any frame.
+///
+/// # Safety
+/// As [`pik_view_texture`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_particle_texture(
+    view: *mut PikView,
+    id: u32,
+    info: *mut PikTexture,
+    rgba: *mut u8,
+    len: u32,
+) -> u8 {
+    // SAFETY: as documented.
+    unsafe {
+        with_view(view, 0, |v| {
+            let Some(t) = v.view.particles.textures.get(id as usize) else { return 0 };
+            if let Some(info) = info.as_mut() {
+                *info = PikTexture {
+                    width: t.image.width,
+                    height: t.image.height,
+                    wrap_s: (!t.wrap[0]) as u8,
+                    wrap_t: (!t.wrap[1]) as u8,
+                    _pad: [0; 2],
+                };
+            }
+            if rgba.is_null() {
+                return 1;
+            }
+            if t.image.rgba.len() > len as usize {
+                return 0;
+            }
+            std::ptr::copy_nonoverlapping(t.image.rgba.as_ptr(), rgba, t.image.rgba.len());
+            1
         })
     }
 }

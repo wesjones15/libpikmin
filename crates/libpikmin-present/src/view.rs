@@ -14,7 +14,10 @@ use libpikmin_assets::pose::srt_matrix;
 use libpikmin_assets::{AnimSet, Assets, Batch, Blend, Model, Skeleton, paths};
 
 use crate::animator::{Animator, piki_look, piki_rgb};
+use crate::effects::{Effects, Flat, WhistleFrame};
 use crate::tev::{self, Inputs};
+use libpikmin_assets::CollSphere;
+use libpikmin_assets::particle::effects as fx_defs;
 
 /// Models, in the order hosts see them.
 pub mod models {
@@ -207,6 +210,13 @@ pub struct View {
     /// Per batch of every draw: its texture in [`View::textures`], or -1.
     pub texture_ids: Vec<i32>,
     pub textures: Textures,
+    /// The whistle and dead Pikmin's ghosts (none if the effect files didn't load).
+    pub effects: Option<Effects>,
+    /// [`View::effects`] as quads, after [`View::particles`].
+    pub particles: Flat,
+    /// Olimar's antenna sphere, where the whistle's beam starts (`Navi::demoDraw`).
+    ante: Option<CollSphere>,
+    whistles: Vec<WhistleFrame>,
     interp: HashMap<u64, Interp>,
     time: f32,
 }
@@ -246,6 +256,7 @@ impl View {
             vm.batch_texture = ids;
             vm.batch_blend = blends;
         }
+        let ante = models[models::OLIMAR as usize].model.coll.iter().find(|c| c.id == "ante").cloned();
         Ok(View {
             models,
             piki_anims: AnimSet::load(assets, paths::PIKI_ANIM_MGR, paths::PIKI_BUNDLE)?,
@@ -258,6 +269,10 @@ impl View {
             colors: Vec::new(),
             texture_ids: Vec::new(),
             textures,
+            effects: Effects::load(assets),
+            particles: Flat::default(),
+            ante,
+            whistles: Vec::new(),
             interp: HashMap::new(),
             time: 0.0,
         })
@@ -265,6 +280,21 @@ impl View {
 
     pub fn on_event(&mut self, e: &Event) {
         self.animator.on_event(e);
+        // `Piki::doKill`: the ghost rises from where it died.
+        if let Event::PikiGone { pos, .. } = e
+            && let Some(fx) = self.effects.as_mut()
+        {
+            fx.spawn(fx_defs::PIKI_DEAD_SOUL, *pos);
+        }
+    }
+
+    /// This frame's particles as quads facing a camera whose world axes are `right` and `up`
+    /// (into [`View::particles`]).
+    pub fn particles(&mut self, right: Vec3, up: Vec3) {
+        match self.effects.as_mut() {
+            Some(fx) => self.particles.update(fx, right, up),
+            None => self.particles.quads.clear(),
+        }
     }
 
     /// Where an object is between the last two ticks (`alpha` 0..1 into the next tick).
@@ -320,6 +350,7 @@ impl View {
         self.normals.clear();
         self.colors.clear();
         self.texture_ids.clear();
+        self.whistles.clear();
         self.time += dt;
         self.animator.begin_frame(dt);
         let tick = sim.tick();
@@ -434,7 +465,22 @@ impl View {
             let pose = self.models[models::OLIMAR as usize].skel.pose(Mat4::IDENTITY, anim);
             let flash = c.damage_frames > 0.0 && (c.damage_frames as i32 / 2) % 2 == 0;
             let f = if flash { flags::FLASH } else { 0 };
-            self.push(k, kinds::CAPTAIN, models::OLIMAR, pos, Quat::from_rotation_y(c.face), pose, &no_inputs, 1.0, f);
+            // The whistle's beam starts at the antenna (`Navi::demoDraw`'s 'ante' sphere).
+            let rot = Quat::from_rotation_y(c.face);
+            let antenna = self
+                .ante
+                .as_ref()
+                .and_then(|a| Some(pos + rot * pose.joints.get(a.joint)?.transform_point3(a.centre)))
+                .unwrap_or(pos + Vec3::Y * 30.0);
+            self.whistles.push(WhistleFrame {
+                captain: c.id,
+                state: c.whistle,
+                antenna,
+                cursor: c.cursor_world,
+                captain_pos: pos,
+                radius: c.whistle_radius(&params),
+            });
+            self.push(k, kinds::CAPTAIN, models::OLIMAR, pos, rot, pose, &no_inputs, 1.0, f);
 
             // On the ground 1 above, Z pointing away from the captain.
             let kc = key(kinds::CURSOR, c.id.0 as u64);
@@ -462,6 +508,10 @@ impl View {
             let pose = self.models[models::MARKER as usize].skel.pose(Mat4::IDENTITY, None);
             let km = key(kinds::MARKER, c.id.0 as u64);
             self.push(km, kinds::MARKER, models::MARKER, at, rot, pose, &inputs, 1.0, 0);
+        }
+
+        if let Some(fx) = self.effects.as_mut() {
+            fx.update(&self.whistles, params.navi.whistle_hold_time, dt);
         }
 
         self.animator.retain_players(&live);
