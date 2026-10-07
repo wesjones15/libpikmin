@@ -109,7 +109,9 @@ impl CreatureFrame {
 }
 
 pub trait Host {
-    /// Ground height under `pos` (straight down), or `None` over a void.
+    /// The highest ground at or below `pos` (straight down), or `None` over a void. A host
+    /// with real 3D geometry (raycasts) can't see a floor the probe starts under, so callers
+    /// probe from above where they expect the ground: a body's feet plus its step height.
     fn ground_height(&self, pos: Vec3) -> Option<f32>;
 
     /// Push a sphere of `radius` centred at `centre` out of walls and return the corrected

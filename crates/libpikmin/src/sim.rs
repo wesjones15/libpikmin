@@ -325,6 +325,7 @@ pub(crate) fn integrate(
     vel.y -= gravity * dt;
 
     let radius = radius.max(1.0);
+    let start_y = pos.y;
     let mut steps = 1u32;
     let mut travel = vel.length() * dt;
     while steps < 64 && travel >= radius {
@@ -347,7 +348,12 @@ pub(crate) fn integrate(
         }
     }
 
-    match host.ground_height(*pos) {
+    // Probe from the body's step height above the higher of where it started and ended the
+    // tick: walking uphill the feet end up under the slope, and falling fast they can pass a
+    // floor within one tick. Anything taller than the step is a wall for `Host::walls`, whose
+    // sphere sits `radius` up.
+    let probe = Vec3::new(pos.x, pos.y.max(start_y) + radius, pos.z);
+    match host.ground_height(probe) {
         Some(g) if pos.y <= g => {
             pos.y = g;
             vel.y = vel.y.max(0.0);

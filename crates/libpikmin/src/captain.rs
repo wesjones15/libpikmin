@@ -9,6 +9,10 @@ use crate::piki::{PikiColor, PikiState};
 use crate::sim::{Sim, integrate};
 use crate::{CaptainId, Host, PikiId};
 
+/// How far above Olimar the cursor looks down for the ground. Pikmin's maps keep the cursor
+/// on a heightfield; a 3D host needs the probe to start above any slope within reach.
+const CURSOR_PROBE_LIFT: f32 = 100.0;
+
 /// Per-frame controls for one captain. Buttons are levels (held = true); the sim detects edges.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct CaptainInput {
@@ -311,7 +315,10 @@ impl Sim {
             }
         }
 
-        let ground = host.ground_height(c.pos + c.cursor).unwrap_or(c.pos.y);
+        // Probe from well above Olimar, so ground rising toward the cursor is found too.
+        let ground = host
+            .ground_height(c.pos + c.cursor + Vec3::Y * CURSOR_PROBE_LIFT)
+            .unwrap_or(c.pos.y);
         c.cursor_world = Vec3::new(c.pos.x + c.cursor.x, ground + 1.0, c.pos.z + c.cursor.z);
     }
 

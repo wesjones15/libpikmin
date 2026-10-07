@@ -570,6 +570,7 @@ async fn main() {
                     dismiss: is_key_down(KeyCode::X),
                     swarm,
                     pose: None,
+                    cursor: None,
                 }
             } else {
                 CaptainInput::default()

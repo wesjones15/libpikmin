@@ -437,8 +437,12 @@ impl Sim {
                     s.vel.y -= dt * s.air_resist * s.vel.y;
                     s.vel.x -= dt * s.air_resist * 0.2 * s.vel.x;
                     s.vel.z -= dt * s.air_resist * 0.2 * s.vel.z;
+                    let from_y = s.pos.y;
                     s.pos += s.vel * dt;
-                    if let Some(g) = host.ground_height(s.pos)
+                    // From above both ends of the tick's fall, so a fast seed can't pass the
+                    // floor between probes.
+                    let probe = Vec3::new(s.pos.x, s.pos.y.max(from_y) + 1.0, s.pos.z);
+                    if let Some(g) = host.ground_height(probe)
                         && s.pos.y <= g
                         && s.vel.y <= 0.0
                     {
