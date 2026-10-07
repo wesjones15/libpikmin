@@ -51,6 +51,21 @@ pub mod flags {
     pub const FLASH: u8 = 1;
 }
 
+/// How a host draws a batch.
+pub mod blend {
+    pub const OPAQUE: u8 = 0;
+    /// Alpha tested (a leaf's outline).
+    pub const CUTOUT: u8 = 1;
+    /// Blended and unlit (Olimar's helmet): a deferred host's lit shader can't blend.
+    pub const TRANSLUCENT: u8 = 2;
+}
+
+/// Blended materials at least this opaque everywhere draw opaque (the pellets are 78%).
+const OPAQUE_ENOUGH: f32 = 0.7;
+
+/// Most material variants baked (pellet colours, ...) before new ones reuse the default.
+const MAX_TEXTURES: usize = 256;
+
 /// A loaded model.
 pub struct ViewModel {
     pub model: Model,
@@ -60,6 +75,13 @@ pub struct ViewModel {
     /// Bind-pose bounds.
     pub lo: Vec3,
     pub hi: Vec3,
+    images: tev::Images,
+    /// Per material: baked (it reads a texture over the mesh's coordinates).
+    textured: Vec<bool>,
+    /// Per batch: its baked texture with no per-draw inputs ([`View::textures`]), or -1.
+    pub batch_texture: Vec<i32>,
+    /// Per batch: [`blend`].
+    pub batch_blend: Vec<u8>,
 }
 
 impl ViewModel {
@@ -77,7 +99,20 @@ impl ViewModel {
             }
         }
         let vertex_count = batches.iter().map(|b| b.vertices.len()).sum();
-        Ok(ViewModel { model, skel, batches, vertex_count, lo, hi })
+        let images = tev::Images::new(&model);
+        let textured = (0..model.materials.len()).map(|m| tev::textured(&model, m, &images)).collect();
+        Ok(ViewModel {
+            model,
+            skel,
+            batches,
+            vertex_count,
+            lo,
+            hi,
+            images,
+            textured,
+            batch_texture: Vec::new(),
+            batch_blend: Vec::new(),
+        })
     }
 
     /// Horizontal radius of the bind pose.
@@ -88,17 +123,42 @@ impl ViewModel {
             .max(0.01)
     }
 
-    /// The texture (`TexAttr` index) batch `b` is drawn with.
-    pub fn batch_texture(&self, b: usize) -> Option<usize> {
-        tev::texture_of(&self.model, self.batches[b].material)
-    }
-
-    pub fn batch_blend(&self, b: usize) -> Blend {
-        self.model.materials[self.batches[b].material].blend()
-    }
-
     pub fn batch_lit(&self, b: usize) -> bool {
         self.model.materials[self.batches[b].material].lit()
+    }
+}
+
+/// Baked materials, shared by every model: each (model, material, inputs that change it)
+/// once.
+#[derive(Default)]
+pub struct Textures {
+    pub list: Vec<tev::Baked>,
+    ids: HashMap<(u32, usize, [u8; 16]), i32>,
+}
+
+impl Textures {
+    /// The texture for `material` of `vm` with `inputs`, baking it the first time; -1 if the
+    /// material isn't textured.
+    fn get(&mut self, model: u32, vm: &ViewModel, material: usize, inputs: Inputs) -> i32 {
+        if !vm.textured[material] {
+            return -1;
+        }
+        let k = (model, material, tev::key(&vm.model, material, inputs));
+        if let Some(&id) = self.ids.get(&k) {
+            return id;
+        }
+        if self.list.len() >= MAX_TEXTURES {
+            return self.get(model, vm, material, Inputs::default());
+        }
+        let id = match tev::bake(&vm.model, material, inputs, &vm.images) {
+            Some(b) => {
+                self.list.push(b);
+                self.list.len() as i32 - 1
+            }
+            None => -1,
+        };
+        self.ids.insert(k, id);
+        id
     }
 }
 
@@ -114,7 +174,8 @@ pub struct Draw {
     pub rot: Quat,
     /// Its vertices in [`View::positions`] / [`View::normals`] (the model's vertex count).
     pub first_vertex: u32,
-    /// Its batches' colours in [`View::colors`] (one per batch).
+    /// Its batches' colours in [`View::colors`] and textures in [`View::texture_ids`] (one
+    /// per batch).
     pub first_color: u32,
     /// 1 opaque .. 0 gone.
     pub alpha: f32,
@@ -140,7 +201,12 @@ pub struct View {
     pub draws: Vec<Draw>,
     pub positions: Vec<Vec3>,
     pub normals: Vec<Vec3>,
+    /// Per batch of every draw: what multiplies its texture (white for baked materials, whose
+    /// colour is in the texture), alpha included.
     pub colors: Vec<[f32; 4]>,
+    /// Per batch of every draw: its texture in [`View::textures`], or -1.
+    pub texture_ids: Vec<i32>,
+    pub textures: Textures,
     interp: HashMap<u64, Interp>,
     time: f32,
 }
@@ -154,10 +220,32 @@ impl View {
         paths_in_order.extend(paths::PELLETS);
         paths_in_order.extend([paths::PIKIHEAD, paths::CURSOR, paths::CURSOR_MARKER]);
         debug_assert_eq!(paths_in_order.len(), models::COUNT);
-        let models = paths_in_order
+        let mut models = paths_in_order
             .iter()
             .map(|p| ViewModel::load(assets, p))
             .collect::<Result<Vec<_>, _>>()?;
+        // Each material baked as it is with no per-draw inputs, which also says how opaque it is.
+        let mut textures = Textures::default();
+        for (mi, vm) in models.iter_mut().enumerate() {
+            let mut ids = Vec::new();
+            let mut blends = Vec::new();
+            for b in &vm.batches {
+                let id = textures.get(mi as u32, vm, b.material, Inputs::default());
+                let floor = match usize::try_from(id) {
+                    Ok(i) => textures.list[i].min_alpha(),
+                    Err(_) => tev::flat_color(&vm.model, b.material, Inputs::default(), &vm.images)[3],
+                };
+                blends.push(match vm.model.materials[b.material].blend() {
+                    Blend::Opaque => blend::OPAQUE,
+                    Blend::AlphaTest => blend::CUTOUT,
+                    Blend::AlphaBlend | Blend::Inverse if floor >= OPAQUE_ENOUGH => blend::OPAQUE,
+                    Blend::AlphaBlend | Blend::Inverse => blend::TRANSLUCENT,
+                });
+                ids.push(id);
+            }
+            vm.batch_texture = ids;
+            vm.batch_blend = blends;
+        }
         Ok(View {
             models,
             piki_anims: AnimSet::load(assets, paths::PIKI_ANIM_MGR, paths::PIKI_BUNDLE)?,
@@ -168,6 +256,8 @@ impl View {
             positions: Vec::new(),
             normals: Vec::new(),
             colors: Vec::new(),
+            texture_ids: Vec::new(),
+            textures,
             interp: HashMap::new(),
             time: 0.0,
         })
@@ -212,9 +302,12 @@ impl View {
                 self.positions.push(p);
                 self.normals.push(n.normalize_or_zero());
             }
-            let mut c = tev::flat_color(&vm.model, b.material, inputs(b.material));
+            let inp = inputs(b.material);
+            let id = self.textures.get(model, vm, b.material, inp);
+            let mut c = if id >= 0 { [1.0; 4] } else { tev::flat_color(&vm.model, b.material, inp, &vm.images) };
             c[3] *= alpha;
             self.colors.push(c);
+            self.texture_ids.push(id);
         }
         self.draws.push(Draw { key: k, kind, flags, model, pos, rot, first_vertex, first_color, alpha });
     }
@@ -226,6 +319,7 @@ impl View {
         self.positions.clear();
         self.normals.clear();
         self.colors.clear();
+        self.texture_ids.clear();
         self.time += dt;
         self.animator.begin_frame(dt);
         let tick = sim.tick();

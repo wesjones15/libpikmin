@@ -36,8 +36,10 @@ Workspace:
 - `crates/libpikmin-present/`: presentation shared by every host: `animator` (which animation
   each object plays, from sim state), `audio` (the sim's events mapped to the game's sounds, on
   a cpal stream), and for engines that draw themselves `view` (models posed and CPU-skinned
-  each frame into one vertex buffer) with `tev` (each material's TEV run on the CPU for a flat
-  colour, since host shaders take one texture times one colour). No music: hosts keep theirs.
+  each frame into one vertex buffer) with `tev` (each material's TEV run on the CPU per texel and
+  baked into one RGBA texture, since host shaders take one texture times one colour; env-mapped
+  reads count as their average; blended materials are tagged opaque, cutout or translucent).
+  No music: hosts keep theirs.
 - `crates/libpikmin-ffi/`: C ABI for hosts: `pikmin.dll`, `pik_*` functions (`pik_view_*` for
   drawing and sound), `PIK_ABI_VERSION`. ror2-olimar's `Native.cs` mirrors its structs and
   checks `pik_struct_sizes` at load; change both together (and the size test in `src/tests.rs`).

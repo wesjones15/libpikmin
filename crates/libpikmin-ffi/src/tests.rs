@@ -147,9 +147,9 @@ fn the_view_poses_a_sim_through_the_abi() {
                     continue;
                 }
                 let mut t = PikTexture::default();
-                assert_eq!(pik_view_texture(view, m, b.texture as u32, &mut t, std::ptr::null_mut(), 0), 1);
+                assert_eq!(pik_view_texture(view, b.texture as u32, &mut t, std::ptr::null_mut(), 0), 1);
                 let mut px = vec![0u8; (t.width * t.height * 4) as usize];
-                assert_eq!(pik_view_texture(view, m, b.texture as u32, &mut t, px.as_mut_ptr(), px.len() as u32), 1);
+                assert_eq!(pik_view_texture(view, b.texture as u32, &mut t, px.as_mut_ptr(), px.len() as u32), 1);
             }
         }
 
@@ -189,6 +189,13 @@ fn the_view_poses_a_sim_through_the_abi() {
         pik_view_model(view, last.model, &mut info);
         assert_eq!(last.first_vertex + info.vertex_count, vc);
         assert_eq!(last.first_color + info.batch_count, cc);
+        let mut tc = 0u32;
+        let ids = std::slice::from_raw_parts(pik_view_texture_ids(view, &mut tc), tc as usize);
+        assert_eq!(tc, cc);
+        assert!(ids.iter().any(|&i| i >= 0));
+        for &i in ids.iter().filter(|&&i| i >= 0) {
+            assert_eq!(pik_view_texture(view, i as u32, std::ptr::null_mut(), std::ptr::null_mut(), 0), 1);
+        }
         let pos = std::slice::from_raw_parts(pos, vc as usize);
         assert!(pos.iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()));
         assert!(!pik_view_status(view).is_null());

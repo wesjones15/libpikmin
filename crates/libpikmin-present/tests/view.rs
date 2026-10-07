@@ -108,3 +108,60 @@ fn onion_colours_follow_its_colour() {
     assert!(red[0] > red[2], "red Onion isn't red: {red:?}");
     assert!(yellow[1] > yellow[2], "yellow Onion isn't yellow: {yellow:?}");
 }
+
+fn average(t: &libpikmin_present::tev::Baked) -> [f32; 4] {
+    let n = (t.rgba.len() / 4) as f32;
+    let mut s = [0.0f32; 4];
+    for px in t.rgba.as_chunks::<4>().0 {
+        for c in 0..4 {
+            s[c] += px[c] as f32 / 255.0 / n;
+        }
+    }
+    s
+}
+
+/// Hosts get each material baked: a leaf's green comes from a second texture, a pellet's
+/// colour from a register its pattern blends towards, and Olimar's helmet glass is see-through.
+#[test]
+fn materials_bake_their_colours() {
+    use libpikmin_present::view::blend;
+    let Some(assets) = assets() else { return };
+    let mut view = View::load(&assets).expect("models load");
+
+    let leaf = &view.models[models::HAPPA[0] as usize];
+    let id = leaf.batch_texture[0];
+    assert!(id >= 0, "the leaf isn't textured");
+    let g = average(&view.textures.list[id as usize]);
+    assert!(g[1] > g[0] * 1.5 && g[1] > g[2] * 1.5, "the leaf isn't green: {g:?}");
+    assert_eq!(leaf.batch_blend[0], blend::CUTOUT);
+
+    let olimar = &view.models[models::OLIMAR as usize];
+    assert!(olimar.batch_blend.contains(&blend::TRANSLUCENT), "no see-through helmet");
+    for pellet in models::PELLETS {
+        assert!(view.models[pellet as usize].batch_blend.iter().all(|&b| b == blend::OPAQUE), "pellet {pellet}");
+    }
+
+    // A red pellet's texture is red, a fresh variant of the pellet's material.
+    let mut sim = Sim::new(Params::default(), 1);
+    sim.spawn_pellet(PelletDesc {
+        ship_part: None,
+        pos: Vec3::ZERO,
+        yaw: 0.0,
+        radius: 20.0,
+        height: 10.0,
+        min_carriers: 1,
+        max_carriers: 2,
+        seeds_matching: 2,
+        seeds_other: 1,
+        color: Some(PikiColor::Red),
+        creature: None,
+    });
+    view.update(&sim, 0.0, TICK_DT);
+    let d = view.draws.iter().find(|d| d.kind == kinds::PELLET).unwrap();
+    let id = view.texture_ids[d.first_color as usize];
+    assert!(id >= 0);
+    assert_ne!(id, view.models[d.model as usize].batch_texture[0]);
+    let r = average(&view.textures.list[id as usize]);
+    assert!(r[0] > r[2] * 1.5, "the red pellet isn't red: {r:?}");
+    assert_eq!(view.texture_ids.len(), view.colors.len());
+}

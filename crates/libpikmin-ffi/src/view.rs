@@ -3,10 +3,12 @@
 //! sim's events) behind a C ABI.
 //!
 //! Models are loaded once: a host builds a mesh per model from [`pik_view_model`],
-//! [`pik_view_batches`] (one submesh each), [`pik_view_indices`], [`pik_view_uvs`] and
-//! [`pik_view_texture`]. Each frame [`pik_view_update`] poses the sim; [`pik_view_draws`] lists
-//! the instances, each with its vertices in [`pik_view_positions`] / [`pik_view_normals`] (in the
-//! instance's local frame, sim units) and one colour per batch in [`pik_view_colors`].
+//! [`pik_view_batches`] (one submesh each), [`pik_view_indices`] and [`pik_view_uvs`]. Each
+//! frame [`pik_view_update`] poses the sim; [`pik_view_draws`] lists the instances, each with its
+//! vertices in [`pik_view_positions`] / [`pik_view_normals`] (in the instance's local frame, sim
+//! units) and per batch a colour in [`pik_view_colors`] and a texture in
+//! [`pik_view_texture_ids`]. Textures are each material's TEV baked into one RGBA image
+//! ([`pik_view_texture`]); new ones (a pellet's colour) can appear in any frame.
 //!
 //! No music plays: the host keeps its own soundtrack.
 
@@ -16,7 +18,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use glam::{Mat4, Vec4};
 use libpikmin::Vec3;
 use libpikmin::captain::WhistleState;
-use libpikmin_assets::{Assets, Blend, Cull};
+use libpikmin_assets::{Assets, Cull};
 use libpikmin_present::audio::Creatures;
 use libpikmin_present::{Audio, View};
 
@@ -29,7 +31,7 @@ pub struct PikModelInfo {
     pub vertex_count: u32,
     pub index_count: u32,
     pub batch_count: u32,
-    /// Texture slots ([`pik_view_texture`] indices); some may be empty.
+    /// Textures baked so far, every model's ([`pik_view_texture`] ids are below this).
     pub texture_count: u32,
     /// Bind-pose bounds.
     pub lo: PikVec3,
@@ -44,9 +46,10 @@ pub struct PikBatch {
     pub index_count: u32,
     pub first_vertex: u32,
     pub vertex_count: u32,
-    /// Texture slot, or -1.
+    /// Its texture with no per-draw colours ([`pik_view_texture`]), or -1. A draw's own is
+    /// in [`pik_view_texture_ids`].
     pub texture: i32,
-    /// 0 opaque, 1 alpha test, 2 alpha blend, 3 inverse blend.
+    /// 0 opaque, 1 alpha tested (cutout), 2 blended and unlit.
     pub blend: u8,
     /// 0: drawn unlit in the game.
     pub lit: u8,
@@ -229,7 +232,7 @@ pub unsafe extern "C" fn pik_view_model(view: *mut PikView, model: u32, out: *mu
                 vertex_count: m.vertex_count as u32,
                 index_count: m.batches.iter().map(|b| b.indices.len() as u32).sum(),
                 batch_count: m.batches.len() as u32,
-                texture_count: m.model.tex_attrs.len() as u32,
+                texture_count: v.view.textures.list.len() as u32,
                 lo: m.lo.into(),
                 hi: m.hi.into(),
             };
@@ -254,12 +257,6 @@ pub unsafe extern "C" fn pik_view_batches(view: *mut PikView, model: u32, out: *
                 if n >= max as usize || out.is_null() {
                     break;
                 }
-                let blend = match m.batch_blend(i) {
-                    Blend::Opaque => 0,
-                    Blend::AlphaTest => 1,
-                    Blend::AlphaBlend => 2,
-                    Blend::Inverse => 3,
-                };
                 let cull = match b.cull {
                     Cull::Back => 0,
                     Cull::Front => 1,
@@ -270,8 +267,8 @@ pub unsafe extern "C" fn pik_view_batches(view: *mut PikView, model: u32, out: *
                     index_count: b.indices.len() as u32,
                     first_vertex: vertex,
                     vertex_count: b.vertices.len() as u32,
-                    texture: m.batch_texture(i).map_or(-1, |t| t as i32),
-                    blend,
+                    texture: m.batch_texture[i],
+                    blend: m.batch_blend[i],
                     lit: m.batch_lit(i) as u8,
                     cull,
                     _pad: 0,
@@ -341,57 +338,35 @@ pub unsafe extern "C" fn pik_view_uvs(view: *mut PikView, model: u32, out: *mut 
     }
 }
 
-fn wrap(bits: u16) -> u8 {
-    if bits & 1 != 0 {
-        1
-    } else if bits & 2 != 0 {
-        2
-    } else {
-        0
-    }
-}
-
-/// Texture slot `tex` of `model`: its size and wrap modes in `info`, and if `rgba` isn't null,
-/// its pixels (RGBA8, rows top first, `width * height * 4` bytes; `len` is the room). Returns 0
-/// for an empty slot or too little room.
+/// Baked texture `id`: its size and wrap modes in `info`, and if `rgba` isn't null, its pixels
+/// (RGBA8, rows top first, `width * height * 4` bytes; `len` is the room). The colour is all
+/// there: a host multiplies it by its lighting and the draw's colour (white, with alpha).
+/// Returns 0 for an unknown id or too little room.
 ///
 /// # Safety
-/// `view` from [`pik_view_new`]; `info` writable; `rgba` null or writable for `len`.
+/// `view` from [`pik_view_new`]; `info` null or writable; `rgba` null or writable for `len`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn pik_view_texture(
-    view: *mut PikView,
-    model: u32,
-    tex: u32,
-    info: *mut PikTexture,
-    rgba: *mut u8,
-    len: u32,
-) -> u8 {
+pub unsafe extern "C" fn pik_view_texture(view: *mut PikView, id: u32, info: *mut PikTexture, rgba: *mut u8, len: u32) -> u8 {
     // SAFETY: as documented.
     unsafe {
         with_view(view, 0, |v| {
-            let Some(m) = v.view.models.get(model as usize) else { return 0 };
-            let Some(attr) = m.model.tex_attrs.get(tex as usize) else { return 0 };
-            if attr.image & 0x8000 != 0 {
-                return 0;
-            }
-            let Some(img) = m.model.textures.get(attr.image as usize) else { return 0 };
+            let Some(t) = v.view.textures.list.get(id as usize) else { return 0 };
             if let Some(info) = info.as_mut() {
                 *info = PikTexture {
-                    width: img.width,
-                    height: img.height,
-                    wrap_s: wrap(attr.tiling),
-                    wrap_t: wrap(attr.tiling >> 8),
+                    width: t.width,
+                    height: t.height,
+                    wrap_s: t.wrap[0],
+                    wrap_t: t.wrap[1],
                     _pad: [0; 2],
                 };
             }
             if rgba.is_null() {
                 return 1;
             }
-            let Ok(decoded) = img.decode() else { return 0 };
-            if decoded.rgba.len() > len as usize {
+            if t.rgba.len() > len as usize {
                 return 0;
             }
-            std::ptr::copy_nonoverlapping(decoded.rgba.as_ptr(), rgba, decoded.rgba.len());
+            std::ptr::copy_nonoverlapping(t.rgba.as_ptr(), rgba, t.rgba.len());
             1
         })
     }
@@ -526,8 +501,8 @@ pub unsafe extern "C" fn pik_view_normals(view: *mut PikView, count: *mut u32) -
     }
 }
 
-/// This frame's batch colours (RGBA 0..1, one per batch of every instance); `count` gets
-/// how many. Valid as [`pik_view_positions`].
+/// This frame's batch colours (RGBA 0..1, one per batch of every instance: what its texture
+/// is multiplied by, or its whole colour if it has none); `count` gets how many. Valid as [`pik_view_positions`].
 ///
 /// # Safety
 /// As [`pik_view_positions`].
@@ -540,6 +515,24 @@ pub unsafe extern "C" fn pik_view_colors(view: *mut PikView, count: *mut u32) ->
                 *c = v.view.colors.len() as u32;
             }
             v.view.colors.as_ptr()
+        })
+    }
+}
+
+/// This frame's batch textures (one per batch of every instance, alongside
+/// [`pik_view_colors`]): a [`pik_view_texture`] id or -1. Valid as [`pik_view_positions`].
+///
+/// # Safety
+/// As [`pik_view_positions`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_texture_ids(view: *mut PikView, count: *mut u32) -> *const i32 {
+    // SAFETY: as above.
+    unsafe {
+        with_view(view, std::ptr::null(), |v| {
+            if let Some(c) = count.as_mut() {
+                *c = v.view.texture_ids.len() as u32;
+            }
+            v.view.texture_ids.as_ptr()
         })
     }
 }
