@@ -46,6 +46,43 @@ pub struct PelletDesc {
     pub ship_part: Option<u32>,
 }
 
+/// The numbered pellets' values, from the disc's `pelMgr.bin` (`p{b,r,y}{01,05,10,20}`).
+pub const PELLET_NUMBERS: [u32; 4] = [1, 5, 10, 20];
+
+/// Bottom radius of the 1, 5, 10 and 20 pellets: their models' 'cent' collision sphere at the
+/// config's scale of 1 (`Pellet::getBottomRadius` → `getCentreSize`, `Pellet::initPellet`).
+const PELLET_RADII: [f32; 4] = [10.0, 20.0, 35.0, 48.0];
+
+impl PelletDesc {
+    /// A numbered pellet: the largest of 1, 5, 10 and 20 not above `number`, with that pellet's
+    /// disc config for `color` (carriers p01/p02, seeds p06/p07, height p11 as
+    /// `Pellet::getCylinderHeight` without a view). The code defaults are the disc's values.
+    pub fn numbered(params: &crate::Params, number: u32, color: PikiColor, pos: Vec3, yaw: f32) -> PelletDesc {
+        let i = PELLET_NUMBERS.iter().rposition(|&n| n <= number).unwrap_or(0);
+        let n = PELLET_NUMBERS[i];
+        let letter = match color {
+            PikiColor::Blue => 'b',
+            PikiColor::Red => 'r',
+            PikiColor::Yellow => 'y',
+        };
+        let cfg = crate::pellet_config::find(&params.pellets, &format!("p{letter}{n:02}"));
+        let (max, seeds, height) = [(2, (2, 1), 7.6), (10, (5, 3), 14.0), (20, (10, 6), 27.0), (50, (20, 10), 36.5)][i];
+        PelletDesc {
+            pos,
+            yaw,
+            radius: PELLET_RADII[i],
+            height: cfg.map_or(height, |c| c.carry_info_height),
+            min_carriers: cfg.map_or(n, |c| c.min_carriers.max(1) as u32),
+            max_carriers: cfg.map_or(max, |c| c.max_carriers.max(1) as u32),
+            seeds_matching: cfg.map_or(seeds.0, |c| c.seeds_matching),
+            seeds_other: cfg.map_or(seeds.1, |c| c.seeds_other),
+            color: Some(color),
+            creature: None,
+            ship_part: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum PelletState {
     /// On the ground, maybe with Pikmin trying to lift it.

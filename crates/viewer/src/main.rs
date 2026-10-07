@@ -208,30 +208,13 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
     world.tekis.spawn(teki::TekiKind::Dwarf, Vec3::new(-120.0, 0.0, 320.0), 0.0);
     world.tekis.spawn(teki::TekiKind::Honeywisp, Vec3::new(-60.0, 0.0, 140.0), 0.0);
     // Numbered pellets 1, 5, 10, 20 with the disc's configs (`pelMgr.bin`: pr01, py05, pb10,
-    // pr20); sizes are this host's choice.
-    for (i, (id, n, seeds, radius, color)) in [
-        ("pr01", 1u32, (2, 1), 7.0, PikiColor::Red),
-        ("py05", 5, (5, 3), 13.0, PikiColor::Yellow),
-        ("pb10", 10, (10, 6), 19.0, PikiColor::Blue),
-        ("pr20", 20, (20, 10), 27.0, PikiColor::Red),
-    ]
-    .into_iter()
-    .enumerate()
+    // pr20).
+    for (i, (n, color)) in [(1, PikiColor::Red), (5, PikiColor::Yellow), (10, PikiColor::Blue), (20, PikiColor::Red)]
+        .into_iter()
+        .enumerate()
     {
-        let cfg = libpikmin::pellet_config::find(&sim.params().pellets, id).cloned();
-        sim.spawn_pellet(PelletDesc {
-            pos: Vec3::new(-150.0 + i as f32 * 90.0, 0.0, -130.0),
-            yaw: 0.0,
-            radius,
-            height: radius * 0.6,
-            min_carriers: cfg.as_ref().map_or(n, |c| c.min_carriers.max(1) as u32),
-            max_carriers: cfg.as_ref().map_or(n * 2, |c| c.max_carriers.max(1) as u32),
-            seeds_matching: cfg.as_ref().map_or(seeds.0, |c| c.seeds_matching),
-            seeds_other: cfg.as_ref().map_or(seeds.1, |c| c.seeds_other),
-            color: Some(color),
-            creature: None,
-            ship_part: None,
-        });
+        let pos = Vec3::new(-150.0 + i as f32 * 90.0, 0.0, -130.0);
+        sim.spawn_pellet(PelletDesc::numbered(sim.params(), n, color, pos, 0.0));
     }
     sim.add_onion(Vec3::new(-220.0, 0.0, -260.0), &[PikiColor::Red]);
     sim.add_onion(Vec3::new(0.0, 0.0, -340.0), &[PikiColor::Yellow]);

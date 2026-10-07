@@ -813,6 +813,36 @@ pub unsafe extern "C" fn pik_sim_spawn_pellet(sim: *mut PikSim, desc: *const Pik
     unsafe { with(sim, -1, |s| s.sim.spawn_pellet(desc).0 as i32) }
 }
 
+/// Puts down a numbered pellet: the largest of 1, 5, 10 and 20 not above `number`, in
+/// [`PikiColor`] index `color`, with the disc's carriers, seeds and size
+/// ([`PelletDesc::numbered`]). Returns its id, or -1.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`]; `pos` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_spawn_numbered_pellet(
+    sim: *mut PikSim,
+    number: u32,
+    color: u32,
+    pos: *const PikVec3,
+    yaw: f32,
+) -> i32 {
+    // SAFETY: as documented.
+    let Some(pos) = (unsafe { pos.as_ref() }).copied() else {
+        return -1;
+    };
+    let Some(color) = color_arg(color) else {
+        return -1;
+    };
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, -1, |s| {
+            let desc = PelletDesc::numbered(s.sim.params(), number, color, pos.into(), yaw);
+            s.sim.spawn_pellet(desc).0 as i32
+        })
+    }
+}
+
 /// Plants a sprout of colour `color` at `pos`, ready to grow and be plucked.
 ///
 /// # Safety

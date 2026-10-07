@@ -298,6 +298,9 @@ fn pellets_onions_and_bad_arguments() {
             ..Default::default()
         };
         assert_eq!(pik_sim_spawn_pellet(sim, &desc), 0);
+        // 7 rounds down to a 5 pellet: five to lift it, the disc's defaults otherwise.
+        assert_eq!(pik_sim_spawn_numbered_pellet(sim, 7, 1, &at, 0.0), 1);
+        assert_eq!(pik_sim_spawn_numbered_pellet(sim, 1, 3, &at, 0.0), -1, "no such colour");
 
         // A creature whose parts run past the array is kept but given no parts.
         let bad = [PikCreature { id: 1, alive: 1, parts_start: 3, parts_len: 2, ..Default::default() }];
@@ -307,9 +310,10 @@ fn pellets_onions_and_bad_arguments() {
         pik_sim_advance(sim, &h, 0.1);
         assert_eq!(pik_sim_poisoned(sim), 0);
 
-        let mut pel = [PikPellet::default(); 2];
-        assert_eq!(pik_sim_pellets(sim, pel.as_mut_ptr(), 2), 1);
+        let mut pel = [PikPellet::default(); 3];
+        assert_eq!(pik_sim_pellets(sim, pel.as_mut_ptr(), 3), 2);
         assert_eq!((pel[0].state, pel[0].creature, pel[0].min_carriers), (0, 5, 2));
+        assert_eq!((pel[1].min_carriers, pel[1].max_carriers, pel[1].radius), (5, 10, 20.0));
         let mut on = [PikOnion::default(); 2];
         assert_eq!(pik_sim_onions(sim, on.as_mut_ptr(), 2), 1);
         assert_eq!((on[0].colors, on[0].is_ship), (0b111, 0));

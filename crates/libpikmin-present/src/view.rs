@@ -411,7 +411,8 @@ impl View {
         }
 
         // Pellets and corpses: the numbered pellets, sized to the thing being carried
-        // (corpses too: a host's enemies have no Pikmin model).
+        // (corpses too: a host's enemies have no Pikmin model). The model goes by carriers,
+        // which for a numbered pellet is its number.
         for pel in sim.pellets() {
             if pel.state == PelletState::Gone {
                 continue;
@@ -424,7 +425,10 @@ impl View {
             };
             let model = models::PELLETS[idx];
             let vm = &self.models[model as usize];
-            let s = pel.desc.radius / vm.radius() * pel.scale;
+            // Sized by the model's bottom circle ('cent', `Pellet::getBottomRadius`): a numbered
+            // pellet ([`libpikmin::PelletDesc::numbered`]) draws at its config scale of 1.
+            let bottom = vm.model.coll.iter().find(|c| c.id == "cent").map_or(vm.radius(), |c| c.radius);
+            let s = pel.desc.radius / bottom * pel.scale;
             let lift = -vm.lo.y * s;
             let k = key(kinds::PELLET, pel.id.0 as u64);
             let pos = self.place(k, pel.pos + Vec3::Y * lift, tick, alpha);
