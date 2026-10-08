@@ -124,6 +124,7 @@ impl Sim {
         c.pressed.whistle |= input.whistle && !old.whistle;
         c.pressed.throw |= input.throw && !old.throw;
         c.pressed.dismiss |= input.dismiss && !old.dismiss;
+        c.pressed.cycle |= input.cycle && !old.cycle;
         c.input = input;
     }
 

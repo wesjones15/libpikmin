@@ -554,6 +554,7 @@ async fn main() {
                     swarm,
                     pose: None,
                     cursor: None,
+                    cycle: is_key_down(KeyCode::Z),
                 }
             } else {
                 CaptainInput::default()
@@ -1094,7 +1095,7 @@ fn draw_hud(g: &Game) {
             g.sim.pikis().iter().filter(|p| p.is_alive()).count(),
         ),
         format!("hits {}  stolen {}  tick {}  {} fps  |  {}", g.hits, g.stolen, g.sim.tick(), get_fps(), g.params_source),
-        "WASD move (Ctrl: aim only)  Space throw/pluck/punch  Shift/RMB whistle  IJKL swarm  X dismiss  Tab captain  H revive  N nectar  O seeds  C dwarf  B bulborb  U honeywisp  G shake  V 2D/3D  Q/E camera  M music  F1 slots  R reset".into(),
+        "WASD move (Ctrl: aim only)  Space throw/pluck/punch  Shift/RMB whistle  IJKL swarm  X dismiss  Z next colour  Tab captain  H revive  N nectar  O seeds  C dwarf  B bulborb  U honeywisp  G shake  V 2D/3D  Q/E camera  M music  F1 slots  R reset".into(),
     ];
     for (i, l) in lines.iter().enumerate() {
         draw_text(l, 12.0, 22.0 + i as f32 * 20.0, 20.0, WHITE);

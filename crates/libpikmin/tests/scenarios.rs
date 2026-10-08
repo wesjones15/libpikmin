@@ -355,6 +355,48 @@ fn auto_rejoin_brings_thrown_pikmin_back_but_not_dismissed_ones() {
     }
 }
 
+fn thrown_color(sim: &mut Sim, host: &mut TestHost, c: CaptainId, cycle: bool) -> PikiColor {
+    let mut ev = Vec::new();
+    if cycle {
+        sim.set_input(c, CaptainInput { cycle: true, ..Default::default() });
+        run(sim, host, 0.1, &mut ev);
+        sim.set_input(c, CaptainInput::default());
+        run(sim, host, 0.1, &mut ev);
+    }
+    throw_once(sim, host, c, &mut ev);
+    run(sim, host, 0.5, &mut ev);
+    let id = ev
+        .iter()
+        .find_map(|e| match e {
+            Event::Thrown { piki, .. } => Some(*piki),
+            _ => None,
+        })
+        .expect("a Pikmin should have been thrown");
+    sim.piki(id).color
+}
+
+#[test]
+fn cycle_picks_the_next_colour_in_the_squad() {
+    let mut sim = Sim::new(retail_params(), 3);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    for i in 0..4 {
+        let pos = Vec3::new(i as f32 * 6.0 - 9.0, 0.0, -25.0);
+        let color = if i == 0 { PikiColor::Yellow } else { PikiColor::Red };
+        sim.spawn_piki_in_squad(color, pos, c).unwrap();
+    }
+    run(&mut sim, &mut host, 2.0, &mut Vec::new());
+    aim_cursor(&mut sim, &mut host, c, Vec2::new(1.0, 0.0), 0.5);
+
+    // Red first (no Blue to skip to from Blue's place in the order), then Yellow, then back
+    // to Red: there are no Blues.
+    assert_eq!(thrown_color(&mut sim, &mut host, c, true), PikiColor::Red);
+    assert_eq!(thrown_color(&mut sim, &mut host, c, true), PikiColor::Yellow);
+    // That was the only Yellow: the next throw falls back to a Red and Red becomes the pick.
+    assert_eq!(thrown_color(&mut sim, &mut host, c, false), PikiColor::Red);
+    assert_eq!(sim.captain(c).throw_color, Some(PikiColor::Red));
+}
+
 fn creature_at_cursor(sim: &mut Sim, host: &mut TestHost, c: CaptainId, hp: f32) -> CreatureId {
     aim_cursor(sim, host, c, Vec2::new(1.0, 0.0), 0.5);
     let at = sim.captain(c).cursor_world;

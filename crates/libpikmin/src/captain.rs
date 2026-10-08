@@ -32,6 +32,9 @@ pub struct CaptainInput {
     /// reach (`NaviParms` cursor max radius). Not in the game, where only the stick moves the
     /// cursor; hosts that aim with a camera use it instead.
     pub cursor: Option<Vec3>,
+    /// Picks the next colour to throw (Pikmin 2's type switch; not in Pikmin 1, which always
+    /// throws the nearest).
+    pub cycle: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -100,6 +103,9 @@ pub struct Captain {
     pub damage_frames: f32,
     /// Health ran out (`NaviDeadState`) or the host put him down.
     pub down: bool,
+    /// The colour he throws next, once the player has picked one with `cycle`; None throws
+    /// the nearest Pikmin, as in Pikmin 1.
+    pub throw_color: Option<PikiColor>,
     /// Multiplies his run speed: the host's own speed stat over its base (items, buffs).
     /// 1 in Pikmin.
     pub speed_scale: f32,
@@ -123,6 +129,7 @@ pub(crate) struct Pressed {
     pub whistle: bool,
     pub throw: bool,
     pub dismiss: bool,
+    pub cycle: bool,
 }
 
 impl Captain {
@@ -148,6 +155,7 @@ impl Captain {
             health,
             damage_frames: 0.0,
             down: false,
+            throw_color: None,
             speed_scale: 1.0,
             rearrange_pending: false,
             input: CaptainInput::default(),
@@ -222,6 +230,9 @@ impl Sim {
             return;
         }
         self.captain_whistle(ci, dt, input, pressed);
+        if pressed.cycle {
+            self.cycle_throw_color(ci, input.throw);
+        }
         self.captain_throw(ci, dt, input, pressed);
         if pressed.dismiss {
             self.dismiss(ci);
@@ -592,31 +603,96 @@ impl Sim {
         }
     }
 
+    /// The order the colour switch goes in.
+    const CYCLE: [PikiColor; 3] = [PikiColor::Red, PikiColor::Yellow, PikiColor::Blue];
+
+    /// The colours among `ci`'s squad (formed up, walking to his hand or held), as bits by
+    /// [`PikiColor::index`].
+    fn squad_colors(&self, ci: usize) -> u32 {
+        let c = &self.captains[ci];
+        let mut bits = 0;
+        for &id in &c.plate.members {
+            let p = &self.pikis[id.0 as usize];
+            if matches!(
+                p.state,
+                PikiState::Squad { .. } | PikiState::GoHang { .. } | PikiState::Held { .. }
+            ) {
+                bits |= 1 << p.color.index();
+            }
+        }
+        bits
+    }
+
+    /// Switches to the next colour in his squad (Red, Yellow, Blue, skipping colours he has
+    /// none of). A Pikmin already in his hand goes back and, with the button still `held`, one
+    /// of the new colour comes instead.
+    fn cycle_throw_color(&mut self, ci: usize, held: bool) {
+        let bits = self.squad_colors(ci);
+        let now = match self.captains[ci].throw {
+            ThrowState::Wait { held: Some(id), .. } | ThrowState::Wait { pending: Some(id), .. } => {
+                Some(self.pikis[id.0 as usize].color)
+            }
+            _ => self.captains[ci].throw_color,
+        };
+        let at = now
+            .and_then(|c| Self::CYCLE.iter().position(|&x| x == c))
+            .unwrap_or(Self::CYCLE.len() - 1);
+        let next = (1..=3)
+            .map(|k| Self::CYCLE[(at + k) % 3])
+            .find(|c| bits & (1 << c.index()) != 0);
+        let Some(next) = next else {
+            return;
+        };
+        self.captains[ci].throw_color = Some(next);
+        if now != Some(next) && matches!(self.captains[ci].throw, ThrowState::Wait { .. }) {
+            self.cancel_throw(ci);
+            if held {
+                self.start_throw_wait(ci);
+            }
+        }
+    }
+
     /// `NaviThrowWaitState::init`: pick the nearest squad member within 80, preferring ones behind.
+    /// With a colour picked (`throw_color`) only that colour; when he has none of it left,
+    /// the nearest of any colour, which becomes the pick.
     fn start_throw_wait(&mut self, ci: usize) -> bool {
+        let want = self.captains[ci].throw_color;
         let grab = self.params.navi.pluck_grab_range;
         let c = &self.captains[ci];
         let fwd = dir_of(c.face);
+        // The nearest of the picked colour, and the nearest of any.
         let mut best: Option<(PikiId, f32)> = None;
-        let mut max_dist = 80.0;
+        let mut any: Option<(PikiId, f32)> = None;
+        let mut have_want = false;
         for &id in &c.plate.members {
             let p = &self.pikis[id.0 as usize];
             if !matches!(p.state, PikiState::Squad { .. }) {
                 continue;
             }
+            have_want |= want.is_some_and(|w| p.color == w);
             let diff = p.pos - c.pos;
             let mut len = diff.length();
             if diff.dot(fwd) > -0.1 {
                 len += 10.0;
             }
-            if len < max_dist {
-                max_dist = len;
+            if len >= 80.0 {
+                continue;
+            }
+            if any.is_none_or(|(_, d)| len < d) {
+                any = Some((id, len));
+            }
+            if want.is_none_or(|w| p.color == w) && best.is_none_or(|(_, d)| len < d) {
                 best = Some((id, len));
             }
         }
-        let Some((id, dist)) = best else {
+        // Out of the picked colour altogether: the nearest of the rest, which becomes the pick.
+        let Some((id, dist)) = (if have_want { best } else { best.or(any) }) else {
             return false;
         };
+        if want.is_some() {
+            self.captains[ci].throw_color = Some(self.pikis[id.0 as usize].color);
+        }
+        let c = &self.captains[ci];
         let captain = c.id;
         let (held, pending) = if dist <= grab {
             self.pikis[id.0 as usize].state = PikiState::Held { captain };

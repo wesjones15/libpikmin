@@ -120,7 +120,9 @@ pub struct PikInput {
     pub dismiss: u8,
     pub use_pose: u8,
     pub use_cursor: u8,
-    pub _pad: [u8; 3],
+    /// Next colour to throw (`CaptainInput::cycle`).
+    pub cycle: u8,
+    pub _pad: [u8; 2],
 }
 
 impl PikInput {
@@ -137,6 +139,7 @@ impl PikInput {
                 face: self.pose_face,
             }),
             cursor: (self.use_cursor != 0).then(|| self.cursor.into()),
+            cycle: self.cycle != 0,
         }
     }
 }
@@ -736,6 +739,25 @@ pub unsafe extern "C" fn pik_sim_set_input(sim: *mut PikSim, captain: u32, input
             if (captain as usize) < s.sim.captains().len() {
                 s.sim.set_input(CaptainId(captain), input.to_input());
             }
+        })
+    }
+}
+
+/// The colour `captain` throws next ([`PikiColor::index`]) once the player has picked one
+/// with `PikInput::cycle`; -1 while he throws the nearest Pikmin.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_captain_throw_color(sim: *mut PikSim, captain: u32) -> i32 {
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, -1, |s| {
+            s.sim
+                .captains()
+                .get(captain as usize)
+                .and_then(|c| c.throw_color)
+                .map_or(-1, |c| c.index() as i32)
         })
     }
 }
