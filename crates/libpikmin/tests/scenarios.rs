@@ -474,6 +474,30 @@ fn thrown_piki_latches_on_and_keeps_hitting() {
 }
 
 #[test]
+fn locked_throw_tracks_an_elevated_moving_enemy_then_releases_lock() {
+    let mut sim = Sim::new(retail_params(), 91);
+    let mut host = TestHost::default();
+    let captain = sim.add_captain(Vec3::ZERO);
+    squad(&mut sim, captain, 3, Vec3::ZERO);
+    let mut events = Vec::new();
+    run(&mut sim, &mut host, 2., &mut events);
+    let target = 99;
+    host.creatures.push(Dummy { id: target, pos: Vec3::new(130., 50., 0.), radius: 12., height: 15., hp: 1000. });
+    sim.set_lock_target(captain, Some(target));
+    throw_once(&mut sim, &mut host, captain, &mut events);
+    for _ in 0..60 {
+        host.creatures[0].pos.z += 0.5;
+        sim.step(&mut host);
+    }
+    assert!(sim.pikis().iter().any(|p| p.state.latched_to() == Some(target)));
+    let expected = host.creatures[0].pos + Vec3::Y * 15.;
+    assert!(sim.captain(captain).cursor_world.distance(expected) < 0.01);
+    sim.set_lock_target(captain, None);
+    sim.step(&mut host);
+    assert!(sim.captain(captain).cursor_world.y < 2.);
+}
+
+#[test]
 fn latched_hits_follow_the_cling_animation() {
     let mut sim = Sim::new(retail_params(), 9);
     let mut host = TestHost::default();

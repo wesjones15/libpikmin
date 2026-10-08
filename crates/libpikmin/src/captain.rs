@@ -106,6 +106,8 @@ pub struct Captain {
     /// The colour he throws next, once the player has picked one with `cycle`; None throws
     /// the nearest Pikmin, as in Pikmin 1.
     pub throw_color: Option<PikiColor>,
+    /// Optional host lock-on. Vanilla throws remain unchanged when absent.
+    pub lock_target: Option<crate::host::CreatureId>,
     /// Multiplies his run speed: the host's own speed stat over its base (items, buffs).
     /// 1 in Pikmin.
     pub speed_scale: f32,
@@ -159,6 +161,7 @@ impl Captain {
             damage_frames: 0.0,
             down: false,
             throw_color: None,
+            lock_target: None,
             speed_scale: 1.0,
             reach_scale: 1.0,
             rearrange_pending: false,
@@ -196,6 +199,9 @@ impl Captain {
 }
 
 impl Sim {
+    pub fn set_lock_target(&mut self, captain: CaptainId, target: Option<crate::host::CreatureId>) {
+        if let Some(c) = self.captains.get_mut(captain.0 as usize) { c.lock_target = target; }
+    }
     pub(crate) fn update_captain(&mut self, ci: usize, host: &mut dyn Host, dt: f32) {
         let input = self.captains[ci].input;
         let pressed = std::mem::take(&mut self.captains[ci].pressed);
@@ -340,6 +346,12 @@ impl Sim {
             .ground_height(c.pos + c.cursor + Vec3::Y * CURSOR_PROBE_LIFT)
             .unwrap_or(c.pos.y);
         c.cursor_world = Vec3::new(c.pos.x + c.cursor.x, ground + 1.0, c.pos.z + c.cursor.z);
+        if let Some(target) = c.lock_target.and_then(|id| self.creatures.get(id)).filter(|t| t.alive)
+            && let Some(part) = self.creatures.parts_of(target).iter().find(|p| p.stickable)
+        {
+            c.cursor_world = part.centre;
+            c.cursor = Vec3::new(part.centre.x - c.pos.x, 0., part.centre.z - c.pos.z);
+        }
     }
 
     /// Formation upkeep (`Navi::makeCStick`). With the C-stick pushed the plate swings toward
@@ -815,6 +827,7 @@ impl Sim {
         p.target_vel = p.vel;
         p.on_ground = false;
         p.state = PikiState::Flying { ground_frames: 0 };
+        p.guided_throw = c.lock_target.map(|target| (target, n.throw_flight_time.max(0.2)));
         p.captain = Some(c.id);
         self.events.push(Event::Thrown {
             piki: id,

@@ -221,6 +221,7 @@ pub struct Piki {
     pub idle_time: f32,
     /// The tick it last latched onto a creature (see [`Sim::set_shake_protection`]).
     pub latched_at: u64,
+    pub guided_throw: Option<(CreatureId, f32)>,
 }
 
 impl Piki {
@@ -259,6 +260,7 @@ fn nearest_part(frame: &CreatureFrame, c: &CreatureView, from: Vec3) -> Option<(
 
 impl Sim {
     pub(crate) fn update_piki(&mut self, pi: usize, host: &mut dyn Host, dt: f32) {
+        if !matches!(self.pikis[pi].state, PikiState::Flying { .. }) { self.pikis[pi].guided_throw = None; }
         if !matches!(self.pikis[pi].state, PikiState::Idle) {
             self.pikis[pi].idle_time = 0.0;
         }
@@ -525,6 +527,18 @@ impl Sim {
 
     /// `PikiFlyingState`: ballistic until we touch a creature part or the ground.
     fn piki_flying(&mut self, pi: usize, host: &mut dyn Host, dt: f32) {
+        // Re-solve the remaining arc against the current hurtbox, so moving/flying
+        // targets are met through normal collision and latch, never a teleport.
+        if let Some((id, remaining)) = self.pikis[pi].guided_throw {
+            let target = self.creatures.get(id).filter(|c| c.alive)
+                .and_then(|c| self.creatures.parts_of(c).iter().find(|p| p.stickable));
+            if let Some(part) = target.filter(|_| remaining > 0.) {
+                let t = remaining.max(dt);
+                let p = &mut self.pikis[pi];
+                p.vel = (part.centre - p.pos) / t + Vec3::Y * (self.params.ai.gravity * (t + dt) * 0.5);
+                p.guided_throw = Some((id, remaining - dt));
+            } else { self.pikis[pi].guided_throw = None; }
+        }
         let p = &mut self.pikis[pi];
         p.target_vel = p.vel;
         self.physics(pi, host, dt);

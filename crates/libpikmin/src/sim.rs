@@ -104,6 +104,7 @@ impl Sim {
             dismissed: false,
             idle_time: 0.0,
             latched_at: 0,
+            guided_throw: None,
         });
         Some(id)
     }

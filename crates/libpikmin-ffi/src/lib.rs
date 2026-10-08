@@ -41,6 +41,11 @@ pub use view::*;
 pub const PIK_ABI_VERSION: u32 = 8;
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_lock_target(sim: *mut PikSim, captain: u32, target: u64, enabled: u8) {
+    unsafe { with(sim, (), |s| s.sim.set_lock_target(CaptainId(captain), (enabled != 0).then_some(target))) }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_camera_preset(zoom: u32, top: u8, out: *mut PikVec3) {
     if let Some(out) = unsafe { out.as_mut() } { *out = libpikmin::camera::preset(zoom, top != 0).into(); }
 }
