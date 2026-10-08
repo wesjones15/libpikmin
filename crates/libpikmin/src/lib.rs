@@ -6,6 +6,7 @@
 
 pub mod anim;
 pub mod captain;
+pub mod camera;
 pub mod carry;
 pub mod clock;
 pub mod damage;

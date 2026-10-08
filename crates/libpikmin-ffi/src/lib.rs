@@ -38,7 +38,20 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 7;
+pub const PIK_ABI_VERSION: u32 = 8;
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_camera_preset(zoom: u32, top: u8, out: *mut PikVec3) {
+    if let Some(out) = unsafe { out.as_mut() } { *out = libpikmin::camera::preset(zoom, top != 0).into(); }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_camera_pan(mode: u32, angles: *mut PikVec3, x: f32, y: f32, dt: f32) {
+    if let Some(a) = unsafe { angles.as_mut() } {
+        let mode = if mode == 1 { libpikmin::camera::CameraMode::Orbit } else { libpikmin::camera::CameraMode::Vanilla };
+        libpikmin::camera::pan(mode, &mut a.x, &mut a.y, Vec2::new(x, y), dt);
+    }
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_abi_version() -> u32 {
