@@ -51,7 +51,8 @@ pub struct PikBatch {
     /// Its texture with no per-draw colours ([`pik_view_texture`]), or -1. A draw's own is
     /// in [`pik_view_texture_ids`].
     pub texture: i32,
-    /// 0 opaque, 1 alpha tested (cutout), 2 blended and unlit.
+    /// 0 opaque, 1 alpha tested (cutout), 2 blended and unlit, 3 added by its alpha, unlit,
+    /// no depth write (the Onions' light cones).
     pub blend: u8,
     /// Lit in the game: 1 its colour, 2 its alpha (opaque only where light falls; ambient
     /// alpha is 0). 0: unlit.
@@ -83,7 +84,7 @@ pub struct PikDraw {
     pub key: u64,
     pub model: u32,
     /// `libpikmin_present::view::kinds`: 0 captain, 1 Pikmin, 2 its leaf, 3 Onion, 4 pellet,
-    /// 5 sprout, 6 its leaf, 7 cursor, 8 cursor marker.
+    /// 5 sprout, 6 its leaf, 7 cursor, 8 cursor marker, 9 ship, 10 an Onion's light cone.
     pub kind: u8,
     /// 1: flashing from a hit.
     pub flags: u8,
@@ -472,7 +473,8 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
                     let sprouts = std::mem::take(&mut v.view.animator.sprout_sounds);
                     let ship = std::mem::take(&mut v.view.ship_sounds);
                     let swarm = me.filter(|c| c.swarming).map_or(glam::Vec2::ZERO, |c| c.swarm_input());
-                    let scene = libpikmin_present::audio::SceneSounds { sprouts: &sprouts, ship: &ship, swarm };
+                    let onion_spot = me.is_some_and(|c| s.sim.onion_in_reach(c.id).is_some());
+                    let scene = libpikmin_present::audio::SceneSounds { sprouts: &sprouts, ship: &ship, swarm, onion_spot };
                     a.frame(cam, at, &s.sim, creatures, whistling, scene);
                 }
             } else {

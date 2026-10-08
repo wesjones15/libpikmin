@@ -300,9 +300,19 @@ pub struct Material {
     pub tex_gens: Vec<TexGen>,
     /// Texture maps of a PVW material, `GX_TEXMAP0..`.
     pub tex_datas: Vec<TexData>,
+    /// `PVWPeInfo` (PVW.h): control, alpha compare, depth test and blend mode flags. With
+    /// control bit 0 set they replace the flag-based pixel setup (`DGXGraphics::initMesh`).
+    pub pe: [u32; 4],
 }
 
 impl Material {
+    /// Drawn `GX_BM_BLEND` with a destination factor of `GX_BL_ONE`: added to the screen,
+    /// like light (`PVWPeInfo::mBlendModeFlags` in `DGXGraphics::initMesh`).
+    pub fn additive(&self) -> bool {
+        let b = self.pe[3];
+        self.pe[0] & 1 != 0 && b & 0xF == 1 && (b >> 8) & 0xF == 1
+    }
+
     pub fn blend(&self) -> Blend {
         use mat_flags::*;
         if self.flags & INVERSE_BLEND != 0 {
@@ -529,6 +539,7 @@ fn read_material(r: &mut Reader) -> Result<Material, Error> {
     let mut tev_info = None;
     let mut tex_gens = Vec::new();
     let mut tex_datas = Vec::new();
+    let mut pe = [0; 4];
     if flags & mat_flags::PVW != 0 {
         tev_info = usize::try_from(r.i32()?).ok();
         // PVWPolygonColourInfo
@@ -538,7 +549,7 @@ fn read_material(r: &mut Reader) -> Result<Material, Error> {
         lighting = r.u32()?;
         r.skip(4)?;
         // PVWPeInfo
-        r.skip(16)?;
+        pe = [r.u32()?, r.u32()?, r.u32()?, r.u32()?];
         // PVWTextureInfo
         r.skip(4 + 12)?; // useScale, scale
         for _ in 0..r.count()? {
@@ -568,6 +579,7 @@ fn read_material(r: &mut Reader) -> Result<Material, Error> {
         tev_info,
         tex_gens,
         tex_datas,
+        pe,
     })
 }
 

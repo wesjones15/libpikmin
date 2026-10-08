@@ -82,6 +82,13 @@ pub mod paths {
     pub const ONION: &str = "objects/goal/goal.mod";
     pub const ONION_BUNDLE: &str = "objects/goal/goal.anm";
     pub const ONION_ANIM_MGR: &str = "objects/goal/anims.bin";
+    /// The Onions' light cones (`EffectMgr::MOD_{Blue,Red,Yellow}Onyon`, effectMgr.cpp's
+    /// `geometryLoadInfo`, drawn at 0.1 scale), by `PikiColor`.
+    pub const ONION_BEAMS: [&str; 3] = [
+        "effects/shapes/b_goal.mod",
+        "effects/shapes/r_goal.mod",
+        "effects/shapes/y_goal.mod",
+    ];
     /// Numbered pellets 1, 5, 10, 20 (gameSetup.cpp).
     pub const PELLETS: [&str; 4] = [
         "objects/pellets/white1.mod",

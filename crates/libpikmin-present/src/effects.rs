@@ -215,8 +215,11 @@ impl Effects {
                 effects::ROCKET_TAKE_S,
                 effects::ROCKET_LAND_S,
                 effects::ROCKET_SMOKE_D,
+                effects::ONYON_SUCK,
             ]
             .into_iter()
+            .chain(effects::ONYON_BEACON_RING)
+            .chain(effects::ONYON_HALO_RING)
             .chain(effects::ROCKET_JETS.into_iter().flatten())
             .chain(effects::ROCKET_JET_G)
             .chain(effects::ROCKET_BOOST_GROUND)

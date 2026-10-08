@@ -129,6 +129,22 @@ pub mod effects {
     pub const ROCKET_LAND_S: EffectDef = one("effects/pcr/land_s.pcr", "effects/tex/hokori4.bti");
     /// `EFF_Rocket_SmokeD`: smoke at an Onion's feet as it lands.
     pub const ROCKET_SMOKE_D: EffectDef = one("effects/pcr/kemuri_d.pcr", "effects/tex/kaen_ok.bti");
+    /// `EFF_Onyon_Suck`: light drawn up into an Onion as a pellet arrives (`GoalEffect`,
+    /// cast by `PelletGoalState::init`).
+    pub const ONYON_SUCK: EffectDef = one("effects/pcr/goal_sui.pcr", "effects/tex/ps_glow.bti");
+    /// `EFF_Onyon_BeaconRing{Blue,Red,Yellow}`, by `PikiColor`: rings under an Onion while a
+    /// captain stands at it (`GoalItem::setSpotActive`).
+    pub const ONYON_BEACON_RING: [EffectDef; 3] = [
+        one("effects/pcr/ony_ac_b.pcr", "effects/tex/ring_i4.bti"),
+        one("effects/pcr/ony_ac_r.pcr", "effects/tex/ring_i4.bti"),
+        one("effects/pcr/ony_ac_y.pcr", "effects/tex/ring_i4.bti"),
+    ];
+    /// `EFF_Onyon_HaloRing{Blue,Red,Yellow}`: their glow, alongside.
+    pub const ONYON_HALO_RING: [EffectDef; 3] = [
+        one("effects/pcr/ony_a_br.pcr", "effects/tex/fuchibal.bti"),
+        one("effects/pcr/ony_a_rr.pcr", "effects/tex/fuchibal.bti"),
+        one("effects/pcr/ony_a_yr.pcr", "effects/tex/fuchibal.bti"),
+    ];
 }
 
 /// `PTCLFLAG_*` (zen/particle.h).
@@ -554,6 +570,10 @@ pub struct Generator {
     pub fixed_normal: bool,
     /// `mEmitDir`, from the file until `setEmitDir` changes it.
     pub emit_dir: Vec3,
+    /// From this generator frame on, no gravity (`setGravityField(0)` in a callback, like
+    /// `GoalEffect::invoke` at frame 50).
+    pub gravity_off_at: Option<f32>,
+    no_gravity: bool,
     pub particles: Vec<Particle>,
     pub children: Vec<Child>,
     partial: f32,
@@ -574,6 +594,8 @@ impl Generator {
             emit_vel: Vec3::ZERO,
             oriented_normal: Vec3::Y,
             fixed_normal: false,
+            gravity_off_at: None,
+            no_gravity: false,
             particles: Vec::new(),
             children: Vec::new(),
             partial: 0.0,
@@ -621,6 +643,9 @@ impl Generator {
             self.emit(each);
         } else if self.particles.is_empty() && self.children.is_empty() {
             return false;
+        }
+        if self.gravity_off_at.is_some_and(|f| self.frame >= f) {
+            self.no_gravity = true;
         }
         self.update_particles(step, each);
         self.pass_timer += step;
@@ -741,7 +766,7 @@ impl Generator {
         let pcr = self.pcr.clone();
         let f = &pcr.fields;
         let mut a = Vec3::ZERO;
-        if pcr.flags & flags::GRAVITY != 0 {
+        if pcr.flags & flags::GRAVITY != 0 && !self.no_gravity {
             a += f.gravity;
         }
         if pcr.flags & flags::VORTEX != 0 {

@@ -128,8 +128,8 @@ fn the_view_poses_a_sim_through_the_abi() {
     unsafe {
         let view = pik_view_new(dir.as_ptr(), 0);
         assert!(!view.is_null());
-        assert_eq!(pik_view_model_count(view), 16);
-        for m in 0..16 {
+        assert_eq!(pik_view_model_count(view), 19);
+        for m in 0..19 {
             let mut info = PikModelInfo::default();
             assert_eq!(pik_view_model(view, m, &mut info), 1);
             let mut batches = vec![PikBatch::default(); info.batch_count as usize];
@@ -178,8 +178,16 @@ fn the_view_poses_a_sim_through_the_abi() {
         let n = pik_view_draws(view, std::ptr::null_mut(), 0);
         let mut draws = vec![PikDraw::default(); n as usize];
         assert_eq!(pik_view_draws(view, draws.as_mut_ptr(), n), n);
-        // Olimar, 4 Pikmin with leaves, the Onion, cursor and marker.
-        assert_eq!(n, 1 + 8 + 1 + 2, "{draws:?}");
+        // Olimar, 4 Pikmin with leaves, the Onion and its light cone, cursor and marker.
+        assert_eq!(n, 1 + 8 + 2 + 2, "{draws:?}");
+        // The Red Onion's cone, added to the screen like light.
+        let cone = draws.iter().find(|d| d.kind == 10).expect("no light cone");
+        assert_eq!(cone.model, 17);
+        let mut info = PikModelInfo::default();
+        pik_view_model(view, cone.model, &mut info);
+        let mut batches = vec![PikBatch::default(); info.batch_count as usize];
+        pik_view_batches(view, cone.model, batches.as_mut_ptr(), info.batch_count);
+        assert!(batches.iter().all(|b| b.blend == 3), "{batches:?}");
         let (mut vc, mut cc) = (0u32, 0u32);
         let pos = pik_view_positions(view, &mut vc);
         let col = pik_view_colors(view, &mut cc);

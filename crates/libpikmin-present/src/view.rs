@@ -33,7 +33,9 @@ pub mod models {
     pub const CURSOR: u32 = 13;
     pub const MARKER: u32 = 14;
     pub const SHIP: u32 = 15;
-    pub const COUNT: usize = 16;
+    /// The Onions' light cones: Blue, Red, Yellow.
+    pub const BEAMS: [u32; 3] = [16, 17, 18];
+    pub const COUNT: usize = 19;
 }
 
 /// What a draw is, for hosts that treat some kinds differently.
@@ -48,6 +50,8 @@ pub mod kinds {
     pub const CURSOR: u8 = 7;
     pub const MARKER: u8 = 8;
     pub const SHIP: u8 = 9;
+    /// An Onion's light cone (`GoalItem::mSpotModelEff`).
+    pub const BEAM: u8 = 10;
 }
 
 /// Draw flags.
@@ -63,6 +67,9 @@ pub mod blend {
     pub const CUTOUT: u8 = 1;
     /// Blended and unlit (Olimar's helmet): a deferred host's lit shader can't blend.
     pub const TRANSLUCENT: u8 = 2;
+    /// Added to the screen by its alpha and unlit, without writing depth (the Onions' light
+    /// cones: `GX_BL_SRCALPHA, GX_BL_ONE` from their `PVWPeInfo`).
+    pub const ADDITIVE: u8 = 3;
 }
 
 /// Blended materials at least this opaque everywhere draw opaque (the pellets are 78%).
@@ -258,7 +265,20 @@ pub struct View {
     /// Draw each captain's cursor and marker (on by default; off for a captain shown on his
     /// own, like a host's character select screen).
     pub show_cursors: bool,
+    /// Each Onion's light cone width, 0..1 (`GoalItem::startConeShrink` / `startConeEmit`).
+    cones: HashMap<u32, f32>,
+    /// Onions whose beacon rings are on (`GoalItem::setSpotActive`).
+    spots: HashSet<u32>,
+    /// Onions a pellet just reached, for their `GoalEffect`.
+    arrivals: Vec<libpikmin::onion::OnionId>,
 }
+
+/// `GoalItem::updateConeShrink` / `updateConeEmit`: the cone narrows or widens over 0.8 s.
+const CONE_TIME: f32 = 0.8;
+/// `EffectMgr`'s `geometryLoadInfo` scale for the cone models.
+const CONE_SCALE: f32 = 0.1;
+/// `GoalEffect::invoke`: no more gravity from this frame of the suck effect.
+const SUCK_GRAVITY_FRAMES: f32 = 50.0;
 
 impl View {
     pub fn load(assets: &Assets) -> Result<Self, libpikmin_assets::Error> {
@@ -269,6 +289,7 @@ impl View {
         paths_in_order.extend(paths::PELLETS);
         paths_in_order.extend([paths::PIKIHEAD, paths::CURSOR, paths::CURSOR_MARKER]);
         paths_in_order.push(libpikmin_assets::ship::SHIP_MODEL);
+        paths_in_order.extend(paths::ONION_BEAMS);
         debug_assert_eq!(paths_in_order.len(), models::COUNT);
         let mut models = paths_in_order
             .iter()
@@ -286,7 +307,9 @@ impl View {
                     Ok(i) => textures.list[i].min_alpha(),
                     Err(_) => tev::flat_color(&vm.model, b.material, Inputs::default(), &vm.images)[3],
                 };
-                blends.push(match vm.model.materials[b.material].blend() {
+                let mat = &vm.model.materials[b.material];
+                blends.push(match mat.blend() {
+                    _ if mat.additive() => blend::ADDITIVE,
                     Blend::Opaque => blend::OPAQUE,
                     Blend::AlphaTest => blend::CUTOUT,
                     Blend::AlphaBlend | Blend::Inverse if floor >= OPAQUE_ENOUGH => blend::OPAQUE,
@@ -328,6 +351,9 @@ impl View {
             interp: HashMap::new(),
             time: 0.0,
             show_cursors: true,
+            cones: HashMap::new(),
+            spots: HashSet::new(),
+            arrivals: Vec::new(),
         })
     }
 
@@ -338,6 +364,54 @@ impl View {
             && let Some(fx) = self.effects.as_mut()
         {
             fx.spawn(fx_defs::PIKI_DEAD_SOUL, *pos);
+        }
+        if let Event::PelletArrived { onion, .. } = e {
+            self.arrivals.push(*onion);
+        }
+    }
+
+    /// An Onion's light cone, beacon rings and arrival effect (`GoalItem::mSpotModelEff`,
+    /// `setSpotActive`, `GoalEffect`).
+    fn onion_light(&mut self, sim: &Sim, i: usize, o: &libpikmin::Onion, dt: f32) {
+        use libpikmin::onion::OnionAnim;
+        let colour = o.colors[0].index();
+        // Grounded it stands lit; flying, landing or away it closes (`startLand` sets it to 0,
+        // the takeoff motion's key starts `startConeShrink`) and opens again once down.
+        let grounded = o.grounded();
+        let cone = self.cones.entry(o.id.0).or_insert(if grounded { 1.0 } else { 0.0 });
+        let step = dt / CONE_TIME;
+        *cone = if grounded { (*cone + step).min(1.0) } else { (*cone - step).max(0.0) };
+        let width = *cone;
+        if width > 0.0 && o.anim != OnionAnim::Away {
+            let model = models::BEAMS[colour];
+            let skel = &self.models[model as usize].skel;
+            let root = Mat4::from_scale(Vec3::new(CONE_SCALE * width, CONE_SCALE, CONE_SCALE * width));
+            let pose = skel.pose(root, None);
+            let k = key(kinds::BEAM, i as u64);
+            self.push(k, kinds::BEAM, model, o.pos, Quat::IDENTITY, pose, &|_| Inputs::default(), 1.0, 0);
+        }
+
+        // `NaviWalkState::exec`: a captain at the Onion lights its rings.
+        let lit = grounded && sim.captains().iter().any(|c| sim.onion_in_reach(c.id) == Some(o.id));
+        let fx_key = (7u64 << 48) | ((o.id.0 as u64) << 8);
+        if let Some(e) = self.effects.as_mut() {
+            if lit && self.spots.insert(o.id.0) {
+                e.attach(fx_key, fx_defs::ONYON_BEACON_RING[colour], o.pos);
+                e.attach(fx_key | 1, fx_defs::ONYON_HALO_RING[colour], o.pos);
+            } else if !lit && self.spots.remove(&o.id.0) {
+                e.detach_where(|k| k & !255 == fx_key);
+            }
+            if lit {
+                e.move_attached(fx_key, o.pos);
+                e.move_attached(fx_key | 1, o.pos);
+            }
+            // `PelletGoalState::init`: `GoalEffect` at the goal for an Onion (the ship's is
+            // `UfoSuck`).
+            if self.arrivals.contains(&o.id)
+                && let Some(g) = e.spawn(fx_defs::ONYON_SUCK, o.goal_pos())
+            {
+                g.gravity_off_at = Some(SUCK_GRAVITY_FRAMES);
+            }
         }
     }
 
@@ -521,6 +595,7 @@ impl View {
                 self.push(key(kinds::SHIP, i as u64), kinds::SHIP, models::SHIP, at, rot, pose, &no_inputs, 1.0, 0);
                 continue;
             }
+            self.onion_light(sim, i, o, dt);
             let Some((_, anim, _)) = self.animator.onion(&self.onion_anims, i, o, dt) else {
                 continue;
             };
@@ -541,6 +616,7 @@ impl View {
             let inputs = move |_: usize| Inputs { frame: Some(frame), ..Default::default() };
             self.push(k, kinds::ONION, models::ONION, o.pos, Quat::IDENTITY, pose, &inputs, 1.0, 0);
         }
+        self.arrivals.clear();
 
         // Pellets and corpses: the numbered pellets, sized to the thing being carried
         // (corpses too: a host's enemies have no Pikmin model). The model goes by carriers,

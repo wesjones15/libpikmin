@@ -45,6 +45,9 @@ pub struct SceneSounds<'a> {
     pub sprouts: &'a [(Option<libpikmin::onion::OnionId>, u8, Vec3)],
     /// The ship's: (ship, sound, start or stop).
     pub ship: &'a [(libpikmin::onion::OnionId, &'static str, bool)],
+    /// The listener's captain is at an Onion (`GoalItem::setSpotActive`, from
+    /// `NaviWalkState::exec`): `SYSSE_CONTAINER_OK` plays while he is.
+    pub onion_spot: bool,
 }
 
 /// Host creatures this frame, for positional sounds.
@@ -70,6 +73,7 @@ pub struct Audio {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
     whistling: bool,
+    onion_spot: bool,
     bgm: usize,
     /// Pellets whose `SE_LIFT_TRY` loop is on (`Pellet::mIsPlayTrySound`).
     trying: Vec<libpikmin::PelletId>,
@@ -133,6 +137,7 @@ impl Audio {
             stop,
             thread: Some(thread),
             whistling: false,
+            onion_spot: false,
             bgm: 0,
             trying: Vec::new(),
             rate,
@@ -188,8 +193,10 @@ impl Audio {
         whistling: bool,
         scene: SceneSounds,
     ) {
-        let SceneSounds { sprouts: sprout_sounds, ship: ship_sounds, swarm } = scene;
+        let SceneSounds { sprouts: sprout_sounds, ship: ship_sounds, swarm, onion_spot } = scene;
         let squad = sim.pikis().iter().filter(|p| p.captain.is_some()).count();
+        let spot_changed = onion_spot != self.onion_spot;
+        self.onion_spot = onion_spot;
         let whistle_started = whistling && !self.whistling;
         let whistle_stopped = self.whistling && !whistling;
         self.whistling = whistling;
@@ -209,7 +216,13 @@ impl Audio {
         self.with(|s| {
             s.set_listener(view, listener);
             s.set_piki_count(squad as u32);
+            // navi.cpp Navi::update: silent with an empty squad (`mPlateMgr->mTotalSlotCount`).
+            let swarm = if squad > 0 { swarm } else { glam::Vec2::ZERO };
             s.formation(swarm.x, swarm.y);
+            // `GoalItem::setSpotActive`: `playSysSe` / `stopSysSe(SYSSE_CONTAINER_OK)`.
+            if spot_changed {
+                if onion_spot { s.play_system_se(16) } else { s.stop_system_se(16) }
+            }
             for (owner, pos) in creatures
                 .positions
                 .iter()
