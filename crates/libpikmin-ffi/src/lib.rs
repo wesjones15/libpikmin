@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 5;
+pub const PIK_ABI_VERSION: u32 = 7;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_abi_version() -> u32 {
@@ -862,6 +862,45 @@ pub unsafe extern "C" fn pik_sim_add_onion(sim: *mut PikSim, pos: *const PikVec3
     unsafe { with(sim, -1, |s| s.sim.add_onion(pos.into(), &colors).0 as i32) }
 }
 
+/// Adds the S.S. Dolphin, independently of ship-repair gameplay.
+/// # Safety
+/// `sim` from [`pik_sim_new`]; `pos` readable. No ship-parts objective is enabled.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_add_ship(sim: *mut PikSim, pos: *const PikVec3, yaw: f32) -> i32 {
+    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return -1 };
+    let pos: Vec3 = pos.into();
+    if !pos.is_finite() || !yaw.is_finite() { return -1; }
+    unsafe { with(sim, -1, |s| s.sim.add_ship(pos,
+        pos + Vec3::new(yaw.sin(), 0.0, yaw.cos()) * 100.0,
+        pos + Vec3::Y * 74.0).0 as i32) }
+}
+
+/// Updates a host-controlled Onion's pose and airborne state.
+/// # Safety
+/// `sim` from [`pik_sim_new`]; `pos` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_onion_pose(sim: *mut PikSim, onion: u32, pos: *const PikVec3, flying: u8) {
+    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return };
+    unsafe { with(sim, (), |s| s.sim.set_onion_pose(OnionId(onion), pos.into(), flying != 0)) }
+}
+
+/// Selects a host-timed disc flight transition without changing gameplay availability.
+/// # Safety
+/// `sim` from [`pik_sim_new`]. `landing` selects landing rather than takeoff.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_onion_flight_motion(sim: *mut PikSim, onion: u32, landing: u8, progress: f32) {
+    unsafe { with(sim, (), |s| s.sim.set_onion_flight_motion(OnionId(onion), landing != 0, progress)) }
+}
+
+/// Selects a cosmetic colour without changing storage/accepted types.
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_onion_color(sim: *mut PikSim, onion: u32, color: u32) {
+    let Some(color) = color_arg(color) else { return };
+    unsafe { with(sim, (), |s| s.sim.set_onion_color(OnionId(onion), color)) }
+}
+
 /// Puts something carryable down. Returns its id.
 ///
 /// # Safety
@@ -1328,6 +1367,7 @@ pub unsafe extern "C" fn pik_sim_onions(sim: *mut PikSim, out: *mut PikOnion, ma
                     stored: o.stored.map(|by_happa| by_happa.iter().sum()),
                     anim: match o.anim {
                         OnionAnim::Idle => 0,
+                        OnionAnim::Hover => 6,
                         OnionAnim::Suction { .. } => 1,
                         OnionAnim::Emitting { .. } => 2,
                         OnionAnim::TakeOff { .. } => 3,

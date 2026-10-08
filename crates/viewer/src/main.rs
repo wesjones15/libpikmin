@@ -828,6 +828,7 @@ async fn main() {
             draw_circle_lines(s.x, s.y, 34.0 * zoom, 3.0, col);
             let state = match o.anim {
                 OnionAnim::Idle => "",
+                OnionAnim::Hover => "following",
                 OnionAnim::Suction { .. } => "slurp",
                 OnionAnim::Emitting { .. } => "seeds!",
                 OnionAnim::TakeOff { .. } => "taking off",

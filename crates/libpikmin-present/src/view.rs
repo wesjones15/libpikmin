@@ -32,7 +32,8 @@ pub mod models {
     pub const PIKIHEAD: u32 = 12;
     pub const CURSOR: u32 = 13;
     pub const MARKER: u32 = 14;
-    pub const COUNT: usize = 15;
+    pub const SHIP: u32 = 15;
+    pub const COUNT: usize = 16;
 }
 
 /// What a draw is, for hosts that treat some kinds differently.
@@ -46,6 +47,7 @@ pub mod kinds {
     pub const SPROUT_HAPPA: u8 = 6;
     pub const CURSOR: u8 = 7;
     pub const MARKER: u8 = 8;
+    pub const SHIP: u8 = 9;
 }
 
 /// Draw flags.
@@ -203,10 +205,31 @@ struct Interp {
     tick: u64,
 }
 
+struct ShipFlight {
+    ground_anchor: Option<Vec3>,
+    animator: libpikmin_assets::ship::ShipAnimator,
+    progress: Option<f32>,
+    flames: Vec<(u8, &'static str)>,
+}
+
+// Strip only cinematic travel; the clip still supplies every articulated pose. Hosts
+// place the model along their collision-safe trajectory instead of adding both motions.
+fn rebase_pose(pose: &mut libpikmin_assets::pose::Pose, offset: Vec3) {
+    let translation = Mat4::from_translation(offset);
+    pose.root = translation * pose.root;
+    for matrix in pose.joints.iter_mut().chain(pose.envelopes.iter_mut()) { *matrix = translation * *matrix; }
+}
+
 pub struct View {
     pub models: Vec<ViewModel>,
     piki_anims: AnimSet,
     onion_anims: AnimSet,
+    ship_anims: AnimSet,
+    ship_mgr: libpikmin_assets::AnimMgr,
+    ship_contexts: Vec<usize>,
+    ships: HashMap<u32, ShipFlight>,
+    pub ship_sounds: Vec<(libpikmin::onion::OnionId, &'static str, bool)>,
+    pub demo_sounds: Vec<Option<(u16, u16)>>,
     pikihead_anims: AnimSet,
     pub animator: Animator,
     pub draws: Vec<Draw>,
@@ -245,6 +268,7 @@ impl View {
         paths_in_order.push(paths::ONION);
         paths_in_order.extend(paths::PELLETS);
         paths_in_order.extend([paths::PIKIHEAD, paths::CURSOR, paths::CURSOR_MARKER]);
+        paths_in_order.push(libpikmin_assets::ship::SHIP_MODEL);
         debug_assert_eq!(paths_in_order.len(), models::COUNT);
         let mut models = paths_in_order
             .iter()
@@ -276,10 +300,17 @@ impl View {
             vm.batch_env = envs;
         }
         let ante = models[models::OLIMAR as usize].model.coll.iter().find(|c| c.id == "ante").cloned();
+        let ship_contexts = models[models::SHIP as usize].skel.override_map(&libpikmin_assets::ship::CONTEXT_JOINTS);
         Ok(View {
             models,
             piki_anims: AnimSet::load(assets, paths::PIKI_ANIM_MGR, paths::PIKI_BUNDLE)?,
             onion_anims: AnimSet::load(assets, paths::ONION_ANIM_MGR, paths::ONION_BUNDLE)?,
+            ship_anims: AnimSet::load(assets, libpikmin_assets::ship::SHIP_ANIM_MGR, libpikmin_assets::ship::SHIP_BUNDLE)?,
+            ship_mgr: libpikmin_assets::AnimMgr::parse(&assets.read(libpikmin_assets::ship::SHIP_ANIM_MGR)?)?,
+            ship_contexts,
+            ships: HashMap::new(),
+            ship_sounds: Vec::new(),
+            demo_sounds: Vec::new(),
             pikihead_anims: AnimSet::load(assets, paths::PIKIHEAD_ANIM_MGR, paths::PIKIHEAD_BUNDLE)?,
             animator: Animator::default(),
             draws: Vec::new(),
@@ -398,9 +429,96 @@ impl View {
         let no_inputs = |_: usize| Inputs::default();
 
         // Onions (`GoalItem`): their colour is a register animation at frame colour * 2
-        // (`GoalItem::refresh`). Ships aren't drawn here.
+        // (`GoalItem::refresh`). The Dolphin uses UfoAnimator's eight skeleton contexts.
         for (i, o) in sim.onions().iter().enumerate() {
             if o.ship.is_some() {
+                use libpikmin_assets::ship::ShipCue;
+                if o.anim == libpikmin::onion::OnionAnim::Away { continue; }
+                let flight = self.ships.entry(o.id.0).or_insert_with(|| {
+                    let mut animator = libpikmin_assets::ship::ShipAnimator::new(&self.ship_mgr, Vec::new());
+                    animator.start(&[], 0, &mut Vec::new());
+                    ShipFlight { animator, progress: None, flames: Vec::new(), ground_anchor: None }
+                });
+                let mut cues = Vec::new();
+                let landing = o.flight_motion.filter(|m| m.0).map(|m| m.1);
+                if let Some(progress) = landing {
+                    if flight.progress.is_none_or(|last| progress < last) {
+                        cues.push(ShipCue::StopAttached);
+                        flight.animator.land(&[], 0, &mut cues);
+                    }
+                    flight.animator.land_progress(progress, &mut cues);
+                } else if flight.progress.is_some() {
+                    flight.animator.land_progress(1.0, &mut cues);
+                    cues.push(ShipCue::Effect { fx: fx_defs::ROCKET_LAND, lift: 0.0, normal: None });
+                } else {
+                    flight.animator.update(dt, &mut cues);
+                }
+                flight.progress = landing;
+                let animator = &flight.animator;
+                let vm = &self.models[models::SHIP as usize];
+                // The host's origin is the terrain contact point. Use the upright
+                // rocket clip's endpoint, not the overturned tutorial wreck pose.
+                let ground_anchor = *flight.ground_anchor.get_or_insert_with(|| {
+                    let rest = vm.skel.pose_by(Mat4::IDENTITY, |j| {
+                        let ctx = self.ship_contexts[j];
+                        let (motion, frame) = if ctx == 0 { (11, 0.0) } else { animator.context(ctx) };
+                        self.ship_anims.get(motion).map(|(_, a)| (a, frame))
+                    });
+                    let bottom = vm.batches.iter().flat_map(|b| &b.vertices)
+                        .map(|v| rest.skin(v).0.y).fold(f32::INFINITY, f32::min);
+                    rest.joints[2].w_axis.truncate() - Vec3::Y * bottom
+                });
+                let mut pose = vm.skel.pose_by(Mat4::IDENTITY, |j| {
+                    let ctx = self.ship_contexts.get(j).copied().unwrap_or(0);
+                    let (motion, frame) = if ctx == 0 && !animator.landing() {
+                        (11, 0.0)
+                    } else { animator.context(ctx) };
+                    let (_, anim) = self.ship_anims.get(motion)?;
+                    Some((anim, frame.clamp(0.0, anim.frames.saturating_sub(1) as f32)))
+                });
+                let offset = ground_anchor - pose.joints[2].w_axis.truncate();
+                rebase_pose(&mut pose, offset);
+                let direction = o.goal_pos() - o.pos;
+                let rot = Quat::from_rotation_y(direction.x.atan2(direction.z));
+                let sphere = |id: &str| {
+                    let c = vm.model.coll.iter().find(|c| c.id == id)?;
+                    Some(o.pos + rot * pose.joints.get(c.joint)?.transform_point3(c.centre))
+                };
+                let fx_key = (6u64 << 48) | ((o.id.0 as u64) << 8);
+                for cue in cues {
+                    match cue {
+                        ShipCue::Sound(name) => self.ship_sounds.push((o.id, name, true)),
+                        ShipCue::StopSound(name) => self.ship_sounds.push((o.id, name, false)),
+                        ShipCue::DemoSound { demo, cmd } => self.demo_sounds.push(Some((demo, cmd))),
+                        ShipCue::EndDemoSound => self.demo_sounds.push(None),
+                        ShipCue::StopAttached => {
+                            flight.flames.clear();
+                            if let Some(e) = self.effects.as_mut() { e.detach_where(|k| k & !255 == fx_key); }
+                        }
+                        ShipCue::Attached { fx, sphere: id, normal, slot } => {
+                            if let (Some(at), Some(e)) = (sphere(id), self.effects.as_mut()) {
+                                if let Some(g) = e.attach(fx_key | slot as u64, fx, at)
+                                    && let Some(n) = normal { g.oriented_normal = rot * n; }
+                                flight.flames.retain(|f| f.0 != slot);
+                                flight.flames.push((slot, id));
+                            }
+                        }
+                        ShipCue::Effect { fx, lift, normal } => {
+                            if let Some(e) = self.effects.as_mut()
+                                && let Some(g) = e.spawn(fx, o.pos + Vec3::Y * lift)
+                                && let Some(n) = normal { g.oriented_normal = rot * n; }
+                        }
+                        // Part-repair cues are outside this arrival-only scene.
+                        _ => {}
+                    }
+                }
+                if let Some(e) = self.effects.as_mut() {
+                    for &(slot, id) in &flight.flames {
+                        if let Some(at) = sphere(id) { e.move_attached(fx_key | slot as u64, at); }
+                    }
+                }
+                let at = self.place(key(kinds::SHIP, i as u64), o.pos, tick, alpha);
+                self.push(key(kinds::SHIP, i as u64), kinds::SHIP, models::SHIP, at, rot, pose, &no_inputs, 1.0, 0);
                 continue;
             }
             let Some((_, anim, _)) = self.animator.onion(&self.onion_anims, i, o, dt) else {
@@ -408,7 +526,17 @@ impl View {
             };
             let k = key(kinds::ONION, i as u64);
             live.insert(crate::animator::onion_key(i));
-            let pose = self.models[models::ONION as usize].skel.pose(Mat4::IDENTITY, anim);
+            let skel = &self.models[models::ONION as usize].skel;
+            let mut pose = match anim {
+                Some((clip, at)) if o.anim == libpikmin::onion::OnionAnim::Hover && o.flight_motion.is_none() && at > 252.0 =>
+                    skel.pose_crossfade(clip, at, 200.0, (at - 252.0) / 8.0),
+                _ => skel.pose(Mat4::IDENTITY, anim),
+            };
+            if o.anim == libpikmin::onion::OnionAnim::Hover {
+                let rest = skel.pose(Mat4::IDENTITY, self.onion_anims.get(1).map(|(_, a)| (a, 0.0)));
+                let offset = rest.joints[1].w_axis.truncate() - pose.joints[1].w_axis.truncate();
+                rebase_pose(&mut pose, offset);
+            }
             let frame = o.colors[0].index() as f32 * 2.0;
             let inputs = move |_: usize| Inputs { frame: Some(frame), ..Default::default() };
             self.push(k, kinds::ONION, models::ONION, o.pos, Quat::IDENTITY, pose, &inputs, 1.0, 0);

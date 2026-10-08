@@ -128,8 +128,8 @@ fn the_view_poses_a_sim_through_the_abi() {
     unsafe {
         let view = pik_view_new(dir.as_ptr(), 0);
         assert!(!view.is_null());
-        assert_eq!(pik_view_model_count(view), 15);
-        for m in 0..15 {
+        assert_eq!(pik_view_model_count(view), 16);
+        for m in 0..16 {
             let mut info = PikModelInfo::default();
             assert_eq!(pik_view_model(view, m, &mut info), 1);
             let mut batches = vec![PikBatch::default(); info.batch_count as usize];
@@ -361,6 +361,44 @@ fn calling_pikmin_out_of_an_onion_and_putting_them_back() {
         pik_sim_onions(sim, on.as_mut_ptr(), 1);
         assert_eq!(on[0].stored[red as usize], 4);
         assert_eq!(pik_sim_onion_in_reach(sim, 99), -1);
+        assert_eq!(pik_sim_poisoned(sim), 0);
+        pik_sim_free(sim);
+    }
+}
+
+#[test]
+fn unified_onion_flight_preserves_every_colour_and_blocks_transfers() {
+    unsafe {
+        let sim = pik_sim_new(std::ptr::null(), 17);
+        let ground = PikVec3::default();
+        let c = pik_sim_add_captain(sim, &ground) as u32;
+        let o = pik_sim_add_onion(sim, &ground, 7) as u32;
+        for color in 0..3 { pik_sim_store_in_onion(sim, o, color, 0, 4); }
+        let air = PikVec3 { x: 20.0, y: 150.0, z: 40.0 };
+        for color in 0..3 {
+            pik_sim_set_onion_color(sim, o, color);
+            pik_sim_set_onion_pose(sim, o, &air, 1);
+            let mut onion = PikOnion::default();
+            assert_eq!(pik_sim_onions(sim, &mut onion, 1), 1);
+            assert_eq!((onion.colors, onion.anim, onion.stored), (7, 6, [4; 3]));
+            assert_eq!(pik_sim_onion_in_reach(sim, c), -1);
+            assert_eq!(pik_sim_onion_call_out(sim, c, o, color, 1), 0);
+        }
+        pik_sim_set_onion_pose(sim, 999, &ground, 0);
+        pik_sim_set_onion_color(sim, o, 99);
+        pik_sim_set_onion_pose(sim, o, &ground, 0);
+        assert_eq!(pik_sim_onion_in_reach(sim, c), o as i32);
+        for color in 0..3 { assert_eq!(pik_sim_onion_call_out(sim, c, o, color, 1), 1); }
+        let mut world = World::default();
+        let h = host(&mut world);
+        for _ in 0..300 { pik_sim_advance(sim, &h, 1.0 / 30.0); }
+        for color in 0..3 {
+            let mut counts = PikOnionCounts::default();
+            pik_sim_onion_counts(sim, o, c, color, &mut counts);
+            assert_eq!((counts.in_squad, counts.in_onion), (1, 3));
+        }
+        pik_sim_set_onion_pose(sim, o, &air, 1);
+        for color in 0..3 { assert_eq!(pik_sim_onion_put_away(sim, c, o, color, 1), 0); }
         assert_eq!(pik_sim_poisoned(sim), 0);
         pik_sim_free(sim);
     }

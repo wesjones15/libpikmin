@@ -498,6 +498,16 @@ impl ShipAnimator {
         self.landing.is_some()
     }
 
+    /// Drive the reverse rocket motion from a host's normalized landing clock. Advancing
+    /// by the difference retains touchdown/engine cues and the eight animation contexts.
+    pub fn land_progress(&mut self, progress: f32, cues: &mut Vec<ShipCue>) {
+        let end = self.ship.get(self.ctx[0].motion).and_then(|i| i.keys.last()).copied().unwrap_or(0) as f32;
+        if let Some(left) = self.landing {
+            let target = end * (1.0 - progress.clamp(0.0, 1.0));
+            self.update((left - target).max(0.0) / SPEED, cues);
+        }
+    }
+
     /// The flames go out where they lit on the way up (the motion's key 0).
     fn touchdown_frame(&self) -> f32 {
         let info = self.ship.get(self.ctx[0].motion);

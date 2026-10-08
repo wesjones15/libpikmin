@@ -121,7 +121,7 @@ impl Sim {
     /// Sends up to `n` of the captain's squad Pikmin of `color` into the Onion. Returns how
     /// many were sent.
     pub fn onion_put_away(&mut self, captain: CaptainId, onion: OnionId, color: PikiColor, n: u32) -> u32 {
-        if !self.onions[onion.0 as usize].accepts(color) {
+        if !self.onions[onion.0 as usize].accepts(color) || !self.onions[onion.0 as usize].grounded() {
             return 0;
         }
         let ids: Vec<_> = self.squad_of_color(captain, color).into_iter().take(n as usize).collect();
@@ -143,6 +143,7 @@ impl Sim {
     /// Asks the Onion to let up to `n` Pikmin of `color` out to join `captain`. Limited by the
     /// stock and the field limit. Returns how many will come out.
     pub fn onion_call_out(&mut self, captain: CaptainId, onion: OnionId, color: PikiColor, n: u32) -> u32 {
+        if !self.onions[onion.0 as usize].accepts(color) || !self.onions[onion.0 as usize].grounded() { return 0; }
         let k = self.onion_counts(onion, captain, color).can_call_out().min(n);
         let o = &mut self.onions[onion.0 as usize];
         for _ in 0..k {

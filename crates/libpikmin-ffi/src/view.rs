@@ -462,6 +462,7 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
             let tick = s.sim.tick();
             if let Some(a) = v.audio.as_mut() {
                 a.set_volume(f.volume);
+                for command in std::mem::take(&mut v.view.demo_sounds) { a.demo(command); }
                 // `SeSystem::update` runs once per game frame (30 Hz): once per tick here.
                 if v.last_tick != Some(tick) {
                     let me = usize::try_from(f.listener).ok().and_then(|i| s.sim.captains().get(i));
@@ -469,11 +470,14 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
                     let whistling = me.is_some_and(|c| matches!(c.whistle, WhistleState::Calling { .. }));
                     let cam = listener_view(f.eye.into(), f.forward.into(), f.up.into());
                     let sprouts = std::mem::take(&mut v.view.animator.sprout_sounds);
-                    let scene = libpikmin_present::audio::SceneSounds { sprouts: &sprouts, ship: &[] };
+                    let ship = std::mem::take(&mut v.view.ship_sounds);
+                    let scene = libpikmin_present::audio::SceneSounds { sprouts: &sprouts, ship: &ship };
                     a.frame(cam, at, &s.sim, creatures, whistling, scene);
                 }
             } else {
                 v.view.animator.sprout_sounds.clear();
+                v.view.ship_sounds.clear();
+                v.view.demo_sounds.clear();
             }
             v.last_tick = Some(tick);
         })

@@ -249,3 +249,110 @@ fn cursors_can_be_hidden() {
     assert_eq!(count(kinds::CAPTAIN), 1);
     assert_eq!(count(kinds::CURSOR) + count(kinds::MARKER), 0);
 }
+
+#[test]
+fn dolphin_and_unified_onion_draw_in_flight_and_after_landing_without_parts() {
+    let Some(assets) = assets() else { return };
+    let mut view = View::load(&assets).unwrap();
+    let mut sim = Sim::new(Params::default(), 13);
+    let ship = sim.add_ship(Vec3::ZERO, Vec3::Z * 100.0, Vec3::Y * 74.0);
+    let onion = sim.add_onion(Vec3::ZERO, &[PikiColor::Blue, PikiColor::Red, PikiColor::Yellow]);
+    for colour in [PikiColor::Red, PikiColor::Yellow, PikiColor::Blue] {
+        sim.set_onion_color(onion, colour);
+        assert_eq!(sim.onions()[onion.0 as usize].colors.len(), 3);
+        assert_eq!(sim.onions()[onion.0 as usize].colors[0], colour);
+        for flying in [true, false] {
+            let pos = if flying { Vec3::Y * 500.0 } else { Vec3::ZERO };
+            sim.set_onion_pose(ship, pos, flying);
+            sim.set_onion_pose(onion, pos + Vec3::X * 200.0, flying);
+            sim.step(&mut FlatHost);
+            view.update(&sim, 1.0, TICK_DT);
+            let d = view.draws.iter().find(|d| d.kind == kinds::SHIP).unwrap();
+            assert_eq!(d.model, models::SHIP);
+            assert_eq!(d.pos, pos);
+            assert!(sim.onions()[ship.0 as usize].ship.as_ref().unwrap().parts.is_empty());
+            assert_eq!(view.draws.iter().filter(|d| d.kind == kinds::ONION).count(), 1);
+            assert!(view.positions.iter().all(|p| p.is_finite()));
+            let vertices = &view.positions[d.first_vertex as usize..][..view.models[models::SHIP as usize].vertex_count];
+            let bounds = vertices.iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+            assert!((bounds.1 - bounds.0).max_element() > 50.0, "Dolphin must have visible geometry");
+        }
+    }
+}
+
+#[test]
+fn host_flight_uses_articulated_disc_clips_without_cinematic_position_drift() {
+    let Some(assets) = assets() else { return };
+    let mut view = View::load(&assets).unwrap();
+    let mut sim = Sim::new(Params::default(), 13);
+    let onion = sim.add_onion(Vec3::ZERO, &[PikiColor::Blue, PikiColor::Red, PikiColor::Yellow]);
+    let ship = sim.add_ship(Vec3::ZERO, Vec3::Z * 100.0, Vec3::Y * 74.0);
+    let air = Vec3::Y * 150.0;
+    let vertices = |view: &View, kind| {
+        let draw = view.draws.iter().find(|d| d.kind == kind).unwrap();
+        view.positions[draw.first_vertex as usize..][..view.models[draw.model as usize].vertex_count].to_vec()
+    };
+    for colour in [PikiColor::Blue, PikiColor::Red, PikiColor::Yellow] {
+        sim.set_onion_color(onion, colour);
+        sim.set_onion_pose(onion, air, true);
+        view.update(&sim, 1.0, TICK_DT);
+        let first = vertices(&view, kinds::ONION);
+        for _ in 0..140 { // crosses the flight-loop seam twice
+            view.update(&sim, 1.0, TICK_DT);
+            assert!(view.positions.iter().all(|v| v.is_finite()));
+        }
+        let later = vertices(&view, kinds::ONION);
+        assert!(first.iter().zip(&later).any(|(a, b)| a.distance(*b) > 0.2), "flying Onion must animate");
+        assert!(later.iter().all(|v| v.length() < 600.0), "flight must not climb thousands of cinematic units");
+        let mut landing = Vec::new();
+        for progress in [0.0, 0.4, 0.8, 1.0] {
+            sim.set_onion_flight_motion(onion, true, progress);
+            view.update(&sim, 1.0, TICK_DT);
+            let player = view.animator.players[&libpikmin_present::animator::onion_key(onion.0 as usize)];
+            assert_eq!(player.anim, libpikmin::anim::ANIM_GOAL_LAND + colour.index());
+            landing.push(vertices(&view, kinds::ONION));
+        }
+        assert!(landing[0].iter().zip(&landing[2]).any(|(a, b)| a.distance(*b) > 1.0), "landing must deploy legs");
+    }
+    let mut frames = Vec::new();
+    for progress in [0.0, 0.2, 0.6, 0.9] {
+        sim.set_onion_pose(ship, air, true);
+        sim.set_onion_flight_motion(ship, true, progress);
+        for _ in 0..10 { view.update(&sim, 1.0, TICK_DT); }
+        frames.push(vertices(&view, kinds::SHIP));
+        assert!(view.positions.iter().all(|v| v.is_finite()));
+        view.particles(Vec3::X, Vec3::Y);
+        if progress == 0.2 { assert!(!view.particles.quads.is_empty(), "rocket flames must render"); }
+    }
+    assert!(frames[0].iter().zip(&frames[2]).any(|(a, b)| a.distance(*b) > 0.2), "rocket landing must animate its skeleton");
+    assert!(frames.iter().flatten().all(|v| v.length() < 1000.0), "host supplies rocket travel exactly once");
+    assert!(view.demo_sounds.iter().any(Option::is_some), "rocket sound starts");
+    sim.set_onion_pose(ship, Vec3::ZERO, false);
+    view.update(&sim, 1.0, TICK_DT);
+    assert!(view.demo_sounds.contains(&None), "rocket sound stops at touchdown");
+}
+
+#[test]
+fn dolphin_touches_ground_without_inverting_at_touchdown() {
+    let Some(assets) = assets() else { return };
+    let mut view = View::load(&assets).unwrap();
+    let mut sim = Sim::new(Params::default(), 13);
+    let ship = sim.add_ship(Vec3::ZERO, Vec3::Z * 100.0, Vec3::Y * 74.0);
+    let vertices = |view: &View| {
+        let d = view.draws.iter().find(|d| d.kind == kinds::SHIP).unwrap();
+        view.positions[d.first_vertex as usize..][..view.models[d.model as usize].vertex_count].to_vec()
+    };
+    sim.set_onion_pose(ship, Vec3::ZERO, true);
+    sim.set_onion_flight_motion(ship, true, 0.9999);
+    view.update(&sim, 1.0, TICK_DT);
+    let before = vertices(&view);
+    sim.set_onion_pose(ship, Vec3::ZERO, false);
+    for _ in 0..60 {
+        view.update(&sim, 1.0, TICK_DT);
+        let after = vertices(&view);
+        let bottom = after.iter().map(|v| v.y).fold(f32::INFINITY, f32::min);
+        assert!(bottom.abs() < 0.05, "rocket bottom must touch terrain: {bottom}");
+        let jump = before.iter().zip(&after).map(|(a,b)| a.distance(*b)).fold(0.0, f32::max);
+        assert!(jump < 0.1, "touchdown must retain the upright pose: {jump}");
+    }
+}

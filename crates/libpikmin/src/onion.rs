@@ -25,6 +25,8 @@ pub struct SproutId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OnionAnim {
     Idle,
+    /// Host-controlled airborne following. Storage and deliveries wait until grounded.
+    Hover,
     /// `GOAL_Effect`: "suction" plays after something is sucked in.
     Suction {
         frame: f32,
@@ -59,6 +61,9 @@ pub struct Onion {
     pub exits: VecDeque<(PikiColor, crate::CaptainId)>,
     pub(crate) exit_timer: f32,
     pub anim: OnionAnim,
+    /// Optional host-timed transition (landing, normalized progress). The host moves the
+    /// object; presentation removes the disc clip's large cinematic travel.
+    pub flight_motion: Option<(bool, f32)>,
     /// Seeds waiting to be launched (`mSAICtx.mCurrAnimId`).
     pub queue: VecDeque<PikiColor>,
     /// Pending fireworks from negative seed counts (`mSAICtx.mCounter`).
@@ -103,7 +108,7 @@ impl Onion {
     /// On the ground: it can be used, delivered to and called from. Not while taking off,
     /// away, or landing.
     pub fn grounded(&self) -> bool {
-        !matches!(self.anim, OnionAnim::TakeOff { .. } | OnionAnim::Away | OnionAnim::Landing { .. })
+        !matches!(self.anim, OnionAnim::Hover | OnionAnim::TakeOff { .. } | OnionAnim::Away | OnionAnim::Landing { .. })
     }
 
     /// Where carriers bring things (`getGoalPos`).
@@ -203,6 +208,7 @@ impl Sim {
             exits: VecDeque::new(),
             exit_timer: 0.0,
             anim: OnionAnim::Idle,
+            flight_motion: None,
             queue: VecDeque::new(),
             fireworks: 0,
             ship: None,
@@ -222,6 +228,7 @@ impl Sim {
             exits: VecDeque::new(),
             exit_timer: 0.0,
             anim: OnionAnim::Idle,
+            flight_motion: None,
             queue: VecDeque::new(),
             fireworks: 0,
             ship: Some(Ship { goal, suck, parts: Vec::new() }),
@@ -231,6 +238,56 @@ impl Sim {
 
     pub fn onions(&self) -> &[Onion] {
         &self.onions
+    }
+
+    /// Host-controlled flight/landing. Takeoff resolves climbers before moving the goal;
+    /// stock, queued exits and seeds survive the flight. Hosts supply terrain-safe poses.
+    pub fn set_onion_pose(&mut self, onion: OnionId, pos: Vec3, flying: bool) {
+        if !pos.is_finite() || self.onions.get(onion.0 as usize).is_none() { return; }
+        if flying && self.onions[onion.0 as usize].grounded() {
+            self.onion_take_off(onion);
+            // Finish exits at the old feet before moving the Onion's airborne legs.
+            for p in &mut self.pikis {
+                if let PikiState::Exit { onion: on, leg, .. } = p.state
+                    && on == onion {
+                    p.pos = self.onions[onion.0 as usize].pos + crate::onion_menu::LEG_FEET[leg as usize % 3];
+                    p.on_ground = true;
+                    p.state = if p.captain.is_some() { PikiState::squad() } else { PikiState::Idle };
+                }
+            }
+        }
+        let o = &mut self.onions[onion.0 as usize];
+        o.flight_motion = None;
+        let delta = pos - o.pos;
+        o.pos = pos;
+        if let Some(s) = o.ship.as_mut() { s.goal += delta; s.suck += delta; }
+        if flying {
+            o.anim = OnionAnim::Hover;
+        } else if !o.grounded() {
+            o.anim = if !o.queue.is_empty() || o.fireworks > 0 {
+                OnionAnim::Emitting { frame: 0.0 }
+            } else { OnionAnim::Idle };
+            self.events.push(Event::OnionLanded { onion });
+        }
+    }
+
+    /// The first accepted colour controls only the model/animation palette. Reordering
+    /// leaves the accepted set and every colour's stock unchanged.
+    pub fn set_onion_color(&mut self, onion: OnionId, color: PikiColor) {
+        if let Some(o) = self.onions.get_mut(onion.0 as usize)
+            && let Some(index) = o.colors.iter().position(|c| *c == color) {
+            o.colors.swap(0, index);
+        }
+    }
+
+    /// Select a disc transition while the host supplies a safe trajectory. This never
+    /// makes an airborne goal usable: landing must finish through set_onion_pose.
+    pub fn set_onion_flight_motion(&mut self, onion: OnionId, landing: bool, progress: f32) {
+        if !progress.is_finite() { return; }
+        if let Some(o) = self.onions.get_mut(onion.0 as usize)
+            && o.anim == OnionAnim::Hover {
+            o.flight_motion = Some((landing, progress.clamp(0.0, 1.0)));
+        }
     }
 
     pub fn sprouts(&self) -> impl Iterator<Item = &Sprout> {
@@ -345,7 +402,7 @@ impl Sim {
             let o = &mut self.onions[oi];
             let colour = o.colors.first().map_or(0, |c| c.index());
             match o.anim {
-                OnionAnim::Idle | OnionAnim::Away => {}
+                OnionAnim::Idle | OnionAnim::Away | OnionAnim::Hover => {}
                 OnionAnim::TakeOff { frame } => {
                     let f = frame + anim.fps * dt;
                     let end = if o.ship.is_some() { anim.ship_takeoff } else { anim.goal_takeoff[colour] };

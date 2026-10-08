@@ -22,6 +22,8 @@ pub type Posed<'a> = Option<(&'a Anim, f32)>;
 pub enum Clock {
     /// Use the sim's own counter.
     Sim(f32),
+    /// Normalized host time over the disc clip's key range.
+    Progress(f32),
     /// Loop over the anim keys at this many frames per second.
     Loop(f32),
     /// Play once and hold the last frame.
@@ -29,6 +31,8 @@ pub enum Clock {
     /// Start at this frame, then loop over the motion's loop keys (`Pick` while carrying:
     /// `ActTransport` starts it at 11).
     LoopFrom(f32, f32),
+    /// Repeat only an airborne section of a cinematic clip.
+    LoopRange(f32, f32, f32),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -77,7 +81,7 @@ pub fn advance_index<'a>(
     let start = *info.keys.first().unwrap_or(&0) as f32;
     let end = (*info.keys.last().unwrap_or(&0) as f32).max(start);
     let first = match clock {
-        Clock::LoopFrom(_, from) => from,
+        Clock::LoopFrom(_, from) | Clock::LoopRange(_, from, _) => from,
         _ => start,
     };
     let p = players.entry(key).or_insert(Player {
@@ -91,6 +95,8 @@ pub fn advance_index<'a>(
         };
     }
     match clock {
+        Clock::Progress(t) => p.frame = start + (end - start) * t.clamp(0.0, 1.0),
+        Clock::LoopRange(fps, lo, hi) => p.frame = lo + (p.frame - lo + fps * dt).rem_euclid(hi - lo),
         Clock::Sim(f) => p.frame = f,
         Clock::Loop(fps) => {
             p.frame += fps * dt;
@@ -280,8 +286,13 @@ pub fn captain_motion(params: &Params, c: &Captain, throwing: bool) -> (Motion, 
 /// motions.
 pub fn onion_motion(o: &Onion) -> Option<(usize, Clock)> {
     let colour = o.colors[0].index();
+    if let Some((landing, progress)) = o.flight_motion {
+        return Some(((if landing { libpikmin::anim::ANIM_GOAL_LAND } else { libpikmin::anim::ANIM_GOAL_TAKEOFF }) + colour,
+            Clock::Progress(progress)));
+    }
     Some(match o.anim {
         OnionAnim::Idle => (1, Clock::Loop(30.0)),
+        OnionAnim::Hover => (libpikmin::anim::ANIM_GOAL_TAKEOFF + colour, Clock::LoopRange(30.0, 200.0, 260.0)),
         OnionAnim::Suction { frame } => (2, Clock::Sim(frame)),
         OnionAnim::Emitting { frame } => (0, Clock::Sim(frame)),
         OnionAnim::TakeOff { frame } => (libpikmin::anim::ANIM_GOAL_TAKEOFF + colour, Clock::Sim(frame)),
@@ -360,21 +371,7 @@ impl Animator {
         let (motion_idx, clock) = onion_motion(o)?;
         let key = onion_key(index);
         let before = self.players.get(&key).filter(|p| p.anim == motion_idx).map(|p| p.frame);
-        let anim = set.get(motion_idx).map(|(info, a)| {
-            let p = self.players.entry(key).or_insert(Player {
-                anim: motion_idx,
-                frame: 0.0,
-            });
-            if p.anim != motion_idx {
-                *p = Player { anim: motion_idx, frame: 0.0 };
-            }
-            let end = *info.keys.last().unwrap_or(&0) as f32;
-            p.frame = match clock {
-                Clock::Sim(f) => f,
-                _ => (p.frame + 30.0 * dt) % end.max(1.0),
-            };
-            (a, p.frame.min(a.frames.saturating_sub(1) as f32))
-        });
+        let anim = advance_index(&mut self.players, key, set, motion_idx, clock, dt);
         Some((motion_idx, anim, before))
     }
 

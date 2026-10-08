@@ -108,6 +108,27 @@ impl Skeleton {
         self.pose_by(root, |_| anim)
     }
 
+    /// Blend two samples of the same clip for a seamless extracted flight loop.
+    pub fn pose_crossfade(&self, anim: &Anim, frame: f32, next: f32, weight: f32) -> Pose {
+        let weight = weight.clamp(0.0, 1.0);
+        let mut pose = self.pose(Mat4::IDENTITY, Some((anim, frame)));
+        let other = self.pose(Mat4::IDENTITY, Some((anim, next)));
+        for (a, b) in pose.joints.iter_mut().zip(&other.joints) {
+            let (sa, ra, ta) = a.to_scale_rotation_translation();
+            let (sb, rb, tb) = b.to_scale_rotation_translation();
+            *a = Mat4::from_scale_rotation_translation(sa.lerp(sb, weight), ra.slerp(rb, weight), ta.lerp(tb, weight));
+        }
+        for (matrix, weights) in pose.envelopes.iter_mut().zip(&self.envelopes) {
+            *matrix = Mat4::ZERO;
+            for &(joint, weight) in weights {
+                if let (Some(jm), Some(ib)) = (pose.joints.get(joint as usize), self.inverse_bind.get(joint as usize)) {
+                    *matrix += *jm * *ib * weight;
+                }
+            }
+        }
+        pose
+    }
+
     /// Like [`pose`](Self::pose) with each joint's animation and frame chosen by `anim`
     /// (`BaseShape::updateAnim` reads joint `i` from `mAnimOverrides[i]`).
     pub fn pose_by<'a>(&self, root: Mat4, anim: impl Fn(usize) -> Option<(&'a Anim, f32)>) -> Pose {
