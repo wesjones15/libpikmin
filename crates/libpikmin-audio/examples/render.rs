@@ -110,6 +110,8 @@ fn main() {
         );
         write_wav(&out.join(format!("bgm_{bgm}.wav")), DAC_RATE as u32, &v);
     }
+    // Hosts can render a short arrival sting without also exporting the SFX catalogue.
+    if args.any(|a| a == "--bgm-only") { return; }
 
     for name in SOUNDS {
         let mut s = SoundSystem::new(data.clone(), tables.clone());
