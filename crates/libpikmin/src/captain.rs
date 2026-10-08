@@ -100,6 +100,9 @@ pub struct Captain {
     pub damage_frames: f32,
     /// Health ran out (`NaviDeadState`) or the host put him down.
     pub down: bool,
+    /// Multiplies his run speed: the host's own speed stat over its base (items, buffs).
+    /// 1 in Pikmin.
+    pub speed_scale: f32,
     rearrange_pending: bool,
     pub(crate) input: CaptainInput,
     pub(crate) pressed: Pressed,
@@ -145,6 +148,7 @@ impl Captain {
             health,
             damage_frames: 0.0,
             down: false,
+            speed_scale: 1.0,
             rearrange_pending: false,
             input: CaptainInput::default(),
             pressed: Pressed::default(),
@@ -253,7 +257,7 @@ impl Sim {
         let stick_mag = stick.length();
 
         // canNaviRunFast() always returns true in the shipped game, so it's always mRunSpeed.
-        c.target_vel = stick * navi.run_speed;
+        c.target_vel = stick * (navi.run_speed * c.speed_scale);
 
         // The cursor leads the captain in the stick direction, sliding along its max radius.
         let mut cursor_vel = stick.normalize_or_zero() * navi.cursor_move_speed;

@@ -122,6 +122,12 @@ impl Sim {
         c.input = input;
     }
 
+    /// Scales `captain`'s run speed (see [`Captain::speed_scale`]); clamped to 0.1..10.
+    pub fn set_captain_speed(&mut self, captain: CaptainId, scale: f32) {
+        let scale = if scale.is_finite() { scale.clamp(0.1, 10.0) } else { 1.0 };
+        self.captains[captain.0 as usize].speed_scale = scale;
+    }
+
     /// The creature shakes off every Pikmin latched onto it (call when its shake attack lands).
     pub fn shake_off(&mut self, creature: CreatureId) {
         self.pending_shakes.push(creature);

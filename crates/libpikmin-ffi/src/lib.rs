@@ -740,6 +740,22 @@ pub unsafe extern "C" fn pik_sim_set_input(sim: *mut PikSim, captain: u32, input
     }
 }
 
+/// Scales `captain`'s run speed by `scale` (the host's move speed stat over its base).
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_captain_speed(sim: *mut PikSim, captain: u32, scale: f32) {
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, (), |s| {
+            if (captain as usize) < s.sim.captains().len() {
+                s.sim.set_captain_speed(CaptainId(captain), scale);
+            }
+        })
+    }
+}
+
 /// Spawns a Pikmin of colour `color` ([`PikiColor::index`]) at `pos`, straight into
 /// `captain`'s squad unless that's -1. Returns its id, or -1 at the field limit.
 ///

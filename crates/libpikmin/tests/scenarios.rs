@@ -165,6 +165,30 @@ fn squad_follows_walking_captain() {
 }
 
 #[test]
+fn speed_scale_speeds_up_the_captain() {
+    let walk = |scale: f32| {
+        let mut sim = Sim::new(retail_params(), 7);
+        let mut host = TestHost::default();
+        let c = sim.add_captain(Vec3::ZERO);
+        sim.set_captain_speed(c, scale);
+        sim.set_input(
+            c,
+            CaptainInput {
+                stick: Vec2::new(0.0, 1.0),
+                ..Default::default()
+            },
+        );
+        run(&mut sim, &mut host, 2.0, &mut Vec::new());
+        sim.captain(c).pos.z
+    };
+    let (normal, fast) = (walk(1.0), walk(1.5));
+    assert!(
+        (fast / normal - 1.5).abs() < 0.05,
+        "1.5x speed walked {fast} against {normal}"
+    );
+}
+
+#[test]
 fn whistle_only_calls_after_full_expansion_and_within_radius() {
     let mut sim = Sim::new(retail_params(), 1);
     let mut host = TestHost::default();
