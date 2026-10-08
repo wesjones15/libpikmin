@@ -41,6 +41,11 @@ pub use view::*;
 pub const PIK_ABI_VERSION: u32 = 8;
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
+    unsafe { with(sim, 0, |s| s.sim.recruit_to_pellet(libpikmin::carry::PelletId(pellet), Some(defeated), range) as u32) }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_lock_target(sim: *mut PikSim, captain: u32, target: u64, enabled: u8) {
     unsafe { with(sim, (), |s| s.sim.set_lock_target(CaptainId(captain), (enabled != 0).then_some(target))) }
 }

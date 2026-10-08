@@ -309,6 +309,9 @@ impl Sim {
             }
             // Pellets and corpses on the ground are solid too.
             for pel in &self.pellets {
+                // Docking slots lie on the pellet radius, inside its normal body
+                // separation margin. Do not push a volunteer away from its own slot.
+                if matches!(p.state, PikiState::Carry(c) if c.pellet == pel.id) { continue; }
                 if matches!(
                     pel.state,
                     crate::carry::PelletState::Idle | crate::carry::PelletState::Carried { .. }

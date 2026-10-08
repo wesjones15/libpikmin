@@ -215,6 +215,29 @@ impl Sim {
         &self.pellets
     }
 
+    /// Host opt-in: nearby free/squad Pikmin and the defeated enemy's attackers
+    /// volunteer for its drop. Never steal held Pikmin or workers on another job.
+    pub fn recruit_to_pellet(&mut self, pellet: PelletId, defeated: Option<CreatureId>, range: f32) -> usize {
+        let Some(pel) = self.pellets.get(pellet.0 as usize) else { return 0; };
+        let pos = pel.pos;
+        let limit = pel.slots.len();
+        let mut candidates: Vec<_> = self.pikis.iter().enumerate()
+            .filter(|(_, p)| p.is_alive() && !p.dismissed && match p.state {
+                PikiState::Idle | PikiState::Squad { .. } => true,
+                PikiState::Attack(a) => defeated == Some(a.target),
+                _ => false,
+            })
+            .filter(|(_, p)| p.pos.distance(pos) <= range)
+            .map(|(i,p)| (i,p.pos.distance_squared(pos))).collect();
+        candidates.sort_by(|a,b| a.1.total_cmp(&b.1));
+        let mut recruited = 0;
+        for (i, _) in candidates.into_iter().take(limit) {
+            self.leave_current(self.pikis[i].id);
+            if self.start_carry(i, pellet) { recruited += 1; }
+        }
+        recruited
+    }
+
     pub fn pellet(&self, id: PelletId) -> &Pellet {
         &self.pellets[id.0 as usize]
     }
@@ -577,7 +600,12 @@ impl Sim {
             return self.stop_carry(pi);
         }
         let id = self.pikis[pi].id;
-        let slot_pos = pel.slot_world(c.slot);
+        let mut slot_pos = pel.slot_world(c.slot);
+        // Carry slots follow terrain rather than the centre's horizontal plane. A wide
+        // pellet on a slope otherwise leaves uphill/downhill slots out of reach.
+        if let Some(g) = host.ground_height(slot_pos + Vec3::Y * (pel.desc.radius + 20.)) {
+            slot_pos.y = g;
+        }
         let centre = pel.pos;
         let carried = matches!(pel.state, PelletState::Carried { .. });
 

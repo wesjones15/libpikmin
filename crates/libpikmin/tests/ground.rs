@@ -64,3 +64,31 @@ fn a_pikmin_dropped_from_high_up_lands() {
     let p = sim.piki(id);
     assert!(p.pos.y.abs() < 1.0, "fell through the floor: {:?}", p.pos);
 }
+
+#[test]
+fn recruited_carriers_deliver_numbered_pellets_to_a_landed_onion_on_slopes() {
+    use libpikmin::carry::{PelletDesc, PelletState};
+    for slope in [0., 0.4, -0.4] {
+        for number in [1, 5, 10] {
+            let params = Params::default();
+            let mut sim = Sim::new(params.clone(), 33);
+            let mut host = RampHost { slope };
+            let goal = Vec3::new(400., host.surface(400.), 0.);
+            let onion = sim.add_onion(goal, &[PikiColor::Red, PikiColor::Blue, PikiColor::Yellow]);
+            let at = Vec3::new(100., host.surface(100.), 0.);
+            let captain = sim.add_captain(Vec3::new(-100., 0., 0.));
+            for i in 0..number * 2 {
+                let p = at + Vec3::new(0.,0., 50. + i as f32 * 8.);
+                sim.spawn_piki_in_squad(PikiColor::Red, p, captain);
+            }
+            let pellet = sim.spawn_pellet(PelletDesc::numbered(&params, number, PikiColor::Red, at, 0.));
+            assert!(sim.recruit_to_pellet(pellet, None, 500.) >= number as usize);
+            for _ in 0..1200 {
+                sim.set_onion_pose(onion, goal, false); // RoR2 sends its planted pose each tick.
+                sim.step(&mut host);
+            }
+            assert!(matches!(sim.pellet(pellet).state, PelletState::Gone),
+                "slope {slope}, number {number}: {:?} carriers {:?}", sim.pellet(pellet), sim.pikis().iter().map(|p|&p.state).collect::<Vec<_>>());
+        }
+    }
+}
