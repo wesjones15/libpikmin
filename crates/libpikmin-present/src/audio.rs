@@ -288,6 +288,12 @@ impl Audio {
             Event::Latched { .. } => {
                 s.play("SE_PIKI_ATTACHENEMY", Vec3::ZERO);
             }
+            // `InteractFlick::actPiki` (interactBattle.cpp): `SE_PIKI_DAMAGED` on the flicking
+            // creature's emitter as the Pikmin flies off.
+            Event::KnockedOff { piki, creature } => {
+                let owner = creature.map_or(piki_owner(piki), creature_owner);
+                s.play_from(owner, "SE_PIKI_DAMAGED", piki_pos(piki));
+            }
             // `ActAttack` (aiAttack.cpp): the attack voice on the target's emitter.
             Event::Hit { creature, .. } => {
                 s.play_from(creature_owner(creature), "SE_PIKI_ATTACK_VOICE", teki_pos(creature));

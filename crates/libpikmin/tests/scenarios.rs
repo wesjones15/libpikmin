@@ -597,6 +597,91 @@ fn shake_off_knocks_pikmin_down_then_they_get_up() {
     assert!(!matches!(sim.piki(stuck).state, PikiState::Knocked { .. }));
 }
 
+fn latched(sim: &Sim, target: CreatureId) -> Vec<PikiId> {
+    sim.pikis()
+        .iter()
+        .filter(|p| p.state.latched_to() == Some(target))
+        .map(|p| p.id)
+        .collect()
+}
+
+#[test]
+fn shake_protection_spares_fresh_latches_without_a_delayed_shake() {
+    let mut sim = Sim::new(retail_params(), 11);
+    sim.set_shake_protection(2.0);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    squad(&mut sim, c, 3, Vec3::ZERO);
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 2.0, &mut ev);
+    let target = creature_at_cursor(&mut sim, &mut host, c, 1e6);
+    throw_once(&mut sim, &mut host, c, &mut ev);
+    run(&mut sim, &mut host, 2.5, &mut ev);
+    let old = latched(&sim, target);
+    assert_eq!(old.len(), 1, "the first Pikmin should be on");
+    throw_once(&mut sim, &mut host, c, &mut ev);
+    // The second throw waits for the grab, so it lands later.
+    run(&mut sim, &mut host, 1.0, &mut ev);
+    let new: Vec<_> = latched(&sim, target).into_iter().filter(|p| !old.contains(p)).collect();
+    assert_eq!(new.len(), 1, "the second Pikmin should be on");
+    let (old, new) = (old[0], new[0]);
+
+    // On for about 5 s and a fraction of a second: only the first goes.
+    sim.shake_off(target);
+    run(&mut sim, &mut host, TICK_DT, &mut ev);
+    assert!(matches!(sim.piki(old).state, PikiState::Knocked { .. }));
+    assert_eq!(sim.piki(new).state.latched_to(), Some(target));
+    // Its protection runs out, and nothing happens until the creature attacks again.
+    run(&mut sim, &mut host, 2.0, &mut ev);
+    assert_eq!(sim.piki(new).state.latched_to(), Some(target));
+    sim.shake_off(target);
+    run(&mut sim, &mut host, TICK_DT, &mut ev);
+    assert!(matches!(sim.piki(new).state, PikiState::Knocked { .. }));
+}
+
+/// The whole round trip with a full swarm: thrown, latched, shaken off by age, up again and
+/// back in the squad once the creature is gone.
+#[test]
+fn hundred_pikmin_latch_shake_and_rejoin() {
+    let mut sim = Sim::new(retail_params(), 3);
+    sim.set_shake_protection(2.0);
+    sim.set_auto_rejoin(true);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    squad(&mut sim, c, 100, Vec3::ZERO);
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 3.0, &mut ev);
+    let target = creature_at_cursor(&mut sim, &mut host, c, 1e9);
+    for _ in 0..40 {
+        sim.set_input(c, CaptainInput { throw: true, ..Default::default() });
+        run(&mut sim, &mut host, 2.0 * TICK_DT, &mut ev);
+        sim.set_input(c, CaptainInput::default());
+        run(&mut sim, &mut host, 0.25, &mut ev);
+    }
+    run(&mut sim, &mut host, 1.0, &mut ev);
+    let on = latched(&sim, target);
+    assert!(on.len() >= 10, "only {} latched", on.len());
+    let now = sim.tick();
+    let protected = |sim: &Sim, p: PikiId| now - sim.piki(p).latched_at < (2.0 / TICK_DT).round() as u64;
+    let fresh: Vec<_> = on.iter().copied().filter(|&p| protected(&sim, p)).collect();
+    assert!(!fresh.is_empty() && fresh.len() < on.len(), "want a mix of ages: {} fresh of {}", fresh.len(), on.len());
+
+    sim.shake_off(target);
+    run(&mut sim, &mut host, TICK_DT, &mut ev);
+    for &p in &on {
+        let knocked = matches!(sim.piki(p).state, PikiState::Knocked { .. });
+        assert_eq!(knocked, !fresh.contains(&p), "Pikmin {:?}: {:?}", p, sim.piki(p).state);
+    }
+
+    // The creature leaves; everyone gets up and comes back.
+    host.creatures.clear();
+    run(&mut sim, &mut host, 6.0, &mut ev);
+    let alive: Vec<_> = sim.pikis().iter().filter(|p| p.is_alive()).collect();
+    let back = alive.iter().filter(|p| p.state.in_squad()).count();
+    assert_eq!(back, alive.len(), "{} of {} back; others: {:?}", back, alive.len(),
+        alive.iter().filter(|p| !p.state.in_squad()).map(|p| p.state).take(5).collect::<Vec<_>>());
+}
+
 #[test]
 fn whistled_while_down_pikmin_get_up_then_join() {
     let mut sim = Sim::new(retail_params(), 11);

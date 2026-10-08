@@ -219,6 +219,8 @@ pub struct Piki {
     pub dismissed: bool,
     /// Seconds it has stood idle.
     pub idle_time: f32,
+    /// The tick it last latched onto a creature (see [`Sim::set_shake_protection`]).
+    pub latched_at: u64,
 }
 
 impl Piki {
@@ -597,6 +599,7 @@ impl Sim {
         p.vel = Vec3::ZERO;
         p.target_vel = Vec3::ZERO;
         p.on_ground = false;
+        p.latched_at = self.tick;
         p.state = PikiState::Attack(Attack {
             target,
             mode: AttackMode::Latched {

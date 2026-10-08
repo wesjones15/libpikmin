@@ -28,6 +28,8 @@ pub struct Sim {
     pending_shakes: Vec<CreatureId>,
     /// See [`Sim::set_auto_rejoin`].
     pub(crate) auto_rejoin: bool,
+    /// See [`Sim::set_shake_protection`], in ticks.
+    shake_protection: u64,
 }
 
 impl Default for Sim {
@@ -55,6 +57,7 @@ impl Sim {
             events: Vec::new(),
             pending_shakes: Vec::new(),
             auto_rejoin: false,
+            shake_protection: 0,
         }
     }
 
@@ -100,6 +103,7 @@ impl Sim {
             blooms: 0,
             dismissed: false,
             idle_time: 0.0,
+            latched_at: 0,
         });
         Some(id)
     }
@@ -146,7 +150,18 @@ impl Sim {
         self.captains[captain.0 as usize].speed_scale = scale;
     }
 
-    /// The creature shakes off every Pikmin latched onto it (call when its shake attack lands).
+    /// Pikmin latched for less than `seconds` hold on through a shake-off; ones latched
+    /// longer fly off. A protected Pikmin isn't shaken off later: only the next shake-off
+    /// after its protection runs out can. Not Pikmin 1, where a flick takes every Pikmin
+    /// (`InteractFlick`, interactBattle.cpp); for hosts whose enemies attack far more often
+    /// than Pikmin 1's flick. 0 (the default) protects none.
+    pub fn set_shake_protection(&mut self, seconds: f32) {
+        let s = if seconds.is_finite() { seconds.clamp(0.0, 60.0) } else { 0.0 };
+        self.shake_protection = (s / crate::TICK_DT).round() as u64;
+    }
+
+    /// The creature shakes off the Pikmin latched onto it (call when its shake attack lands),
+    /// except those still protected (see [`Sim::set_shake_protection`]).
     pub fn shake_off(&mut self, creature: CreatureId) {
         self.pending_shakes.push(creature);
     }
@@ -167,7 +182,10 @@ impl Sim {
 
         for creature in std::mem::take(&mut self.pending_shakes) {
             for pi in 0..self.pikis.len() {
-                if self.pikis[pi].state.latched_to() == Some(creature) {
+                let p = &self.pikis[pi];
+                if p.state.latched_to() == Some(creature)
+                    && self.tick.saturating_sub(p.latched_at) >= self.shake_protection
+                {
                     self.knock_off(pi, creature);
                 }
             }

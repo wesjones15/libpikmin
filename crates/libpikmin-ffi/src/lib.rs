@@ -773,6 +773,17 @@ pub unsafe extern "C" fn pik_sim_set_auto_rejoin(sim: *mut PikSim, on: u8) {
     unsafe { with(sim, (), |s| s.sim.set_auto_rejoin(on != 0)) }
 }
 
+/// Pikmin latched for less than `seconds` hold on through [`pik_sim_shake_off`] (see
+/// `Sim::set_shake_protection`). 0 protects none, as in Pikmin 1.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_shake_protection(sim: *mut PikSim, seconds: f32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| s.sim.set_shake_protection(seconds)) }
+}
+
 /// Scales how far `captain`'s cursor reaches, and so how far he throws, by `scale`.
 ///
 /// # Safety
