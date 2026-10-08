@@ -471,7 +471,8 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
                     let cam = listener_view(f.eye.into(), f.forward.into(), f.up.into());
                     let sprouts = std::mem::take(&mut v.view.animator.sprout_sounds);
                     let ship = std::mem::take(&mut v.view.ship_sounds);
-                    let scene = libpikmin_present::audio::SceneSounds { sprouts: &sprouts, ship: &ship };
+                    let swarm = me.filter(|c| c.swarming).map_or(glam::Vec2::ZERO, |c| c.swarm_input());
+                    let scene = libpikmin_present::audio::SceneSounds { sprouts: &sprouts, ship: &ship, swarm };
                     a.frame(cam, at, &s.sim, creatures, whistling, scene);
                 }
             } else {

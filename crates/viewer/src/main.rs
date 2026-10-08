@@ -766,7 +766,8 @@ async fn main() {
                     None => ::glam::Mat4::look_at_rh(me.pos + ::glam::Vec3::Y * 500.0, me.pos, -::glam::Vec3::Z),
                 };
                 let whistling = matches!(me.whistle, libpikmin::captain::WhistleState::Calling { .. });
-                let scene_sounds = sound::SceneSounds { sprouts: &sprout_sounds, ship: &ship_sounds };
+                let swarm = if me.swarming { me.swarm_input() } else { glam::Vec2::ZERO };
+                let scene_sounds = sound::SceneSounds { sprouts: &sprout_sounds, ship: &ship_sounds, swarm };
                 a.frame(view, me.pos, &g.sim, &mut g.world.tekis, whistling, scene_sounds);
             }
             None => {

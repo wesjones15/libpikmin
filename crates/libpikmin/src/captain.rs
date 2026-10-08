@@ -138,6 +138,7 @@ pub(crate) struct Pressed {
 }
 
 impl Captain {
+    pub fn swarm_input(&self) -> Vec2 { if self.swarming { self.input.swarm } else { Vec2::ZERO } }
     pub(crate) fn new(id: CaptainId, pos: Vec3, health: f32) -> Self {
         Self {
             id,

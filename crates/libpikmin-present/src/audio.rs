@@ -40,6 +40,7 @@ fn pellet_owner(id: libpikmin::PelletId) -> u64 {
 /// Sounds the 3D scene's animations asked for this frame.
 #[derive(Default, Clone, Copy)]
 pub struct SceneSounds<'a> {
+    pub swarm: glam::Vec2,
     /// Sprout animation keys: (parent Onion, value, position).
     pub sprouts: &'a [(Option<libpikmin::onion::OnionId>, u8, Vec3)],
     /// The ship's: (ship, sound, start or stop).
@@ -187,7 +188,7 @@ impl Audio {
         whistling: bool,
         scene: SceneSounds,
     ) {
-        let SceneSounds { sprouts: sprout_sounds, ship: ship_sounds } = scene;
+        let SceneSounds { sprouts: sprout_sounds, ship: ship_sounds, swarm } = scene;
         let squad = sim.pikis().iter().filter(|p| p.captain.is_some()).count();
         let whistle_started = whistling && !self.whistling;
         let whistle_stopped = self.whistling && !whistling;
@@ -208,6 +209,7 @@ impl Audio {
         self.with(|s| {
             s.set_listener(view, listener);
             s.set_piki_count(squad as u32);
+            s.formation(swarm.x, swarm.y);
             for (owner, pos) in creatures
                 .positions
                 .iter()

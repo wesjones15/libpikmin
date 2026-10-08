@@ -135,6 +135,7 @@ pub struct SoundSystem {
     listener: Vec3,
     view: Mat4,
     gaya_timer: u32,
+    formation_on: bool,
     gaya_outer: Option<usize>,
     gaya_volume: f32,
     pikis: u32,
@@ -182,6 +183,7 @@ impl SoundSystem {
             listener: Vec3::ZERO,
             view: Mat4::IDENTITY,
             gaya_timer: 0,
+            formation_on: false,
             gaya_outer: None,
             gaya_volume: 0.0,
             pikis: 0,
@@ -430,6 +432,23 @@ impl SoundSystem {
         if let Some(t) = self.engine.track_handle(0x10008) {
             self.engine.write_port(t, 0, kind);
         }
+    }
+
+    /// `Jac_Orima_Formation` (piki_player.c): the disc's trumpet sequence follows
+    /// horizontal stick direction and magnitude through track 0x10007 ports 2/3.
+    pub fn formation(&mut self, x: f32, y: f32) {
+        let Some(track) = self.engine.track_handle(0x10007) else { return; };
+        let x = (x.clamp(-1., 1.) * 74.) as i16;
+        let y = (y.clamp(-1., 1.) * 74.) as i16;
+        let magnitude = ((x as f32).hypot(y as f32)) as u16;
+        self.engine.write_port(track, 2, x as u16);
+        self.engine.write_port(track, 3, magnitude);
+        let active = magnitude != 0;
+        if active != self.formation_on {
+            self.engine.write_port(track, 0, active as u16);
+            self.formation_on = active;
+        }
+        if active { self.gaya_timer = 0; }
     }
 
     /// A cutscene's sound without the cutscene: `Jac_StartDemo` tells the demo track which
