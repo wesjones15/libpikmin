@@ -214,6 +214,11 @@ pub struct Piki {
     pub health: f32,
     /// Times it has bloomed from nectar (`mFloweringTimer`).
     pub blooms: u8,
+    /// Dismissed by its captain and not called back since: it stays put even with
+    /// [`Sim::set_auto_rejoin`].
+    pub dismissed: bool,
+    /// Seconds it has stood idle.
+    pub idle_time: f32,
 }
 
 impl Piki {
@@ -252,6 +257,9 @@ fn nearest_part(frame: &CreatureFrame, c: &CreatureView, from: Vec3) -> Option<(
 
 impl Sim {
     pub(crate) fn update_piki(&mut self, pi: usize, host: &mut dyn Host, dt: f32) {
+        if !matches!(self.pikis[pi].state, PikiState::Idle) {
+            self.pikis[pi].idle_time = 0.0;
+        }
         match self.pikis[pi].state {
             PikiState::Dead => {}
             PikiState::Carry(c) => self.piki_carry(pi, c, host, dt),
@@ -325,6 +333,11 @@ impl Sim {
 
     fn piki_idle(&mut self, pi: usize, host: &mut dyn Host, dt: f32) {
         self.pikis[pi].target_vel = Vec3::ZERO;
+        self.pikis[pi].idle_time += dt;
+        if self.try_rejoin(pi) {
+            self.physics(pi, host, dt);
+            return;
+        }
         // "ピキ：オートアタック". Off on the retail disc; on with code defaults.
         if self.params.ai.auto_attack != 0 && (self.tick + pi as u64).is_multiple_of(10) {
             self.act_on_situation(pi);
@@ -439,6 +452,10 @@ impl Sim {
             leave = lost_timer > pp.max_lost_child_time;
         } else {
             leave = true;
+        }
+        // With auto-rejoin a straggler keeps running after the captain instead.
+        if self.auto_rejoin {
+            leave = false;
         }
 
         let p = &mut self.pikis[pi];
@@ -954,8 +971,29 @@ impl Sim {
         p.state = PikiState::Idle;
     }
 
+    /// Host option, not Pikmin 1: a separated Pikmin (done carrying or fighting, landed from
+    /// a throw with nothing to do, fallen out of formation) goes back to its captain's squad
+    /// after a moment, wherever he is. Dismissed Pikmin stay where they were left.
+    fn try_rejoin(&mut self, pi: usize) -> bool {
+        const DELAY: f32 = 0.5;
+        let p = &self.pikis[pi];
+        if !self.auto_rejoin || p.dismissed || p.idle_time < DELAY || !p.on_ground {
+            return false;
+        }
+        let Some(cid) = p.captain else {
+            return false;
+        };
+        if self.captains[cid.0 as usize].down {
+            return false;
+        }
+        let id = p.id;
+        self.join_squad(id, cid);
+        true
+    }
+
     pub(crate) fn join_squad(&mut self, id: PikiId, captain: CaptainId) {
         let p = &mut self.pikis[id.0 as usize];
+        p.dismissed = false;
         p.captain = Some(captain);
         p.state = PikiState::squad();
         self.captains[captain.0 as usize].plate.add(id);

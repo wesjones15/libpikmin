@@ -26,6 +26,8 @@ pub struct Sim {
     pub(crate) next_nectar: u32,
     pub(crate) events: Vec<Event>,
     pending_shakes: Vec<CreatureId>,
+    /// See [`Sim::set_auto_rejoin`].
+    pub(crate) auto_rejoin: bool,
 }
 
 impl Default for Sim {
@@ -52,6 +54,7 @@ impl Sim {
             next_nectar: 0,
             events: Vec::new(),
             pending_shakes: Vec::new(),
+            auto_rejoin: false,
         }
     }
 
@@ -95,6 +98,8 @@ impl Sim {
             state: PikiState::Idle,
             health: self.params.piki.piki_max_health,
             blooms: 0,
+            dismissed: false,
+            idle_time: 0.0,
         });
         Some(id)
     }
@@ -120,6 +125,12 @@ impl Sim {
         c.pressed.throw |= input.throw && !old.throw;
         c.pressed.dismiss |= input.dismiss && !old.dismiss;
         c.input = input;
+    }
+
+    /// Separated Pikmin rejoin their captain by themselves (not Pikmin 1, where they wait to
+    /// be whistled); dismissed ones still wait. Off by default.
+    pub fn set_auto_rejoin(&mut self, on: bool) {
+        self.auto_rejoin = on;
     }
 
     /// Scales `captain`'s run speed (see [`Captain::speed_scale`]); clamped to 0.1..10.

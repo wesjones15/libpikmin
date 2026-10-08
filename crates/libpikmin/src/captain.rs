@@ -748,6 +748,7 @@ impl Sim {
         for id in members {
             let p = &mut self.pikis[id.0 as usize];
             p.state = PikiState::Idle;
+            p.dismissed = true;
         }
         self.events.push(Event::Dismissed {
             captain: self.captains[ci].id,

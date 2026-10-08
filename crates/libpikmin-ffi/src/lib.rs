@@ -740,6 +740,17 @@ pub unsafe extern "C" fn pik_sim_set_input(sim: *mut PikSim, captain: u32, input
     }
 }
 
+/// `on` (non-zero): separated Pikmin go back to their captain by themselves; dismissed ones
+/// still wait (see `Sim::set_auto_rejoin`).
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_auto_rejoin(sim: *mut PikSim, on: u8) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| s.sim.set_auto_rejoin(on != 0)) }
+}
+
 /// Scales `captain`'s run speed by `scale` (the host's move speed stat over its base).
 ///
 /// # Safety

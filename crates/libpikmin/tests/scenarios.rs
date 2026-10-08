@@ -310,6 +310,51 @@ fn thrown_piki_lands_at_the_cursor() {
     );
 }
 
+#[test]
+fn auto_rejoin_brings_thrown_pikmin_back_but_not_dismissed_ones() {
+    let mut sim = Sim::new(retail_params(), 5);
+    sim.set_auto_rejoin(true);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    squad(&mut sim, c, 3, Vec3::ZERO);
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 2.0, &mut ev);
+
+    // Thrown onto empty ground: it lands, stands a moment, then comes back.
+    aim_cursor(&mut sim, &mut host, c, Vec2::new(1.0, 0.0), 0.5);
+    ev.clear();
+    throw_once(&mut sim, &mut host, c, &mut ev);
+    run(&mut sim, &mut host, 1.5, &mut ev);
+    let thrown = ev
+        .iter()
+        .find_map(|e| match e {
+            Event::Thrown { piki, .. } => Some(*piki),
+            _ => None,
+        })
+        .expect("a Pikmin should have been thrown");
+    run(&mut sim, &mut host, 3.0, &mut ev);
+    assert!(
+        matches!(sim.piki(thrown).state, PikiState::Squad { .. }),
+        "thrown Pikmin should be back in the squad: {:?}",
+        sim.piki(thrown).state
+    );
+
+    // Dismissed: they stay where they were left.
+    sim.set_input(
+        c,
+        CaptainInput {
+            dismiss: true,
+            ..Default::default()
+        },
+    );
+    run(&mut sim, &mut host, 0.1, &mut ev);
+    sim.set_input(c, CaptainInput::default());
+    run(&mut sim, &mut host, 3.0, &mut ev);
+    for p in sim.pikis() {
+        assert!(matches!(p.state, PikiState::Idle), "{:?} should stay dismissed", p.state);
+    }
+}
+
 fn creature_at_cursor(sim: &mut Sim, host: &mut TestHost, c: CaptainId, hp: f32) -> CreatureId {
     aim_cursor(sim, host, c, Vec2::new(1.0, 0.0), 0.5);
     let at = sim.captain(c).cursor_world;
