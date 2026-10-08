@@ -311,6 +311,22 @@ fn thrown_piki_lands_at_the_cursor() {
 }
 
 #[test]
+fn reach_scale_throws_further() {
+    let throw_at = |scale: f32| {
+        let mut sim = Sim::new(retail_params(), 5);
+        let mut host = TestHost::default();
+        let c = sim.add_captain(Vec3::ZERO);
+        sim.set_captain_reach(c, scale);
+        squad(&mut sim, c, 3, Vec3::ZERO);
+        run(&mut sim, &mut host, 2.0, &mut Vec::new());
+        aim_cursor(&mut sim, &mut host, c, Vec2::new(1.0, 0.0), 1.0);
+        (sim.captain(c).cursor_world - sim.captain(c).pos).length()
+    };
+    let (near, far) = (throw_at(1.0), throw_at(2.0));
+    assert!((far / near - 2.0).abs() < 0.1, "reach {far} against {near}");
+}
+
+#[test]
 fn auto_rejoin_brings_thrown_pikmin_back_but_not_dismissed_ones() {
     let mut sim = Sim::new(retail_params(), 5);
     sim.set_auto_rejoin(true);

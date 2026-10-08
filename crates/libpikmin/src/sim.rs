@@ -134,6 +134,12 @@ impl Sim {
         self.auto_rejoin = on;
     }
 
+    /// Scales how far `captain` can throw (see [`Captain::reach_scale`]); clamped to 0.1..10.
+    pub fn set_captain_reach(&mut self, captain: CaptainId, scale: f32) {
+        let scale = if scale.is_finite() { scale.clamp(0.1, 10.0) } else { 1.0 };
+        self.captains[captain.0 as usize].reach_scale = scale;
+    }
+
     /// Scales `captain`'s run speed (see [`Captain::speed_scale`]); clamped to 0.1..10.
     pub fn set_captain_speed(&mut self, captain: CaptainId, scale: f32) {
         let scale = if scale.is_finite() { scale.clamp(0.1, 10.0) } else { 1.0 };

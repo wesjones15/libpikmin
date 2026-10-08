@@ -773,6 +773,22 @@ pub unsafe extern "C" fn pik_sim_set_auto_rejoin(sim: *mut PikSim, on: u8) {
     unsafe { with(sim, (), |s| s.sim.set_auto_rejoin(on != 0)) }
 }
 
+/// Scales how far `captain`'s cursor reaches, and so how far he throws, by `scale`.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_captain_reach(sim: *mut PikSim, captain: u32, scale: f32) {
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, (), |s| {
+            if (captain as usize) < s.sim.captains().len() {
+                s.sim.set_captain_reach(CaptainId(captain), scale);
+            }
+        })
+    }
+}
+
 /// Scales `captain`'s run speed by `scale` (the host's move speed stat over its base).
 ///
 /// # Safety

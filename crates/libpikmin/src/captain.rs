@@ -109,6 +109,9 @@ pub struct Captain {
     /// Multiplies his run speed: the host's own speed stat over its base (items, buffs).
     /// 1 in Pikmin.
     pub speed_scale: f32,
+    /// Multiplies how far his cursor reaches (and so how far he throws) and how fast it moves
+    /// out there. 1 in Pikmin.
+    pub reach_scale: f32,
     rearrange_pending: bool,
     pub(crate) input: CaptainInput,
     pub(crate) pressed: Pressed,
@@ -157,6 +160,7 @@ impl Captain {
             down: false,
             throw_color: None,
             speed_scale: 1.0,
+            reach_scale: 1.0,
             rearrange_pending: false,
             input: CaptainInput::default(),
             pressed: Pressed::default(),
@@ -271,9 +275,10 @@ impl Sim {
         c.target_vel = stick * (navi.run_speed * c.speed_scale);
 
         // The cursor leads the captain in the stick direction, sliding along its max radius.
-        let mut cursor_vel = stick.normalize_or_zero() * navi.cursor_move_speed;
+        let reach = navi.cursor_max_radius * c.reach_scale;
+        let mut cursor_vel = stick.normalize_or_zero() * (navi.cursor_move_speed * c.reach_scale);
         let mut next = c.cursor + cursor_vel * dt;
-        if next.length() >= navi.cursor_max_radius {
+        if next.length() >= reach {
             let radial = next.normalize_or_zero();
             cursor_vel -= radial * radial.dot(cursor_vel);
             next = c.cursor + cursor_vel * dt;
@@ -281,7 +286,7 @@ impl Sim {
         c.cursor = next;
         if let Some(aim) = input.cursor {
             let off = Vec3::new(aim.x - c.pos.x, 0.0, aim.z - c.pos.z);
-            c.cursor = off.clamp_length_max(navi.cursor_max_radius);
+            c.cursor = off.clamp_length_max(reach);
         }
 
         if stick_mag > navi.neutral_stick_threshold {
