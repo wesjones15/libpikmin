@@ -17,6 +17,8 @@ pub enum Motion {
     Dead3 = 9,
     Damage = 10,
     Asibumi = 11,
+    /// NaviGeyzerState::init's airborne pose (naviState.cpp).
+    OCarry = 12,
     Tanemaki = 15,
     GrowUp1 = 17,
     GrowUp2 = 18,

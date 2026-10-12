@@ -356,3 +356,44 @@ fn dolphin_touches_ground_without_inverting_at_touchdown() {
         assert!(jump < 0.1, "touchdown must retain the upright pose: {jump}");
     }
 }
+
+#[test]
+fn jumps_use_disc_geyser_and_pikmin_airborne_motions_then_resume_walking() {
+    use libpikmin::CaptainInput;
+    use libpikmin_assets::motion::Motion;
+    use libpikmin_present::animator::{captain_key, piki_key};
+    let Some(assets) = assets() else { return };
+    let mut view = View::load(&assets).unwrap();
+    let mut sim = Sim::new(Params::default(), 35);
+    let c = sim.add_captain(Vec3::ZERO);
+    let p = sim.spawn_piki_in_squad(PikiColor::Red, Vec3::X * -60.0, c).unwrap();
+    sim.step(&mut FlatHost);
+    view.update(&sim, 1.0, TICK_DT);
+    let vertices = |view: &View, kind| {
+        let d = view.draws.iter().find(|d| d.kind == kind).unwrap();
+        view.positions[d.first_vertex as usize..][..view.models[d.model as usize].vertex_count].to_vec()
+    };
+    let standing_c = vertices(&view, kinds::CAPTAIN);
+    let standing_p = vertices(&view, kinds::PIKI);
+    sim.set_input(c, CaptainInput { jump: true, ..Default::default() });
+    let mut poses_c = Vec::new();
+    let mut poses_p = Vec::new();
+    for _ in 0..8 {
+        sim.step(&mut FlatHost);
+        view.update(&sim, 1.0, TICK_DT);
+        assert_eq!(view.animator.players[&captain_key(c)].anim, Motion::OCarry.anim_index().unwrap());
+        assert_eq!(view.animator.players[&piki_key(p)].anim, Motion::RollJmp.anim_index().unwrap());
+        poses_c.push(vertices(&view, kinds::CAPTAIN));
+        poses_p.push(vertices(&view, kinds::PIKI));
+        assert!(view.positions.iter().all(|p| p.is_finite()));
+    }
+    for (standing, poses) in [(standing_c, poses_c), (standing_p, poses_p)] {
+        assert!(standing.iter().zip(&poses[0]).any(|(a,b)| a.distance(*b) > 0.1), "airborne pose differs from walking");
+        assert!(poses[0].iter().zip(&poses[7]).any(|(a,b)| a.distance(*b) > 0.1), "jump animation articulates");
+        assert!(poses.iter().flatten().all(|v| v.length() < 80.0), "animation must not add cinematic travel");
+    }
+    for _ in 0..90 { sim.step(&mut FlatHost); }
+    view.update(&sim, 1.0, TICK_DT);
+    assert_ne!(view.animator.players[&captain_key(c)].anim, Motion::OCarry.anim_index().unwrap());
+    assert_ne!(view.animator.players[&piki_key(p)].anim, Motion::RollJmp.anim_index().unwrap());
+}

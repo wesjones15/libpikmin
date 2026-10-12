@@ -555,6 +555,8 @@ async fn main() {
                     pose: None,
                     cursor: None,
                     cycle: is_key_down(KeyCode::Z),
+                    jump: is_key_down(KeyCode::J),
+                    jump_blocked: false,
                 }
             } else {
                 CaptainInput::default()

@@ -207,6 +207,9 @@ pub struct Piki {
     /// Body radius, random per Pikmin between `min_piki_size` and `max_piki_size`.
     pub size: f32,
     pub on_ground: bool,
+    /// Locomotion jump, independent of its job (never the thrown/attack state).
+    pub jump: Option<crate::jump::Jump>,
+    pub(crate) jump_queue: std::collections::VecDeque<crate::jump::JumpCue>,
     /// Captain this Pikmin follows or last followed (`mNavi`).
     pub captain: Option<CaptainId>,
     pub state: PikiState,
@@ -260,6 +263,7 @@ fn nearest_part(frame: &CreatureFrame, c: &CreatureView, from: Vec3) -> Option<(
 
 impl Sim {
     pub(crate) fn update_piki(&mut self, pi: usize, host: &mut dyn Host, dt: f32) {
+        if self.update_piki_jump(pi, host, dt) { return; }
         if !matches!(self.pikis[pi].state, PikiState::Flying { .. }) { self.pikis[pi].guided_throw = None; }
         if !matches!(self.pikis[pi].state, PikiState::Idle) {
             self.pikis[pi].idle_time = 0.0;
@@ -291,6 +295,7 @@ impl Sim {
     }
 
     pub(crate) fn physics(&mut self, pi: usize, host: &mut dyn Host, dt: f32) {
+        self.try_navigation_jump(pi, host);
         let accel = self.params.piki_creature.acceleration;
         let gravity = self.params.ai.gravity;
         let face_adjust = self.params.piki_creature.face_dir_adjust;
@@ -361,7 +366,8 @@ impl Sim {
             self.pikis[pi].state = PikiState::Idle;
             return;
         };
-        let slot_pos = c.plate.slot_world(slot);
+        let cue = self.pikis[pi].jump_queue.front().copied();
+        let slot_pos = cue.map_or_else(|| c.plate.slot_world(slot), |j| j.origin);
         let (cpos, plate_offset, swarming) = (c.pos, c.plate.offset, c.swarming);
         let accel = self.params.piki_creature.acceleration;
         let full = self.piki_speed(pi, 1.0);
@@ -377,7 +383,7 @@ impl Sim {
         else {
             unreachable!()
         };
-        if formed && self.squad_contact(pi, swarming) {
+        if cue.is_none() && formed && self.squad_contact(pi, swarming) {
             return;
         }
 
@@ -427,7 +433,7 @@ impl Sim {
 
         // Pikmin in front of the captain arc around him instead of walking through, except
         // while the C-stick sends them forward on purpose (`newVer && !check`).
-        if sidestep && !swarming {
+        if sidestep && !swarming && cue.is_none() {
             let from_captain = p.pos - cpos;
             let plate_to_captain = (cpos - plate_offset).normalize_or_zero();
             if plate_to_captain.dot(from_captain) > 0.0 {
@@ -458,7 +464,7 @@ impl Sim {
             leave = true;
         }
         // With auto-rejoin a straggler keeps running after the captain instead.
-        if self.auto_rejoin {
+        if self.auto_rejoin || cue.is_some() {
             leave = false;
         }
 
@@ -981,6 +987,7 @@ impl Sim {
             }
         }
         let p = &mut self.pikis[id.0 as usize];
+        p.jump_queue.clear();
         if p.state.latched_to().is_some() {
             p.vel = Vec3::ZERO;
             p.on_ground = false;

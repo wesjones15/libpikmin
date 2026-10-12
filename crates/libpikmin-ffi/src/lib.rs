@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 8;
+pub const PIK_ABI_VERSION: u32 = 9;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -145,7 +145,8 @@ pub struct PikInput {
     pub use_cursor: u8,
     /// Next colour to throw (`CaptainInput::cycle`).
     pub cycle: u8,
-    pub _pad: [u8; 2],
+    pub jump: u8,
+    pub jump_blocked: u8,
 }
 
 impl PikInput {
@@ -163,6 +164,8 @@ impl PikInput {
             }),
             cursor: (self.use_cursor != 0).then(|| self.cursor.into()),
             cycle: self.cycle != 0,
+            jump: self.jump != 0,
+            jump_blocked: self.jump_blocked != 0,
         }
     }
 }

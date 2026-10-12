@@ -35,6 +35,9 @@ pub struct CaptainInput {
     /// Picks the next colour to throw (Pikmin 2's type switch; not in Pikmin 1, which always
     /// throws the nearest).
     pub cycle: bool,
+    /// Host extension: jump on the rising edge. The modifier blocks jumping even if pressed.
+    pub jump: bool,
+    pub jump_blocked: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -78,6 +81,7 @@ pub struct Captain {
     pub target_vel: Vec3,
     pub face: f32,
     pub on_ground: bool,
+    pub jump: Option<crate::jump::Jump>,
     /// Cursor offset from the captain, XZ (`mCursorPosition`).
     pub cursor: Vec3,
     /// Cursor on the ground in world space (`mCursorWorldPos`). Throws land here and the whistle is centred here.
@@ -131,6 +135,7 @@ pub struct Punch {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Pressed {
+    pub jump: bool,
     pub whistle: bool,
     pub throw: bool,
     pub dismiss: bool,
@@ -147,6 +152,7 @@ impl Captain {
             target_vel: Vec3::ZERO,
             face: 0.0,
             on_ground: false,
+            jump: None,
             cursor: Vec3::ZERO,
             cursor_world: pos,
             neutral_time: 0.0,
@@ -214,6 +220,7 @@ impl Sim {
             c.target_vel = Vec3::ZERO;
             c.whistle = WhistleState::Off;
             c.pluck = None;
+            c.jump = None;
             return;
         }
 
@@ -226,6 +233,7 @@ impl Sim {
         // The action button plucks when a sprout is in reach, else throws
         // (`Navi::procActionButton` runs before entering `NaviThrowWaitState`).
         if pressed.throw
+            && self.captains[ci].jump.is_none()
             && matches!(self.captains[ci].throw, ThrowState::Idle)
             && let Some(sprout) = self.find_pluckable(ci)
         {
@@ -235,7 +243,24 @@ impl Sim {
             return;
         }
 
+        if pressed.jump && !input.jump_blocked && input.pose.is_none()
+            && self.captains[ci].on_ground && self.captains[ci].damage_frames <= 0.0
+            && self.captains[ci].punch.is_none()
+        {
+            self.start_captain_jump(ci);
+        }
+        let was_grounded = self.captains[ci].on_ground;
+        let takeoff_origin = self.captains[ci].pos;
         self.captain_move(ci, host, dt, input, false);
+        // Host-driven captains (VR) leave the ground through their host's controller.
+        if input.pose.is_some() && was_grounded && !self.captains[ci].on_ground
+            && self.captains[ci].vel.y > 0.0 && !input.jump_blocked
+        {
+            self.record_captain_jump(ci, takeoff_origin);
+        }
+        let c = &mut self.captains[ci];
+        if c.on_ground { c.jump = None; }
+        else if let Some(jump) = &mut c.jump { jump.elapsed += dt; }
         self.captain_formation(ci);
         if self.captain_punch(ci, host, dt, pressed) {
             return;
@@ -321,7 +346,8 @@ impl Sim {
             c.pos = pose.pos;
             c.vel = pose.vel;
             c.face = pose.face;
-            c.on_ground = true;
+            c.on_ground = pose.vel.y <= 0.0 && host.ground_height(pose.pos + Vec3::Y)
+                .is_some_and(|g| (pose.pos.y - g).abs() < 2.0);
         } else {
             let mut on_ground = c.on_ground;
             integrate(

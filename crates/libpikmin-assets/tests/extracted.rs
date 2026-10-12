@@ -95,6 +95,14 @@ fn extractor_matches_existing_assets() {
             "{rel}"
         );
     }
+    // Fresh first-run extraction includes the two jump motions inside the shared bundle.
+    let fresh = Assets { root: out.clone() };
+    let motions = AnimSet::load(&fresh, paths::PIKI_ANIM_MGR, paths::PIKI_BUNDLE).unwrap();
+    for (motion, name) in [(Motion::OCarry, "ocarry.dca"), (Motion::RollJmp, "rolljmp.dca")] {
+        let (info, anim) = motions.get(motion.anim_index().unwrap()).unwrap();
+        assert_eq!(info.name.to_ascii_lowercase(), name);
+        assert!(anim.frames > 10);
+    }
     let _ = std::fs::remove_dir_all(&out);
 }
 

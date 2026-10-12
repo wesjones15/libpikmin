@@ -6,6 +6,28 @@ spec, in our own words. Citations are `file: function` under `pikmin-main/src/`
 
 Status: **implemented** = in `crates/libpikmin` with tests; **planned** = not yet.
 
+## Host extension: jumping (implemented)
+
+This mod adds voluntary jumps rather than reproducing a Pikmin 1 control. A rising edge
+of `CaptainInput.jump` launches a grounded, active captain; `jump_blocked` suppresses it.
+Gravity is read from the disc as usual, with a 40-unit jump height. Standing squad members
+hop in place. Moving squad members queue the captain's takeoff positions and launch there
+using his takeoff direction and horizontal speed. Up to 16 points are retained for 15 seconds;
+leaving the squad clears them. Held, thrown, latched, knocked-down and busy Pikmin keep
+their existing state behavior. Locomotion jumps preserve the current job and resume it on landing.
+
+Navigation checks for low obstructions or short gaps, an unobstructed raised body, and a
+reachable landing before jumping. Pikmin may jump while approaching a carrying slot,
+but never during lifting or carrying. These are local probes, not a general path planner.
+
+Presentation uses the extracted shared animation bundle: `OCARRY` (motion 12, AnimInfo 45)
+is started by `NaviGeyzerState::init` in `plugPikiKando/naviState.cpp`; Pikmin use `ROLLJMP`
+(motion 34, AnimInfo 61), started by `PikiFlyingState::init` in `plugPikiKando/pikiState.cpp`.
+Both are already part of first-run extraction. The RoR2 Pikmin scheme binds B to jump,
+LB + B to whistle and suppresses jumping for the entire LB hold. Menu closing consumes B.
+The viewer uses J for this extension. ABI 9 uses the two former input-padding bytes for
+`jump` and `jump_blocked`; Rust and C# must be rebuilt together.
+
 ## 0. Tuning values: code defaults vs the disc
 
 The `Parm<T>` defaults in the headers are *not* what ships. At load, `Parameters::read`

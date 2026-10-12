@@ -177,6 +177,9 @@ pub fn piki_look(params: &Params, p: &Piki) -> Option<PikiLook> {
     let mut scale = Vec3::ONE;
     let mut fade = 1.0;
     let walk = locomotion(p.vel.with_y(0.0).length(), th, rate);
+    if p.jump.is_some() {
+        return Some(PikiLook { motion: Motion::RollJmp, clock: Clock::Loop(30.0), scale, fade });
+    }
     let (motion, clock) = match p.state {
         PikiState::Dead | PikiState::Swallowed { .. } => return None,
         PikiState::Idle | PikiState::Squad { .. } | PikiState::GoHang { .. } => walk,
@@ -262,6 +265,8 @@ pub fn captain_motion(params: &Params, c: &Captain, throwing: bool) -> (Motion, 
         (Motion::ODead, Clock::Once(30.0))
     } else if c.damage_frames > 0.0 {
         (Motion::Damage, Clock::Sim(params.anim.damage.end - c.damage_frames))
+    } else if c.jump.is_some() {
+        (Motion::OCarry, Clock::LoopFrom(30.0, 10.0))
     } else if let Some(p) = c.punch {
         (Motion::Punch, Clock::Sim(p.frame))
     } else if let Some(libpikmin::onion::Pluck {

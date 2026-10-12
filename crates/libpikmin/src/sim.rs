@@ -97,6 +97,8 @@ impl Sim {
             face: 0.0,
             size,
             on_ground: false,
+            jump: None,
+            jump_queue: Default::default(),
             captain: None,
             state: PikiState::Idle,
             health: self.params.piki.piki_max_health,
@@ -130,6 +132,7 @@ impl Sim {
         c.pressed.throw |= input.throw && !old.throw;
         c.pressed.dismiss |= input.dismiss && !old.dismiss;
         c.pressed.cycle |= input.cycle && !old.cycle;
+        c.pressed.jump |= input.jump && !old.jump;
         c.input = input;
     }
 
@@ -253,7 +256,7 @@ impl Sim {
     /// captains and creatures are effectively immovable to Pikmin).
     fn separate(&mut self) {
         let navi_r = self.params.navi.body_collision_radius;
-        let grounded = |p: &Piki| match p.state {
+        let grounded = |p: &Piki| p.jump.is_none() && match p.state {
             PikiState::Idle
             | PikiState::Squad { .. }
             | PikiState::GoHang { .. }

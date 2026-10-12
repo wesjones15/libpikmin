@@ -7,6 +7,8 @@
 //!
 //! - `parms/`: tuning `.bin` files
 //! - `pikis/`: Olimar and Pikmin models, the shared animation bundle, `animMgr.bin`, leaves
+//!   (includes OCARRY, Olimar's geyser pose, and ROLLJMP, Pikmin's airborne motion;
+//!   these are bundle entries, not separate files on the disc)
 //! - `objects/goal/`: the Onion model, animations and `anims.bin`
 //! - `objects/pellets/`: the numbered pellets (1, 5, 10, 20)
 //! - `objects/pikihead/`: the sprout / flying seed
