@@ -13,6 +13,7 @@ pub mod damage;
 pub mod event;
 pub mod formation;
 pub mod host;
+pub mod items;
 pub mod jump;
 pub mod math;
 pub mod nectar;
@@ -21,6 +22,7 @@ pub mod onion_menu;
 pub mod params;
 pub mod pellet_config;
 pub mod piki;
+pub mod plucker;
 mod sim;
 
 pub use captain::{Captain, CaptainInput, CaptainPose};

@@ -118,12 +118,28 @@ pub struct Captain {
     /// Multiplies how far his cursor reaches (and so how far he throws) and how fast it moves
     /// out there. 1 in Pikmin.
     pub reach_scale: f32,
+    /// Host extension: how fast his punches and plucks, and his Pikmin's attacks, play (the
+    /// host's attack speed over its base). 1 in Pikmin.
+    pub attack_rate: f32,
+    /// Host extension: multiplies his Pikmin's walk and run speeds (the host's inherited move
+    /// speed). 1 in Pikmin.
+    pub squad_speed: f32,
+    /// Host extension: jumps he may make in mid-air (Hopoo Feather), and how many he's made
+    /// since leaving the ground.
+    pub air_jumps: u32,
+    pub air_jumps_used: u32,
+    /// Host extension: jump with no mid-air jumps left starts a stomp (H3AD-5T v2).
+    pub can_stomp: bool,
+    /// Stomping down since this height.
+    pub stomp: Option<f32>,
+    /// The tick his current jump started, so later mid-air jumps reach his followers' cues.
+    pub(crate) jump_tick: Option<u64>,
     rearrange_pending: bool,
     pub(crate) input: CaptainInput,
     pub(crate) pressed: Pressed,
     movement_held: bool,
     actions_held: bool,
-    launched: bool,
+    pub(crate) launched: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -174,6 +190,13 @@ impl Captain {
             lock_target: None,
             speed_scale: 1.0,
             reach_scale: 1.0,
+            attack_rate: 1.0,
+            squad_speed: 1.0,
+            air_jumps: 0,
+            air_jumps_used: 0,
+            can_stomp: false,
+            stomp: None,
+            jump_tick: None,
             rearrange_pending: false,
             input: CaptainInput::default(),
             pressed: Pressed::default(),
@@ -238,10 +261,13 @@ impl Sim {
             c.launched = true;
             c.pluck = None;
             c.punch = None;
-            c.jump = Some(crate::jump::Jump { elapsed: 0.0, horizontal: velocity.with_y(0.0), gravity });
+            c.jump = Some(crate::jump::Jump { horizontal: velocity.with_y(0.0), gravity, ..Default::default() });
+            c.stomp = None;
             if squad {
+                c.jump_tick = Some(self.tick);
                 cue = Some(crate::jump::JumpCue { origin: c.pos, horizontal: velocity.with_y(0.0),
-                    launch: Some((velocity.y, gravity.unwrap_or(self.params.ai.gravity))), tick: self.tick });
+                    launch: Some((velocity.y, gravity.unwrap_or(self.params.ai.gravity))), tick: self.tick,
+                    air: [0.0; crate::jump::MAX_AIR_JUMPS], air_count: 0 });
             }
         }
         if let Some(cue) = cue {
@@ -298,10 +324,17 @@ impl Sim {
         }
 
         if pressed.jump && !input.jump_blocked && !self.captains[ci].movement_held && input.pose.is_none()
-            && self.captains[ci].on_ground && self.captains[ci].damage_frames <= 0.0
+            && self.captains[ci].damage_frames <= 0.0
             && self.captains[ci].punch.is_none()
         {
-            self.start_captain_jump(ci);
+            let c = &self.captains[ci];
+            if c.on_ground {
+                self.start_captain_jump(ci);
+            } else if c.stomp.is_none() && c.air_jumps_used < c.air_jumps {
+                self.start_air_jump(ci);
+            } else if c.stomp.is_none() && c.can_stomp {
+                self.start_stomp(ci);
+            }
         }
         let was_grounded = self.captains[ci].on_ground;
         let takeoff_origin = self.captains[ci].pos;
@@ -312,8 +345,9 @@ impl Sim {
         {
             self.record_captain_jump(ci, takeoff_origin);
         }
+        self.update_stomp(ci);
         let c = &mut self.captains[ci];
-        if c.on_ground { c.jump = None; }
+        if c.on_ground { c.jump = None; c.air_jumps_used = 0; }
         else if let Some(jump) = &mut c.jump { jump.elapsed += dt; }
         self.captain_formation(ci);
         if self.captain_punch(ci, host, dt, pressed) {
@@ -615,6 +649,8 @@ impl Sim {
                 PikiState::Absorb { .. } | PikiState::GrowUp { .. } => false,
                 // `Navi::callPikis` skips `EnterMode` / `ExitMode`.
                 PikiState::Enter { .. } | PikiState::Exit { .. } => false,
+                // The Onion's plucker answers to its Onion.
+                PikiState::Plucker(_) => false,
                 PikiState::Dead => false,
             };
             if !eligible {
@@ -829,7 +865,7 @@ impl Sim {
         let reach_extra = self.params.navi.body_collision_radius + self.params.navi.punch_radius;
         let damage = self.params.navi.punch_damage;
         punch.whistle_queued |= pressed.whistle;
-        punch.frame += self.params.anim.fps * dt;
+        punch.frame += self.params.anim.fps * dt * self.captains[ci].attack_rate;
 
         let (cpos, face, cid) = (
             self.captains[ci].pos,

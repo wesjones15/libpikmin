@@ -68,12 +68,12 @@ impl OnionCounts {
     }
 }
 
-fn leg_point(onion: Vec3, leg: u8, ratio: f32) -> Vec3 {
+pub(crate) fn leg_point(onion: Vec3, leg: u8, ratio: f32) -> Vec3 {
     let l = leg as usize % 3;
     onion + LEG_FEET[l].lerp(LEG_TOPS[l], ratio.clamp(0.0, 1.0))
 }
 
-fn leg_length(leg: u8) -> f32 {
+pub(crate) fn leg_length(leg: u8) -> f32 {
     let l = leg as usize % 3;
     (LEG_TOPS[l] - LEG_FEET[l]).length()
 }

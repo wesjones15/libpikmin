@@ -415,6 +415,12 @@ impl Sim {
         c.damage_frames = 0.0;
         c.pos = pos;
         c.vel = Vec3::ZERO;
+        // Going down left his squad behind as if dismissed; it may find him again.
+        for p in &mut self.pikis {
+            if p.captain == Some(id) {
+                p.dismissed = false;
+            }
+        }
     }
 
     /// Ticks the damage animation; at its end a captain at ≤ 1 health goes down.

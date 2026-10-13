@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 11;
+pub const PIK_ABI_VERSION: u32 = 12;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -257,6 +257,8 @@ pub mod piki_state {
     pub const ENTER: u8 = 14;
     pub const EXIT: u8 = 15;
     pub const DEAD: u8 = 16;
+    /// The Onion's plucker, out pulling sprouts nobody plucked.
+    pub const PLUCKER: u8 = 17;
 }
 
 #[repr(C)]
@@ -273,6 +275,8 @@ pub struct PikPiki {
     pub captain: i32,
     /// The pellet it carries, or -1.
     pub pellet: i32,
+    /// Out of `piki_max_health` (100 by default).
+    pub health: f32,
     /// A [`piki_state`] value.
     pub state: u8,
     /// [`PikiColor::index`].
@@ -282,7 +286,7 @@ pub struct PikPiki {
     pub alive: u8,
     pub has_creature: u8,
     pub on_ground: u8,
-    pub _pad: [u8; 6],
+    pub _pad: [u8; 2],
 }
 
 #[repr(C)]
@@ -385,6 +389,18 @@ pub mod event_kind {
     pub const SPROUT_GREW: u32 = 34;
     pub const SPROUT_WILTED: u32 = 35;
     pub const PLUCKED: u32 = 36;
+    /// `b` the Onion, `a` its owner, `c` how many Pikmin it sent.
+    pub const EMERGENCY_PIKMIN: u32 = 37;
+    /// `a` the plucker, `b` its Onion.
+    pub const PLUCKER_OUT: u32 = 38;
+    /// `a` the plucked Pikmin, `c` the plucker, `b` the captain it joins or -1.
+    pub const PLUCKER_PULLED: u32 = 39;
+    /// `a` the captain, `c` 1 for a mid-air jump.
+    pub const CAPTAIN_JUMPED: u32 = 40;
+    /// `a` the captain, `pos` where it landed, `value` the drop in sim units.
+    pub const CAPTAIN_STOMPED: u32 = 41;
+    /// `a` the Pikmin, `b` its captain, `pos` where it landed.
+    pub const PIKI_STOMPED: u32 = 42;
 }
 
 /// One [`Event`]. `a` is the Pikmin, pellet, sprout or captain it's about (the first id in the
@@ -1338,13 +1354,14 @@ pub unsafe extern "C" fn pik_sim_pikis(sim: *mut PikSim, out: *mut PikPiki, max:
                     id: p.id.0,
                     captain: p.captain.map_or(-1, |c| c.0 as i32),
                     pellet: pellet.map_or(-1, |id| id as i32),
+                    health: p.health,
                     state: state_code(&p.state),
                     color: p.color.index() as u8,
                     happa: happa_code(p.happa),
                     alive: p.is_alive() as u8,
                     has_creature: creature.is_some() as u8,
                     on_ground: p.on_ground as u8,
-                    _pad: [0; 6],
+                    _pad: [0; 2],
                 };
                 // SAFETY: `i < max`, which the caller promised is writable.
                 out.add(i).write(v);
@@ -1547,6 +1564,7 @@ fn state_code(s: &PikiState) -> u8 {
         PikiState::GrowUp { .. } => GROW_UP,
         PikiState::Enter { .. } => ENTER,
         PikiState::Exit { .. } => EXIT,
+        PikiState::Plucker(_) => PLUCKER,
         PikiState::Dead => DEAD,
     }
 }
@@ -1637,8 +1655,229 @@ fn event(e: Event) -> PikEvent {
         Event::Plucked { captain, piki, sprout } => {
             (v.kind, v.a, v.b, v.c) = (PLUCKED, piki.0, captain.0 as i32, sprout.0 as i32)
         }
+        Event::EmergencyPikmin { onion, captain, count } => {
+            (v.kind, v.a, v.b, v.c) = (EMERGENCY_PIKMIN, captain.0, onion.0 as i32, count as i32)
+        }
+        Event::PluckerOut { piki, onion } => (v.kind, v.a, v.b) = (PLUCKER_OUT, piki.0, onion.0 as i32),
+        Event::PluckerPulled { plucker, plucked, captain } => {
+            (v.kind, v.a, v.b, v.c) = (PLUCKER_PULLED, plucked.0, captain.map_or(-1, |c| c.0 as i32), plucker.0 as i32)
+        }
+        Event::CaptainJumped { captain, air } => (v.kind, v.a, v.c) = (CAPTAIN_JUMPED, captain.0, air as i32),
+        Event::CaptainStomped { captain, pos, drop } => {
+            (v.kind, v.a, v.pos, v.value) = (CAPTAIN_STOMPED, captain.0, pos.into(), drop)
+        }
+        Event::PikiStomped { piki, captain, pos } => {
+            (v.kind, v.a, v.b, v.pos) = (PIKI_STOMPED, piki.0, captain.0 as i32, pos.into())
+        }
     }
     v
+}
+
+// ---- host item hooks (libpikmin's items.rs, plucker.rs, jump.rs) ---------------------------
+
+fn captain_ok(sim: &Sim, captain: u32) -> bool {
+    (captain as usize) < sim.captains().len()
+}
+
+/// [`Sim::set_captain_attack_rate`]: his punches and plucks and his Pikmin's attacks.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_captain_attack_rate(sim: *mut PikSim, captain: u32, rate: f32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.set_captain_attack_rate(CaptainId(captain), rate) }) }
+}
+
+/// [`Sim::set_squad_speed`].
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_squad_speed(sim: *mut PikSim, captain: u32, scale: f32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.set_squad_speed(CaptainId(captain), scale) }) }
+}
+
+/// [`Sim::set_captain_air_jumps`] and [`Sim::set_captain_stomp`].
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_captain_jumps(sim: *mut PikSim, captain: u32, air_jumps: u32, stomp: u8) {
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, (), |s| {
+            if captain_ok(&s.sim, captain) {
+                s.sim.set_captain_air_jumps(CaptainId(captain), air_jumps);
+                s.sim.set_captain_stomp(CaptainId(captain), stomp != 0);
+            }
+        })
+    }
+}
+
+/// [`Sim::boost_captain_jump`] (Wax Quail).
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_boost_captain_jump(sim: *mut PikSim, captain: u32, factor: f32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.boost_captain_jump(CaptainId(captain), factor) }) }
+}
+
+/// Cooldown items: [`Sim::set_growth_rate`] and [`Sim::set_rejoin_delay`].
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_growth(sim: *mut PikSim, growth_rate: f32, rejoin_delay: f32) {
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, (), |s| {
+            s.sim.set_growth_rate(growth_rate);
+            s.sim.set_rejoin_delay(rejoin_delay);
+        })
+    }
+}
+
+/// [`Sim::set_auto_carry_range`], in sim units (0 off).
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_auto_carry(sim: *mut PikSim, range: f32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| s.sim.set_auto_carry_range(range)) }
+}
+
+/// [`Sim::set_auto_pluck`]: seconds, or below 0 for off.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_auto_pluck(sim: *mut PikSim, seconds: f32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| s.sim.set_auto_pluck((seconds >= 0.0).then_some(seconds))) }
+}
+
+/// [`Sim::set_emergency_recovery`] (`count` 0 off).
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_emergency(sim: *mut PikSim, seconds: f32, count: u32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| s.sim.set_emergency_recovery(seconds, count)) }
+}
+
+/// [`Sim::set_onion_owner`]; `captain` below 0 for none.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_onion_owner(sim: *mut PikSim, onion: u32, captain: i32) {
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, (), |s| {
+            if onion_ok(&s.sim, onion) {
+                let owner = (captain >= 0 && captain_ok(&s.sim, captain as u32)).then_some(CaptainId(captain as u32));
+                s.sim.set_onion_owner(OnionId(onion), owner);
+            }
+        })
+    }
+}
+
+/// [`Sim::heal_squad`]. Returns the health restored, summed.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_heal_squad(sim: *mut PikSim, captain: u32, amount: f32) -> f32 {
+    // SAFETY: as documented.
+    unsafe { with(sim, 0.0, |s| if captain_ok(&s.sim, captain) { s.sim.heal_squad(CaptainId(captain), amount) } else { 0.0 }) }
+}
+
+/// [`Sim::heal_pikis_in_sphere`]. Returns the health restored, summed.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`]; `centre` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_heal_pikis_in_sphere(sim: *mut PikSim, centre: *const PikVec3, radius: f32, amount: f32) -> f32 {
+    // SAFETY: as documented.
+    let Some(c) = (unsafe { centre.as_ref() }).copied() else {
+        return 0.0;
+    };
+    unsafe { with(sim, 0.0, |s| s.sim.heal_pikis_in_sphere(c.into(), radius, amount)) }
+}
+
+/// [`Sim::teleport_squad`].
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`]; `pos` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_teleport_squad(sim: *mut PikSim, captain: u32, pos: *const PikVec3) {
+    // SAFETY: as documented.
+    let Some(p) = (unsafe { pos.as_ref() }).copied() else {
+        return;
+    };
+    unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.teleport_squad(CaptainId(captain), p.into()) }) }
+}
+
+/// [`Sim::captain_piki_count`].
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_captain_piki_count(sim: *mut PikSim, captain: u32) -> u32 {
+    // SAFETY: as documented.
+    unsafe { with(sim, 0, |s| if captain_ok(&s.sim, captain) { s.sim.captain_piki_count(CaptainId(captain)) } else { 0 }) }
+}
+
+/// [`Sim::spawn_squad`]: `count` Pikmin straight into his squad around `pos`.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`]; `pos` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_spawn_squad(sim: *mut PikSim, captain: u32, pos: *const PikVec3, count: u32) -> u32 {
+    // SAFETY: as documented.
+    let Some(p) = (unsafe { pos.as_ref() }).copied() else {
+        return 0;
+    };
+    unsafe { with(sim, 0, |s| if captain_ok(&s.sim, captain) { s.sim.spawn_squad(CaptainId(captain), p.into(), count) } else { 0 }) }
+}
+
+/// [`Sim::remove_captain_pikis`].
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_remove_captain_pikis(sim: *mut PikSim, captain: u32) -> u32 {
+    // SAFETY: as documented.
+    unsafe { with(sim, 0, |s| if captain_ok(&s.sim, captain) { s.sim.remove_captain_pikis(CaptainId(captain)) } else { 0 }) }
+}
+
+/// [`Sim::down_captain`]: he's out (his squad goes idle), as when his host body dies.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_down_captain(sim: *mut PikSim, captain: u32, down: u8) {
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, (), |s| {
+            if !captain_ok(&s.sim, captain) {
+                return;
+            }
+            let id = CaptainId(captain);
+            if down != 0 {
+                s.sim.down_captain(id);
+            } else if s.sim.captain(id).down {
+                let pos = s.sim.captain(id).pos;
+                s.sim.revive_captain(id, pos);
+            }
+        })
+    }
 }
 
 #[cfg(test)]

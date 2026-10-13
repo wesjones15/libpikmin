@@ -1,0 +1,349 @@
+//! Host extension, not Pikmin 1: the Onion plucks its own sprouts. When a sprout has stood
+//! pluckable for [`Sim::set_auto_pluck`]'s time with nobody pulling it, and the landed Onion
+//! holds a Pikmin, one slides down a leg (`ActExit`, aiExit.cpp), walks to each pluckable
+//! sprout around the Onion in turn and pulls it with the captain's pluck (`NaviNukuState`,
+//! naviState.cpp: "NUKU", the Pikmin popping out at its `KEY_Action0`). Pikmin and Olimar share
+//! one skeleton and motion set, so the Pikmin plays Olimar's own motion. Each plucked Pikmin
+//! joins the Onion's owner (Pikmin 1's plucked Pikmin join whoever pulled them). When nothing
+//! is left to pull, the plucker walks back and climbs in again (`ActEnter`, aiEnter.cpp).
+
+use glam::Vec3;
+
+use crate::event::Event;
+use crate::math::{ang_dist, dist_xz, round_ang, yaw_of};
+use crate::onion::{OnionId, SproutId};
+use crate::onion_menu::{SLIDE_SPEED, leg_length, leg_point};
+use crate::piki::{Happa, PikiState};
+use crate::{CaptainId, Host, Sim};
+
+/// How far from its Onion a plucker goes for sprouts (sim units, about 29 m in Risk of Rain 2;
+/// seeds land within about 200).
+pub const PLUCKER_RANGE: f32 = 600.0;
+/// `NaviNukuAdjustState`: it pulls from this far short of the sprout.
+const PULL_DISTANCE: f32 = 6.0;
+/// Gives up on a sprout it hasn't got closer to in this long (a wall, a cliff).
+const STUCK_TIME: f32 = 3.0;
+/// Sprouts given up on this outing, at most.
+const SKIPS: usize = 8;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PluckerJob {
+    /// Sliding down leg `leg` (`ActExit`); `ratio` 1 at the top.
+    Descend { leg: u8, ratio: f32 },
+    /// Walking to `sprout`. `best` is the closest it has been, `stuck` how long since.
+    Walk { sprout: SproutId, best: f32, stuck: f32 },
+    /// Pulling `sprout` ("NUKU" at `frame`); `popped` once the Pikmin is out.
+    Pull { sprout: SproutId, frame: f32, popped: bool },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Plucker {
+    pub onion: OnionId,
+    pub job: PluckerJob,
+    /// Sprouts it couldn't reach this outing.
+    skipped: [Option<SproutId>; SKIPS],
+}
+
+impl Sim {
+    /// Turns on the Onion's plucker: a sprout left pluckable this many seconds with nobody
+    /// pulling it sends a Pikmin out of its landed Onion to pluck every ready sprout around.
+    /// `None` (the default) is off. Hosts shorten it for cooldown items as they go.
+    pub fn set_auto_pluck(&mut self, seconds: Option<f32>) {
+        self.auto_pluck_after = seconds.filter(|s| s.is_finite()).map(|s| s.max(0.0));
+    }
+
+    /// Sends a plucker out of each landed Onion that has a long-forgotten sprout, a Pikmin
+    /// inside, and no plucker out already.
+    pub(crate) fn update_auto_pluck(&mut self, _dt: f32) {
+        let Some(after) = self.auto_pluck_after else { return };
+        for oi in 0..self.onions.len() {
+            let o = &self.onions[oi];
+            if o.ship.is_some() || !o.grounded() || o.stored_total() == 0 {
+                continue;
+            }
+            let (id, opos) = (o.id, o.pos);
+            let busy = self
+                .pikis
+                .iter()
+                .any(|p| matches!(p.state, PikiState::Plucker(pl) if pl.onion == id));
+            if busy {
+                continue;
+            }
+            let due = self.sprouts.iter().flatten().any(|s| {
+                s.pluckable()
+                    && s.claimed_by.is_none()
+                    && s.unplucked >= after
+                    && in_reach(opos, s.pos)
+            });
+            if due {
+                self.send_plucker(oi);
+            }
+        }
+    }
+
+    fn send_plucker(&mut self, oi: usize) {
+        let o = &self.onions[oi];
+        // The colour it holds most of, its best leaf stage.
+        let Some(color) = crate::PikiColor::ALL
+            .into_iter()
+            .filter(|&c| o.stored_of(c) > 0)
+            .max_by_key(|&c| o.stored_of(c))
+        else {
+            return;
+        };
+        let Some(happa) = [Happa::Flower, Happa::Bud, Happa::Leaf]
+            .into_iter()
+            .find(|&h| o.stored[color.index()][h as usize] > 0)
+        else {
+            return;
+        };
+        let (onion, opos, owner) = (o.id, o.pos, o.owner);
+        let leg = (self.rng.f32() * 3.0) as u8 % 3;
+        let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0)) else {
+            return;
+        };
+        self.onions[oi].stored[color.index()][happa as usize] -= 1;
+        let p = &mut self.pikis[id.0 as usize];
+        p.happa = happa;
+        p.captain = owner;
+        p.state = PikiState::Plucker(Plucker {
+            onion,
+            job: PluckerJob::Descend { leg, ratio: 1.0 },
+            skipped: [None; SKIPS],
+        });
+        self.events.push(Event::PluckerOut { piki: id, onion });
+    }
+
+    /// The nearest pluckable sprout around the plucker's Onion it hasn't given up on.
+    fn plucker_target(&self, pi: usize, pl: &Plucker) -> Option<SproutId> {
+        let opos = self.onions[pl.onion.0 as usize].pos;
+        let pos = self.pikis[pi].pos;
+        self.sprouts
+            .iter()
+            .flatten()
+            .filter(|s| s.pluckable() && s.claimed_by.is_none() && in_reach(opos, s.pos))
+            .filter(|s| !pl.skipped.contains(&Some(s.id)))
+            .min_by(|a, b| dist_xz(a.pos, pos).total_cmp(&dist_xz(b.pos, pos)))
+            .map(|s| s.id)
+    }
+
+    /// Picks its next job: another sprout, or home.
+    fn plucker_next(&mut self, pi: usize, pl: Plucker) {
+        match self.plucker_target(pi, &pl) {
+            Some(sprout) => {
+                self.pikis[pi].state = PikiState::Plucker(Plucker {
+                    job: PluckerJob::Walk { sprout, best: f32::MAX, stuck: 0.0 },
+                    ..pl
+                });
+            }
+            None => self.plucker_home(pi, pl.onion),
+        }
+    }
+
+    /// Back into its Onion up the nearest leg, or, if the Onion has left, off to its captain.
+    fn plucker_home(&mut self, pi: usize, onion: OnionId) {
+        let o = &self.onions[onion.0 as usize];
+        let p = &mut self.pikis[pi];
+        p.target_vel = Vec3::ZERO;
+        if o.grounded() {
+            let leg = (0..3u8)
+                .min_by(|&a, &b| {
+                    dist_xz(leg_point(o.pos, a, 0.0), p.pos).total_cmp(&dist_xz(leg_point(o.pos, b, 0.0), p.pos))
+                })
+                .unwrap_or(0);
+            p.state = PikiState::Enter { onion, leg, climbing: false, ratio: 0.0 };
+            return;
+        }
+        let id = p.id;
+        match p.captain.filter(|c| !self.captains[c.0 as usize].down) {
+            Some(c) => self.join_squad(id, c),
+            None => p.state = PikiState::Idle,
+        }
+    }
+
+    pub(crate) fn piki_plucker(&mut self, pi: usize, pl: Plucker, host: &mut dyn Host, dt: f32) {
+        // The Onion took off under it: it gives up and goes to its captain.
+        if !self.onions[pl.onion.0 as usize].grounded() && !matches!(pl.job, PluckerJob::Descend { .. }) {
+            return self.plucker_home(pi, pl.onion);
+        }
+        match pl.job {
+            PluckerJob::Descend { leg, ratio } => {
+                let opos = self.onions[pl.onion.0 as usize].pos;
+                let r = ratio - SLIDE_SPEED * dt / leg_length(leg);
+                let p = &mut self.pikis[pi];
+                p.pos = leg_point(opos, leg, r);
+                p.vel = Vec3::ZERO;
+                let d = p.pos - leg_point(opos, leg, 1.0);
+                p.face = d.x.atan2(d.z);
+                if r > 0.0 {
+                    p.state = PikiState::Plucker(Plucker { job: PluckerJob::Descend { leg, ratio: r }, ..pl });
+                    return;
+                }
+                p.on_ground = true;
+                self.plucker_next(pi, pl);
+            }
+            PluckerJob::Walk { sprout, best, stuck } => {
+                let Some(s) = self.sprouts.get(sprout.0 as usize).and_then(Option::as_ref)
+                    .filter(|s| s.pluckable() && s.claimed_by.is_none())
+                else {
+                    // Somebody else pulled it.
+                    return self.plucker_next(pi, pl);
+                };
+                let spos = s.pos;
+                let speed = self.piki_speed(pi, 1.0);
+                let p = &mut self.pikis[pi];
+                let to = (spos - p.pos).with_y(0.0);
+                let dist = to.length();
+                let dir = to.normalize_or_zero();
+                if dist <= PULL_DISTANCE + 2.0 {
+                    p.target_vel = Vec3::ZERO;
+                    p.vel = Vec3::ZERO;
+                    p.face = yaw_of(dir);
+                    p.state = PikiState::Plucker(Plucker {
+                        job: PluckerJob::Pull { sprout, frame: 0.0, popped: false },
+                        ..pl
+                    });
+                    return;
+                }
+                // Slow into the pulling spot instead of overshooting it.
+                let room = dist - PULL_DISTANCE;
+                p.target_vel = dir * speed.min(room / dt.max(1e-3));
+                p.face = round_ang(p.face + 0.3 * ang_dist(yaw_of(dir), p.face));
+                let (best, stuck) = if dist < best - 2.0 { (dist, 0.0) } else { (best, stuck + dt) };
+                if stuck >= STUCK_TIME {
+                    // Can't get there: leave it for the next outing (its clock starts over).
+                    let mut skipped = pl.skipped;
+                    if let Some(slot) = skipped.iter_mut().find(|s| s.is_none()) {
+                        *slot = Some(sprout);
+                    }
+                    if let Some(Some(s)) = self.sprouts.get_mut(sprout.0 as usize) {
+                        s.unplucked = 0.0;
+                    }
+                    self.physics(pi, host, dt);
+                    let pl = Plucker { skipped, ..pl };
+                    if skipped.iter().all(Option::is_some) {
+                        return self.plucker_home(pi, pl.onion);
+                    }
+                    return self.plucker_next(pi, pl);
+                }
+                p.state = PikiState::Plucker(Plucker { job: PluckerJob::Walk { sprout, best, stuck }, ..pl });
+                self.physics(pi, host, dt);
+            }
+            PluckerJob::Pull { sprout, frame, popped } => {
+                let anim = self.params.anim.nuku;
+                let f = frame + self.params.anim.fps * dt * self.attack_rate_of(pi);
+                let mut popped = popped;
+                self.pikis[pi].target_vel = Vec3::ZERO;
+                self.pikis[pi].vel = Vec3::ZERO;
+                if !popped && f >= anim.action0 {
+                    popped = true;
+                    let plucker = self.pikis[pi].id;
+                    let captain = self.pikis[pi].captain.filter(|c| !self.captains[c.0 as usize].down);
+                    let free = self.sprouts.get(sprout.0 as usize).and_then(Option::as_ref)
+                        .is_some_and(|s| s.pluckable() && s.claimed_by.is_none());
+                    if free && let Some(s) = self.sprouts[sprout.0 as usize].take() {
+                        if let Some(plucked) = self.spawn_from_sprout(s.color, s.happa, s.pos, captain) {
+                            self.events.push(Event::PluckerPulled { plucker, plucked, captain });
+                        } else {
+                            // Field full: leave it in the ground.
+                            self.sprouts[sprout.0 as usize] = Some(s);
+                        }
+                    }
+                }
+                if f >= anim.end {
+                    return self.plucker_next(pi, pl);
+                }
+                self.pikis[pi].state = PikiState::Plucker(Plucker {
+                    job: PluckerJob::Pull { sprout, frame: f, popped },
+                    ..pl
+                });
+            }
+        }
+    }
+
+    /// A plucked Pikmin: it pops up and runs to `captain`'s squad, or stands about if there's
+    /// no captain.
+    fn spawn_from_sprout(
+        &mut self,
+        color: crate::PikiColor,
+        happa: Happa,
+        pos: Vec3,
+        captain: Option<CaptainId>,
+    ) -> Option<crate::PikiId> {
+        let id = self.spawn_piki(color, pos)?;
+        let p = &mut self.pikis[id.0 as usize];
+        p.happa = happa;
+        p.vel = Vec3::new(0.0, 120.0, 0.0);
+        p.on_ground = false;
+        p.captain = captain;
+        if let Some(c) = captain {
+            self.join_squad(id, c);
+        }
+        Some(id)
+    }
+}
+
+fn in_reach(onion: Vec3, at: Vec3) -> bool {
+    dist_xz(onion, at) <= PLUCKER_RANGE && (at.y - onion.y).abs() < 200.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::FlatHost;
+    use crate::{Params, PikiColor, Sim};
+
+    fn run(sim: &mut Sim, host: &mut FlatHost, seconds: f32) {
+        for _ in 0..(seconds * crate::TICK_HZ as f32) as u32 {
+            sim.step(host);
+        }
+    }
+
+    #[test]
+    fn a_forgotten_sprout_is_plucked_by_the_onion_and_the_plucker_goes_home() {
+        let mut sim = Sim::new(Params::default(), 7);
+        let mut host = FlatHost;
+        let captain = sim.add_captain(Vec3::new(2000.0, 0.0, 0.0));
+        let onion = sim.add_onion(Vec3::ZERO, &PikiColor::ALL);
+        sim.set_onion_owner(onion, Some(captain));
+        // Far off, they lose the squad and come back to it (as in Risk of Rain 2).
+        sim.set_auto_rejoin(true);
+        sim.store_in_onion(onion, PikiColor::Red, Happa::Leaf, 1);
+        sim.set_auto_pluck(Some(2.0));
+        sim.plant_sprout(PikiColor::Blue, Vec3::new(150.0, 0.0, 0.0));
+        sim.plant_sprout(PikiColor::Yellow, Vec3::new(-150.0, 0.0, 60.0));
+
+        run(&mut sim, &mut host, 1.5);
+        assert!(!sim.pikis().iter().any(|p| matches!(p.state, PikiState::Plucker(_))), "too early");
+        run(&mut sim, &mut host, 1.0);
+        assert_eq!(sim.onions()[0].stored_total(), 0, "the plucker left the Onion");
+
+        let mut pulled = 0;
+        for _ in 0..(40 * crate::TICK_HZ) {
+            sim.step(&mut host);
+            pulled += sim
+                .drain_events()
+                .filter(|e| matches!(e, Event::PluckerPulled { captain: Some(c), .. } if *c == captain))
+                .count();
+        }
+        assert_eq!(pulled, 2);
+        assert_eq!(sim.sprouts().count(), 0);
+        assert_eq!(sim.onions()[0].stored_total(), 1, "the plucker climbed back in");
+        let squad = sim.pikis().iter().filter(|p| p.is_alive() && p.state.in_squad()).count();
+        assert_eq!(squad, 2, "plucked Pikmin joined the owner");
+    }
+
+    #[test]
+    fn no_plucker_without_pikmin_inside() {
+        let mut sim = Sim::new(Params::default(), 7);
+        let mut host = FlatHost;
+        let captain = sim.add_captain(Vec3::new(2000.0, 0.0, 0.0));
+        let onion = sim.add_onion(Vec3::ZERO, &PikiColor::ALL);
+        sim.set_onion_owner(onion, Some(captain));
+        sim.set_auto_pluck(Some(0.5));
+        sim.plant_sprout(PikiColor::Blue, Vec3::new(150.0, 0.0, 0.0));
+        run(&mut sim, &mut host, 5.0);
+        assert_eq!(sim.sprouts().count(), 1);
+        assert!(sim.pikis().is_empty());
+    }
+}

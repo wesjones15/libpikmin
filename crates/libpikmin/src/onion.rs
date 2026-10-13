@@ -70,6 +70,11 @@ pub struct Onion {
     pub fireworks: u32,
     /// Set for the ship (`UfoItem`): it takes ship parts instead of pellets.
     pub ship: Option<Ship>,
+    /// Host extension: the captain it belongs to. Its plucker's Pikmin join him, and its
+    /// emergency Pikmin come for him (see [`Sim::set_onion_owner`]).
+    pub owner: Option<CaptainId>,
+    /// Seconds its owner has had no Pikmin anywhere (see [`Sim::set_emergency_recovery`]).
+    pub(crate) extinct_for: f32,
 }
 
 /// The S.S. Dolphin as a carry goal (`UfoItem`).
@@ -158,6 +163,8 @@ pub struct Sprout {
     pub onion: Option<OnionId>,
     /// A captain is pulling this one.
     pub claimed_by: Option<CaptainId>,
+    /// Seconds it has stood pluckable with nobody pulling it (see [`Sim::set_auto_pluck`]).
+    pub unplucked: f32,
 }
 
 impl Sprout {
@@ -212,6 +219,8 @@ impl Sim {
             queue: VecDeque::new(),
             fireworks: 0,
             ship: None,
+            owner: None,
+            extinct_for: 0.0,
         });
         id
     }
@@ -232,6 +241,8 @@ impl Sim {
             queue: VecDeque::new(),
             fireworks: 0,
             ship: Some(Ship { goal, suck, parts: Vec::new() }),
+            owner: None,
+            extinct_for: 0.0,
         });
         id
     }
@@ -342,6 +353,7 @@ impl Sim {
             state,
             onion,
             claimed_by: None,
+            unplucked: 0.0,
         };
         if slot == self.sprouts.len() {
             self.sprouts.push(Some(s));
@@ -398,6 +410,8 @@ impl Sim {
 
     pub(crate) fn update_onions(&mut self, dt: f32) {
         let anim = self.params.anim.clone();
+        // Cooldown items (the host's growth rate) send seeds out sooner after feeding.
+        let feed = dt * self.growth_rate;
         for oi in 0..self.onions.len() {
             let o = &mut self.onions[oi];
             let colour = o.colors.first().map_or(0, |c| c.index());
@@ -422,7 +436,7 @@ impl Sim {
                     }
                 }
                 OnionAnim::Suction { frame } => {
-                    let f = frame + anim.fps * dt;
+                    let f = frame + anim.fps * feed;
                     o.anim = if f >= anim.goal_suction.end {
                         OnionAnim::Emitting { frame: 0.0 }
                     } else {
@@ -430,7 +444,7 @@ impl Sim {
                     };
                 }
                 OnionAnim::Emitting { frame } => {
-                    let mut f = frame + anim.fps * dt;
+                    let mut f = frame + anim.fps * feed;
                     let (start, end) = anim
                         .goal_flowrot
                         .loop_range
@@ -482,6 +496,7 @@ impl Sim {
     pub(crate) fn update_sprouts(&mut self, host: &mut dyn Host, dt: f32) {
         let gravity = self.params.ai.gravity;
         let pp = self.params.piki.clone();
+        let grow = dt * self.growth_rate;
         for si in 0..self.sprouts.len() {
             let r = self.rng.f32() * 2.0;
             let Some(s) = self.sprouts[si].as_mut() else {
@@ -512,7 +527,7 @@ impl Sim {
                     }
                 }
                 SproutState::Buried { timer } => {
-                    let t = timer - dt;
+                    let t = timer - grow;
                     s.state = if t < 0.0 {
                         SproutState::Tane {
                             timer: pp.pluck_wait_time + r,
@@ -522,7 +537,7 @@ impl Sim {
                     };
                 }
                 SproutState::Tane { timer } => {
-                    let t = timer - dt;
+                    let t = timer - grow;
                     s.state = if t < 0.0 {
                         SproutState::Ready {
                             timer: pp.grow_up_time + r,
@@ -532,7 +547,11 @@ impl Sim {
                     };
                 }
                 SproutState::Ready { timer } => {
-                    let t = timer - dt;
+                    if s.claimed_by.is_none() {
+                        s.unplucked += dt;
+                    }
+                    // Cooldown items hurry leaves and buds along, not a flower's wilting.
+                    let t = timer - if s.happa == Happa::Flower { dt } else { grow };
                     if t >= 0.0 || s.claimed_by.is_some() {
                         s.state = SproutState::Ready { timer: t };
                     } else if s.happa == Happa::Flower {
@@ -710,7 +729,7 @@ impl Sim {
                 let let_go = let_go || !held;
                 let hold_chains = self.params.extras.hold_to_chain_pluck;
                 let again = again || pressed || (held && (let_go || hold_chains));
-                let f = frame + fps * dt;
+                let f = frame + fps * dt * self.captains[ci].attack_rate;
                 if !popped && f >= anim.action0 {
                     popped = true;
                     if let Some(s) = self.sprouts[pl.sprout.0 as usize].take()

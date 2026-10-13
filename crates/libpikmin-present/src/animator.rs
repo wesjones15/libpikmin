@@ -10,6 +10,7 @@ use glam::Vec3;
 use libpikmin::captain::{ThrowState, WhistleState};
 use libpikmin::onion::{OnionAnim, OnionId, PluckPhase};
 use libpikmin::piki::AttackMode;
+use libpikmin::plucker::PluckerJob;
 use libpikmin::{Captain, CaptainId, Event, Onion, Params, Piki, PikiColor, PikiState, Sprout, SproutId, SproutState};
 use libpikmin_assets::motion::Motion;
 use libpikmin_assets::{Anim, AnimSet};
@@ -231,6 +232,19 @@ pub fn piki_look(params: &Params, p: &Piki) -> Option<PikiLook> {
             }
             (Motion::HNoboru, Clock::Loop(30.0))
         }
+        // The Onion's plucker: down a leg as called-out Pikmin come, then Olimar's own pluck
+        // (Pikmin and Navi share `pikis/animMgr.bin`, so the Pikmin model plays NUKU as is).
+        PikiState::Plucker(pl) => match pl.job {
+            PluckerJob::Descend { ratio, .. } => {
+                let k = libpikmin::onion_menu::SHRINK_FROM;
+                if ratio > k {
+                    scale = Vec3::splat(((1.0 - ratio) / (1.0 - k)).clamp(0.0, 1.0));
+                }
+                (Motion::HNoboru, Clock::Loop(30.0))
+            }
+            PluckerJob::Walk { .. } => walk,
+            PluckerJob::Pull { frame, .. } => (Motion::Nuku, Clock::Sim(frame)),
+        },
         PikiState::GrowUp { frame, second, .. } => (
             if second { Motion::GrowUp2 } else { Motion::GrowUp1 },
             Clock::Sim(frame),

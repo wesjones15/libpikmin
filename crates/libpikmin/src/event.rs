@@ -168,4 +168,34 @@ pub enum Event {
         piki: PikiId,
         sprout: SproutId,
     },
+    /// Host extension: an Onion sent `count` Pikmin to its owner, who had none left
+    /// ([`crate::Sim::set_emergency_recovery`]).
+    EmergencyPikmin {
+        onion: OnionId,
+        captain: CaptainId,
+        count: u32,
+    },
+    /// Host extension: a Pikmin came out of `onion` to pluck sprouts nobody pulled
+    /// ([`crate::Sim::set_auto_pluck`]).
+    PluckerOut { piki: PikiId, onion: OnionId },
+    /// The plucker pulled a sprout; `plucked` joins `captain` (if any).
+    PluckerPulled {
+        plucker: PikiId,
+        plucked: PikiId,
+        captain: Option<CaptainId>,
+    },
+    /// Host extension: `captain` jumped; `air` for a mid-air jump (Hopoo Feather).
+    CaptainJumped { captain: CaptainId, air: bool },
+    /// Host extension: `captain`'s stomp hit the ground at `pos` after falling `drop` units.
+    CaptainStomped {
+        captain: CaptainId,
+        pos: Vec3,
+        drop: f32,
+    },
+    /// Host extension: one of `captain`'s Pikmin stomped down with him and landed at `pos`.
+    PikiStomped {
+        piki: PikiId,
+        captain: CaptainId,
+        pos: Vec3,
+    },
 }

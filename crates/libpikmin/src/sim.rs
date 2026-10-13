@@ -30,6 +30,16 @@ pub struct Sim {
     pub(crate) auto_rejoin: bool,
     /// See [`Sim::set_shake_protection`], in ticks.
     shake_protection: u64,
+    /// See [`Sim::set_rejoin_delay`].
+    pub(crate) rejoin_delay: f32,
+    /// See [`Sim::set_growth_rate`].
+    pub(crate) growth_rate: f32,
+    /// See [`Sim::set_auto_carry_range`].
+    pub(crate) auto_carry_range: f32,
+    /// See [`Sim::set_auto_pluck`].
+    pub(crate) auto_pluck_after: Option<f32>,
+    /// See [`Sim::set_emergency_recovery`]: (seconds, Pikmin).
+    pub(crate) recovery: Option<(f32, u32)>,
 }
 
 impl Default for Sim {
@@ -58,6 +68,11 @@ impl Sim {
             pending_shakes: Vec::new(),
             auto_rejoin: false,
             shake_protection: 0,
+            rejoin_delay: 0.5,
+            growth_rate: 1.0,
+            auto_carry_range: 0.0,
+            auto_pluck_after: None,
+            recovery: None,
         }
     }
 
@@ -207,6 +222,8 @@ impl Sim {
         self.update_onions(dt);
         self.update_onion_exits(dt);
         self.update_sprouts(host, dt);
+        self.update_auto_pluck(dt);
+        self.update_recovery(dt);
         self.separate();
         self.tick += 1;
     }

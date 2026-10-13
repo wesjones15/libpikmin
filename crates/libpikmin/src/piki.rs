@@ -162,6 +162,8 @@ pub enum PikiState {
         leg: u8,
         ratio: f32,
     },
+    /// Host extension: an Onion's plucker, out pulling forgotten sprouts (`plucker.rs`).
+    Plucker(crate::plucker::Plucker),
     /// Gone.
     Dead,
 }
@@ -290,6 +292,7 @@ impl Sim {
             PikiState::Attack(a) => self.piki_attack(pi, a, host, dt),
             PikiState::Absorb { .. } | PikiState::GrowUp { .. } => self.piki_nectar(pi, host, dt),
             PikiState::Enter { .. } | PikiState::Exit { .. } => self.piki_onion_travel(pi, host, dt),
+            PikiState::Plucker(pl) => self.piki_plucker(pi, pl, host, dt),
             PikiState::Knocked { phase, whistled } => self.piki_knocked(pi, phase, whistled, host, dt),
         }
     }
@@ -327,7 +330,17 @@ impl Sim {
             Happa::Bud if scale => pp.max_bud_move_speed,
             _ => pp.max_leaf_move_speed,
         };
-        (max - pp.min_move_speed) * ratio + pp.min_move_speed
+        ((max - pp.min_move_speed) * ratio + pp.min_move_speed) * self.squad_speed_of(pi)
+    }
+
+    /// Its captain's [`crate::Captain::squad_speed`].
+    fn squad_speed_of(&self, pi: usize) -> f32 {
+        self.pikis[pi].captain.map_or(1.0, |c| self.captains[c.0 as usize].squad_speed)
+    }
+
+    /// Its captain's [`crate::Captain::attack_rate`]: how fast its attack animations play.
+    pub(crate) fn attack_rate_of(&self, pi: usize) -> f32 {
+        self.pikis[pi].captain.map_or(1.0, |c| self.captains[c.0 as usize].attack_rate)
     }
 
     /// `Piki::getAttackPower`
@@ -343,7 +356,7 @@ impl Sim {
     fn piki_idle(&mut self, pi: usize, host: &mut dyn Host, dt: f32) {
         self.pikis[pi].target_vel = Vec3::ZERO;
         self.pikis[pi].idle_time += dt;
-        if self.try_rejoin(pi) {
+        if self.try_auto_carry(pi) || self.try_rejoin(pi) {
             self.physics(pi, host, dt);
             return;
         }
@@ -384,6 +397,9 @@ impl Sim {
             unreachable!()
         };
         if cue.is_none() && formed && self.squad_contact(pi, swarming) {
+            return;
+        }
+        if cue.is_none() && !swarming && self.try_auto_carry(pi) {
             return;
         }
 
@@ -699,7 +715,7 @@ impl Sim {
             // The cling animation loops, so it never finishes and aiconst p10 ("attack once")
             // never lets go: latched Pikmin hit once per loop until shaken off or the target dies.
             let anim = self.params.anim.kuttuku;
-            let mut frame = frame + self.params.anim.fps * dt;
+            let mut frame = frame + self.params.anim.fps * dt * self.attack_rate_of(pi);
             let mut hit = hit;
             match anim.loop_range {
                 Some((start, end)) if frame >= end => {
@@ -754,7 +770,7 @@ impl Sim {
         let full = self.piki_speed(pi, 1.0);
         let dmg = self.attack_power(pi);
         let anim = self.params.anim.attack;
-        let fps = self.params.anim.fps;
+        let fps = self.params.anim.fps * self.attack_rate_of(pi);
         let attack_once = self.params.ai.attack_once != 0;
         let r = self.rng.f32();
 
@@ -999,9 +1015,8 @@ impl Sim {
     /// a throw with nothing to do, fallen out of formation) goes back to its captain's squad
     /// after a moment, wherever he is. Dismissed Pikmin stay where they were left.
     fn try_rejoin(&mut self, pi: usize) -> bool {
-        const DELAY: f32 = 0.5;
         let p = &self.pikis[pi];
-        if !self.auto_rejoin || p.dismissed || p.idle_time < DELAY || !p.on_ground {
+        if !self.auto_rejoin || p.dismissed || p.idle_time < self.rejoin_delay || !p.on_ground {
             return false;
         }
         let Some(cid) = p.captain else {
