@@ -749,7 +749,8 @@ impl View {
             let k = key(kinds::CAPTAIN, c.id.0 as u64);
             let (pos, rot) = self.place_rot(k, c.pos, Quat::from_rotation_y(c.face), tick, alpha);
             let anim = self.animator.captain(&self.piki_anims, &params, c, dt);
-            let pose = self.models[models::OLIMAR as usize].skel.pose(Mat4::IDENTITY, anim);
+            let root = crate::animator::captain_root(&params, c);
+            let pose = self.models[models::OLIMAR as usize].skel.pose(root, anim);
             let flash = c.damage_frames > 0.0 && (c.damage_frames as i32 / 2) % 2 == 0;
             let f = if flash { flags::FLASH } else { 0 };
             // The whistle's beam starts at the antenna (`Navi::demoDraw`'s 'ante' sphere).

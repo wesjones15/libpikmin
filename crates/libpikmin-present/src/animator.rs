@@ -300,6 +300,25 @@ pub fn captain_motion(params: &Params, c: &Captain, throwing: bool) -> (Motion, 
     }
 }
 
+/// How far Olimar tips forward while jumping. His jump reuses the geyser ride (`OCarry`),
+/// whose loop lies him on his back with his head behind him; tipped this far he rides it
+/// feet first instead of lying in the air.
+pub const JUMP_TILT_DEGREES: f32 = 75.0;
+
+/// The captain's model root, in his own frame (multiply under his position and facing): an
+/// identity, except while he jumps, when [`JUMP_TILT_DEGREES`] stands the geyser pose up.
+/// It pivots at the height his body lies at, lifted so his feet stay above his origin.
+pub fn captain_root(params: &Params, c: &Captain) -> glam::Mat4 {
+    use glam::Mat4;
+    if captain_motion(params, c, false).0 != Motion::OCarry {
+        return Mat4::IDENTITY;
+    }
+    let pivot = Vec3::new(0.0, 3.0, 0.0);
+    Mat4::from_translation(pivot + Vec3::Y * 4.0)
+        * Mat4::from_rotation_x(JUMP_TILT_DEGREES.to_radians())
+        * Mat4::from_translation(-pivot)
+}
+
 /// An Onion's motion (`GoalItem`, goalItem.cpp): its AnimMgr index and clock, or `None`
 /// while it's away. `GoalItem::mOnionColour` order (blue, red, yellow) picks the flight
 /// motions.

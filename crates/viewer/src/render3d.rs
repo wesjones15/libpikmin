@@ -1077,7 +1077,8 @@ impl Scene3d {
         let mut whistles = Vec::new();
         for (i, c) in sim.captains().iter().enumerate() {
             let anim = self.animator.captain(&self.piki_anims, &params, c, dt);
-            let root = srt_matrix(GVec3::ONE, GVec3::new(0.0, c.face, 0.0), c.pos);
+            let root = srt_matrix(GVec3::ONE, GVec3::new(0.0, c.face, 0.0), c.pos)
+                * libpikmin_present::animator::captain_root(&params, c);
             let flash = c.damage_frames > 0.0 && (c.damage_frames as i32 / 2) % 2 == 0;
             let joints = draw_model(
                 &self.olimar,
