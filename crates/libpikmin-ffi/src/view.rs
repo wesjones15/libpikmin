@@ -128,6 +128,9 @@ pub struct PikViewFrame {
     pub listener: i32,
     /// Sound volume 0..1.
     pub volume: f32,
+    /// Ticks behind the newest sim state to draw, 0..1. Hosts stepping in FixedUpdate
+    /// pass `StepSmoother.LagTicks(render_alpha, 1)`; zero draws the latest state.
+    pub lag: f32,
 }
 
 /// An opaque view handle.
@@ -450,7 +453,8 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
             let right = Vec3::from(f.up).cross(fwd).normalize_or(Vec3::X);
             let up = fwd.cross(right);
             v.view.set_camera(right, up, fwd);
-            v.view.update(&s.sim, s.sim.alpha(), dt);
+            let alpha = if f.lag.is_finite() { 1.0 - f.lag.clamp(0.0, 1.0) } else { 1.0 };
+            v.view.update(&s.sim, alpha, dt);
             v.view.particles(right, up);
             v.particles.clear();
             v.particles.extend(v.view.particles.quads.iter().map(|q| PikParticle {

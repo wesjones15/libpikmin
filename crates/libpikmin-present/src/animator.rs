@@ -325,18 +325,54 @@ struct SproutTrack {
     motion: PikiHeadMotion,
 }
 
+struct FrameTrack {
+    motion: usize,
+    tick: u64,
+    prev: f32,
+    cur: f32,
+}
+
 /// Animation players for every drawn object, and the little state the sim doesn't keep.
 #[derive(Default)]
 pub struct Animator {
     pub players: HashMap<u64, Player>,
     sprouts: HashMap<SproutId, SproutTrack>,
     throw_timer: HashMap<CaptainId, f32>,
+    render: Option<(u64, f32)>,
+    frames: HashMap<u64, FrameTrack>,
     /// Sprout animation sound keys hit this frame: (parent Onion, value, position). Drained by
     /// the caller.
     pub sprout_sounds: Vec<(Option<OnionId>, u8, Vec3)>,
 }
 
 impl Animator {
+    /// The same point between sim ticks as the body's position and facing. Standalone
+    /// animator callers retain the original clocks unless they opt in here.
+    pub fn render_clock(&mut self, tick: u64, alpha: f32) {
+        self.render = Some((tick, alpha.clamp(0.0, 1.0)));
+    }
+
+    fn clock(&mut self, key: u64, motion: usize, clock: Clock) -> Clock {
+        let Some((tick, alpha)) = self.render else { return clock; };
+        let value = match clock {
+            Clock::Sim(f) => f,
+            _ => { self.frames.remove(&key); return clock; }
+        };
+        let track = self.frames.entry(key).or_insert(FrameTrack {
+            motion, tick, prev: value, cur: value,
+        });
+        // A new clip or a counter wrapping/restarting must not blend back across its end.
+        if track.motion != motion || value < track.cur {
+            *track = FrameTrack { motion, tick, prev: value, cur: value };
+        } else if track.tick != tick {
+            track.prev = track.cur;
+            track.cur = value;
+            track.tick = tick;
+        }
+        let frame = track.prev + (track.cur - track.prev) * alpha;
+        Clock::Sim(frame)
+    }
+
     pub fn on_event(&mut self, e: &Event) {
         if let Event::Thrown { captain, .. } = e {
             // The throw motion's length (`NaviThrowState`).
@@ -356,11 +392,13 @@ impl Animator {
     }
 
     pub fn piki<'a>(&mut self, set: &'a AnimSet, p: &Piki, look: &PikiLook, dt: f32) -> Option<(&'a Anim, f32)> {
-        advance(&mut self.players, piki_key(p.id), set, look.motion, look.clock, dt)
+        let clock = self.clock(piki_key(p.id), look.motion.anim_index()?, look.clock);
+        advance(&mut self.players, piki_key(p.id), set, look.motion, clock, dt)
     }
 
     pub fn captain<'a>(&mut self, set: &'a AnimSet, params: &Params, c: &Captain, dt: f32) -> Option<(&'a Anim, f32)> {
         let (motion, clock) = captain_motion(params, c, self.throwing(c.id));
+        let clock = self.clock(captain_key(c.id), motion.anim_index()?, clock);
         advance(&mut self.players, captain_key(c.id), set, motion, clock, dt)
     }
 
@@ -375,6 +413,7 @@ impl Animator {
     ) -> Option<(usize, Posed<'a>, Option<f32>)> {
         let (motion_idx, clock) = onion_motion(o)?;
         let key = onion_key(index);
+        let clock = self.clock(key, motion_idx, clock);
         let before = self.players.get(&key).filter(|p| p.anim == motion_idx).map(|p| p.frame);
         let anim = advance_index(&mut self.players, key, set, motion_idx, clock, dt);
         Some((motion_idx, anim, before))
@@ -450,5 +489,34 @@ impl Animator {
     /// Forgets the players of objects not drawn this frame (by key).
     pub fn retain_players(&mut self, live: &std::collections::HashSet<u64>) {
         self.players.retain(|k, _| live.contains(k));
+        self.frames.retain(|k, _| live.contains(k));
+    }
+}
+
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+
+    fn frame(clock: Clock) -> f32 {
+        match clock { Clock::Sim(f) | Clock::Progress(f) => f, _ => panic!("not a sampled clock") }
+    }
+
+    #[test]
+    fn sim_poses_advance_between_ticks_and_reset_on_clip_changes() {
+        let mut animator = Animator::default();
+        animator.render_clock(1, 0.0);
+        assert_eq!(frame(animator.clock(0, 1, Clock::Sim(4.0))), 4.0);
+        for alpha in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            animator.render_clock(2, alpha);
+            assert_eq!(frame(animator.clock(0, 1, Clock::Sim(6.0))), 4.0 + 2.0 * alpha);
+        }
+        animator.render_clock(3, 0.5);
+        assert_eq!(frame(animator.clock(0, 2, Clock::Sim(1.0))), 1.0);
+        animator.render_clock(4, 0.5);
+        assert_eq!(frame(animator.clock(0, 2, Clock::Sim(0.0))), 0.0);
+        // Host-driven landing/takeoff progress can change without a sim tick.
+        assert_eq!(frame(animator.clock(1, 2, Clock::Progress(0.2))), 0.2);
+        animator.render_clock(5, 0.5);
+        assert_eq!(frame(animator.clock(1, 2, Clock::Progress(0.4))), 0.4);
     }
 }

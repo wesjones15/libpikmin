@@ -209,7 +209,49 @@ fn key(kind: u8, id: u64) -> u64 {
 struct Interp {
     prev: Vec3,
     cur: Vec3,
+    prev_rot: Quat,
+    cur_rot: Quat,
     tick: u64,
+}
+
+impl Interp {
+    fn new(at: Vec3, rot: Quat, tick: u64) -> Self {
+        Self { prev: at, cur: at, prev_rot: rot, cur_rot: rot, tick }
+    }
+
+    fn sample(&mut self, at: Vec3, rot: Quat, tick: u64, alpha: f32) -> (Vec3, Quat) {
+        if self.tick != tick {
+            // A respawn or teleport starts a fresh blend for both position and facing.
+            let jumped = (at - self.cur).length() > 200.0;
+            self.prev = if jumped { at } else { self.cur };
+            self.prev_rot = if jumped { rot } else { self.cur_rot };
+            self.cur = at;
+            self.cur_rot = rot;
+            self.tick = tick;
+        }
+        (self.prev.lerp(self.cur, alpha), self.prev_rot.slerp(self.cur_rot, alpha))
+    }
+}
+
+#[cfg(test)]
+mod interpolation_tests {
+    use super::*;
+
+    #[test]
+    fn position_and_facing_share_the_render_fraction() {
+        let start = Quat::from_rotation_y(179f32.to_radians());
+        let end = Quat::from_rotation_y(-179f32.to_radians());
+        let mut state = Interp::new(Vec3::ZERO, start, 1);
+        for alpha in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let (at, rot) = state.sample(Vec3::X * 10.0, end, 2, alpha);
+            assert!((at.x - 10.0 * alpha).abs() < 1e-5);
+            let expected = Quat::from_rotation_y((179.0 + 2.0 * alpha).to_radians());
+            assert!(rot.dot(expected).abs() > 0.99999, "facing took the long path");
+        }
+        let (at, rot) = state.sample(Vec3::X * 500.0, Quat::IDENTITY, 3, 0.0);
+        assert_eq!(at, Vec3::X * 500.0);
+        assert_eq!(rot, Quat::IDENTITY);
+    }
 }
 
 struct ShipFlight {
@@ -432,14 +474,11 @@ impl View {
 
     /// Where an object is between the last two ticks (`alpha` 0..1 into the next tick).
     fn place(&mut self, k: u64, at: Vec3, tick: u64, alpha: f32) -> Vec3 {
-        let e = self.interp.entry(k).or_insert(Interp { prev: at, cur: at, tick });
-        if e.tick != tick {
-            // A jump (an Onion's Pikmin coming out, a respawn) isn't smoothed.
-            e.prev = if (at - e.cur).length() > 200.0 { at } else { e.cur };
-            e.cur = at;
-            e.tick = tick;
-        }
-        e.prev.lerp(e.cur, alpha)
+        self.place_rot(k, at, Quat::IDENTITY, tick, alpha).0
+    }
+
+    fn place_rot(&mut self, k: u64, at: Vec3, rot: Quat, tick: u64, alpha: f32) -> (Vec3, Quat) {
+        self.interp.entry(k).or_insert_with(|| Interp::new(at, rot, tick)).sample(at, rot, tick, alpha)
     }
 
     /// Skins `model` posed by `pose_root`/`anim`, appends a draw, and returns the joints.
@@ -498,6 +537,7 @@ impl View {
         self.time += dt;
         self.animator.begin_frame(dt);
         let tick = sim.tick();
+        self.animator.render_clock(tick, alpha);
         let params = sim.params().clone();
         let mut live = HashSet::new();
         let no_inputs = |_: usize| Inputs::default();
@@ -614,7 +654,8 @@ impl View {
             }
             let frame = o.colors[0].index() as f32 * 2.0;
             let inputs = move |_: usize| Inputs { frame: Some(frame), ..Default::default() };
-            self.push(k, kinds::ONION, models::ONION, o.pos, Quat::IDENTITY, pose, &inputs, 1.0, 0);
+            let pos = self.place(k, o.pos, tick, alpha);
+            self.push(k, kinds::ONION, models::ONION, pos, Quat::IDENTITY, pose, &inputs, 1.0, 0);
         }
         self.arrivals.clear();
 
@@ -639,11 +680,11 @@ impl View {
             let s = pel.desc.radius / bottom * pel.scale;
             let lift = -vm.lo.y * s;
             let k = key(kinds::PELLET, pel.id.0 as u64);
-            let pos = self.place(k, pel.pos + Vec3::Y * lift, tick, alpha);
+            let (pos, rot) = self.place_rot(k, pel.pos + Vec3::Y * lift, Quat::from_rotation_y(pel.yaw), tick, alpha);
             let pose = self.models[model as usize].skel.pose(srt_matrix(Vec3::splat(s), Vec3::ZERO, Vec3::ZERO), None);
             let tint = pel.desc.color.map(piki_rgb).unwrap_or([230, 230, 230, 255]);
             let inputs = move |_: usize| Inputs { reg0: Some(tint), ..Default::default() };
-            self.push(k, kinds::PELLET, model, pos, Quat::from_rotation_y(pel.yaw), pose, &inputs, 1.0, 0);
+            self.push(k, kinds::PELLET, model, pos, rot, pose, &inputs, 1.0, 0);
         }
 
         // Sprouts and flying seeds, with the leaf, bud or flower on joint 3.
@@ -652,7 +693,6 @@ impl View {
             live_sprouts.push(sp.id);
             live.insert(crate::animator::sprout_key(sp.id));
             let k = key(kinds::SPROUT, sp.id.0 as u64);
-            let pos = self.place(k, sp.pos, tick, alpha);
             let anim = self.animator.sprout(&self.pikihead_anims, sp, dt);
             let rot = if matches!(sp.state, SproutState::Flying) && sp.vel.length() > 0.0 {
                 // Flying seeds point their Y axis against their velocity.
@@ -664,6 +704,7 @@ impl View {
                 Quat::IDENTITY
             };
             let pose = self.models[models::PIKIHEAD as usize].skel.pose(Mat4::IDENTITY, anim);
+            let (pos, rot) = self.place_rot(k, sp.pos, rot, tick, alpha);
             let head = pose.joints.get(3).copied();
             let tint = piki_rgb(sp.color);
             let inputs = move |m: usize| Inputs { material: (m == 0).then_some(tint), ..Default::default() };
@@ -684,9 +725,8 @@ impl View {
             };
             live.insert(crate::animator::piki_key(p.id));
             let k = key(kinds::PIKI, p.id.0 as u64);
-            let pos = self.place(k, p.pos, tick, alpha);
+            let (pos, rot) = self.place_rot(k, p.pos, Quat::from_rotation_y(p.face), tick, alpha);
             let anim = self.animator.piki(&self.piki_anims, p, &look, dt);
-            let rot = Quat::from_rotation_y(p.face);
             let model = models::PIKMIN[p.color.index()];
             let pose = self.models[model as usize].skel.pose(srt_matrix(look.scale, Vec3::ZERO, Vec3::ZERO), anim);
             let head = pose.joints.get(6).copied();
@@ -707,13 +747,12 @@ impl View {
         for c in sim.captains() {
             live.insert(crate::animator::captain_key(c.id));
             let k = key(kinds::CAPTAIN, c.id.0 as u64);
-            let pos = self.place(k, c.pos, tick, alpha);
+            let (pos, rot) = self.place_rot(k, c.pos, Quat::from_rotation_y(c.face), tick, alpha);
             let anim = self.animator.captain(&self.piki_anims, &params, c, dt);
             let pose = self.models[models::OLIMAR as usize].skel.pose(Mat4::IDENTITY, anim);
             let flash = c.damage_frames > 0.0 && (c.damage_frames as i32 / 2) % 2 == 0;
             let f = if flash { flags::FLASH } else { 0 };
             // The whistle's beam starts at the antenna (`Navi::demoDraw`'s 'ante' sphere).
-            let rot = Quat::from_rotation_y(c.face);
             let antenna = self
                 .ante
                 .as_ref()

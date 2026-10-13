@@ -72,7 +72,7 @@ fn struct_sizes_are_what_hosts_mirror() {
         (s.captain, s.piki, s.pellet, s.onion, s.sprout, s.event, s.onion_counts),
         (60, 64, 64, 36, 20, 48, 16)
     );
-    assert_eq!((s.model_info, s.batch, s.texture, s.draw, s.view_frame, s.particle), (40, 24, 12, 64, 48, 72));
+    assert_eq!((s.model_info, s.batch, s.texture, s.draw, s.view_frame, s.particle), (40, 24, 12, 64, 52, 72));
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn the_view_poses_a_sim_through_the_abi() {
         let mut world = World::default();
         let h = host(&mut world);
         pik_sim_set_input(sim, 0, &PikInput { throw: 1, ..Default::default() });
-        let frame = PikViewFrame {
+        let mut frame = PikViewFrame {
             dt: 1.0 / 60.0,
             forward: PikVec3 { x: 0.0, y: 0.0, z: 1.0 },
             up: PikVec3 { x: 0.0, y: 1.0, z: 0.0 },
@@ -173,6 +173,7 @@ fn the_view_poses_a_sim_through_the_abi() {
         };
         for _ in 0..30 {
             pik_sim_advance(sim, &h, 1.0 / 60.0);
+            frame.lag = 1.0 - pik_sim_alpha(sim);
             pik_view_update(view, sim, &frame);
         }
         let n = pik_view_draws(view, std::ptr::null_mut(), 0);
@@ -215,6 +216,7 @@ fn the_view_poses_a_sim_through_the_abi() {
         pik_sim_set_input(sim, 0, &PikInput { whistle: 1, ..Default::default() });
         for _ in 0..20 {
             pik_sim_advance(sim, &h, 1.0 / 60.0);
+            frame.lag = 1.0 - pik_sim_alpha(sim);
             pik_view_update(view, sim, &frame);
         }
         let mut pc = 0u32;
