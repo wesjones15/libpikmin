@@ -1741,6 +1741,24 @@ pub unsafe extern "C" fn pik_sim_set_growth(sim: *mut PikSim, growth_rate: f32, 
     }
 }
 
+/// [`Sim::give_onion_seeds`]: `seeds` more of `color` for the Onion to send out (Backup
+/// Magazine's extra sprouts per delivery).
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_give_onion_seeds(sim: *mut PikSim, onion: u32, color: u32, seeds: u32) {
+    let Some(color) = color_arg(color) else { return };
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, (), |s| {
+            if onion_ok(&s.sim, onion) {
+                s.sim.give_onion_seeds(OnionId(onion), color, seeds.min(100));
+            }
+        })
+    }
+}
+
 /// [`Sim::set_auto_carry_range`], in sim units (0 off).
 ///
 /// # Safety
