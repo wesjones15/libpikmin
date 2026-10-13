@@ -14,10 +14,8 @@ use crate::{CaptainId, Host, PikiId};
 const CURSOR_PROBE_LIFT: f32 = 100.0;
 /// How high above his feet the locked-on cursor looks back at him (host extension).
 const LOCK_EYE_HEIGHT: f32 = 24.0;
-/// A target this big (its parts' bounding radius) draws the cursor at its usual size; bigger
-/// ones scale it up, to `LOCK_MAX_SCALE` times.
-const LOCK_SCALE_SIZE: f32 = 40.0;
-const LOCK_MAX_SCALE: f32 = 6.0;
+/// The locked-on cursor stays at least this far from the captain's eye.
+const LOCK_MIN_DISTANCE: f32 = 20.0;
 /// Clear space between a locked-on target's surface and its cursor.
 const LOCK_MARGIN: f32 = 4.0;
 
@@ -82,16 +80,14 @@ pub enum ThrowState {
 }
 
 /// Host extension: where to draw a locked-on cursor. Pikmin 1's cursor lies on the ground; the
-/// part a lock aims at can be inside the enemy, so the view stands the cursor up in front of
-/// it, facing the captain.
+/// part a lock aims at can be anywhere on the enemy, so the view stands the cursor up in front
+/// of its whole body, facing the captain, at the usual size.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LockView {
-    /// On the target's surface toward the captain, clear of its other parts.
+    /// In front of the middle of the target's body as the captain sees it.
     pub pos: Vec3,
     /// The captain's eye, which the cursor faces.
     pub eye: Vec3,
-    /// How much bigger than usual to draw it: grows with the target so it reads on a big enemy.
-    pub scale: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -516,9 +512,8 @@ impl Sim {
             c.cursor_world = part.centre;
             c.cursor = Vec3::new(part.centre.x - c.pos.x, 0., part.centre.z - c.pos.z);
             let eye = c.pos + Vec3::Y * LOCK_EYE_HEIGHT;
-            let pos = lock_marker(self.creatures.parts_of(target), part, eye);
-            let (_, size) = self.creatures.bounds(target);
-            c.lock_view = Some(LockView { pos, eye, scale: (size / LOCK_SCALE_SIZE).clamp(1.0, LOCK_MAX_SCALE) });
+            let pos = lock_marker(self.creatures.parts_of(target), eye);
+            c.lock_view = Some(LockView { pos, eye });
         }
     }
 
@@ -1020,19 +1015,38 @@ impl Sim {
     }
 }
 
-/// Where a locked-on cursor floats: the aimed part's surface on the line to `eye`, then out
-/// along that line past any other part of the same creature that covers it, so it is never
-/// buried in the enemy's body.
-fn lock_marker(parts: &[crate::CreaturePart], aimed: &crate::CreaturePart, eye: Vec3) -> Vec3 {
-    let toward = (eye - aimed.centre).normalize_or(Vec3::Y);
-    let mut at = aimed.centre + toward * aimed.radius;
-    for _ in 0..4 {
-        let Some(cover) = parts.iter().find(|p| (at - p.centre).length() < p.radius) else { break };
-        let ray = (eye - at).normalize_or(toward);
-        let oc = at - cover.centre;
-        let b = oc.dot(ray);
-        let reach = -b + (b * b - (oc.length_squared() - cover.radius * cover.radius)).max(0.0).sqrt();
-        at += ray * (reach + 0.5);
+/// Where a locked-on cursor floats: on the line from `eye` to the middle of the creature's
+/// whole body (the box around all its parts, not the one part the lock aims at), just in
+/// front of the first part that line enters. If it misses every part it hangs at the middle.
+fn lock_marker(parts: &[crate::CreaturePart], eye: Vec3) -> Vec3 {
+    let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+    for p in parts {
+        lo = lo.min(p.centre - Vec3::splat(p.radius));
+        hi = hi.max(p.centre + Vec3::splat(p.radius));
     }
-    at + toward * LOCK_MARGIN
+    let middle = (lo + hi) * 0.5;
+    let to = middle - eye;
+    let dist = to.length();
+    let dir = to.normalize_or(Vec3::Z);
+    let mut enter = dist;
+    let mut hit = false;
+    for p in parts {
+        let oc = eye - p.centre;
+        let b = oc.dot(dir);
+        let disc = b * b - (oc.length_squared() - p.radius * p.radius);
+        if disc < 0.0 {
+            continue;
+        }
+        let (near, far) = (-b - disc.sqrt(), -b + disc.sqrt());
+        if far < 0.0 {
+            continue;
+        }
+        let t = near.max(0.0);
+        if !hit || t < enter {
+            enter = t;
+            hit = true;
+        }
+    }
+    let t = if hit { enter - LOCK_MARGIN } else { dist };
+    eye + dir * t.max(LOCK_MIN_DISTANCE.min(dist))
 }

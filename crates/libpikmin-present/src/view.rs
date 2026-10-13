@@ -844,10 +844,9 @@ impl View {
             }
 
             // On the ground 1 above, Z pointing away from the captain. Locked on, it stands up
-            // in front of the target instead (the part it aims at can be inside the enemy),
-            // face toward the captain, bigger on a bigger enemy.
+            // in front of the target's body instead, facing the captain.
             let kc = key(kinds::CURSOR, c.id.0 as u64);
-            let (at, rot, scale) = match c.lock_view {
+            let (at, rot) = match c.lock_view {
                 Some(lock) => {
                     let at = self.place(kc, lock.pos, tick, alpha);
                     let up = (lock.eye - at).normalize_or(Vec3::Y);
@@ -856,19 +855,18 @@ impl View {
                     let z = x.cross(up);
                     // It turns slowly about the line to the captain so it reads as a lock.
                     let spin = Quat::from_rotation_y(self.time * LOCK_SPIN);
-                    (at, Quat::from_mat3(&Mat3::from_cols(x, up, z)) * spin, lock.scale)
+                    (at, Quat::from_mat3(&Mat3::from_cols(x, up, z)) * spin)
                 }
                 None => {
                     let at = self.place(kc, c.cursor_world.with_y(c.cursor_world.y + 1.0), tick, alpha);
                     let z = (at - pos).with_y(0.0).normalize_or(Vec3::Z);
                     let x = Vec3::Y.cross(z).normalize_or(Vec3::X);
-                    (at, Quat::from_mat3(&Mat3::from_cols(x, Vec3::Y, z)), 1.0)
+                    (at, Quat::from_mat3(&Mat3::from_cols(x, Vec3::Y, z)))
                 }
             };
             let time = self.time;
             let inputs = move |_: usize| Inputs { frame: Some(time * 30.0), ..Default::default() };
-            let root = Mat4::from_scale(Vec3::splat(scale));
-            let pose = self.models[models::CURSOR as usize].skel.pose(root, None);
+            let pose = self.models[models::CURSOR as usize].skel.pose(Mat4::IDENTITY, None);
             self.push(kc, kinds::CURSOR, models::CURSOR, at, rot, pose, &inputs, 1.0, 0);
             // The marker takes the next Pikmin to throw's colour (`findNextThrowPiki`: the
             // nearest squad Pikmin within 200), else white.
@@ -883,7 +881,7 @@ impl View {
             });
             let tint = next.map(piki_rgb).unwrap_or([255; 4]);
             let inputs = move |m: usize| Inputs { material: (m == 0).then_some(tint), ..Default::default() };
-            let pose = self.models[models::MARKER as usize].skel.pose(root, None);
+            let pose = self.models[models::MARKER as usize].skel.pose(Mat4::IDENTITY, None);
             let km = key(kinds::MARKER, c.id.0 as u64);
             self.push(km, kinds::MARKER, models::MARKER, at, rot, pose, &inputs, 1.0, 0);
         }

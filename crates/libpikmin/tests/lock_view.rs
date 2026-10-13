@@ -1,4 +1,5 @@
-//! Where the locked-on cursor is drawn: in front of the enemy, whatever its shape or size.
+//! Where the locked-on cursor is drawn: in front of the middle of the enemy's body, whatever
+//! its shape or size, at the same size as ever.
 
 use libpikmin::{CaptainId, CreatureFrame, CreaturePart, Host, Params, Sim, Vec3};
 
@@ -33,39 +34,62 @@ fn locked(parts: Vec<CreaturePart>) -> (Sim, Enemy, CaptainId) {
 }
 
 #[test]
-fn the_cursor_floats_on_the_surface_facing_the_captain() {
+fn a_single_sphere_gets_the_cursor_on_its_near_side() {
     let aim = Vec3::new(200.0, 30.0, 0.0);
     let (sim, _, c) = locked(vec![part(aim, 20.0, true)]);
     let view = sim.captain(c).lock_view.expect("locked on");
-    // Between the captain and the aimed centre, just outside the sphere.
     assert!(view.pos.x < aim.x - 20.0 && view.pos.x > aim.x - 30.0, "{view:?}");
-    assert!(view.pos.distance(aim) > 20.0);
     assert!(view.eye.x.abs() < 1.0 && view.eye.y > 0.0);
     // The throw still lands on the part's centre.
     assert!(sim.captain(c).cursor_world.distance(aim) < 0.01);
 }
 
 #[test]
-fn a_bigger_enemy_gets_a_bigger_cursor_up_to_a_limit() {
-    let small = locked(vec![part(Vec3::new(120.0, 20.0, 0.0), 12.0, true)]).0;
-    let big = locked(vec![part(Vec3::new(400.0, 100.0, 0.0), 120.0, true)]).0;
-    let huge = locked(vec![part(Vec3::new(2000.0, 100.0, 0.0), 1500.0, true)]).0;
-    let scale = |s: &Sim| s.captain(CaptainId(0)).lock_view.unwrap().scale;
-    assert_eq!(scale(&small), 1.0);
-    assert!(scale(&big) > 2.0 && scale(&big) < scale(&huge), "{} {}", scale(&big), scale(&huge));
-    assert!(scale(&huge) <= 6.0);
+fn on_a_big_body_it_is_centred_not_at_the_part_the_throw_aims_at() {
+    // A rock body with a stickable lump low on its right side (the first stickable part).
+    let body = part(Vec3::new(400.0, 150.0, 0.0), 150.0, false);
+    let lump = part(Vec3::new(430.0, 20.0, 110.0), 30.0, true);
+    let (sim, _, c) = locked(vec![body, lump]);
+    let view = sim.captain(c).lock_view.unwrap();
+    // On the line from his eye to the box around everything, in front of the body.
+    let (lo, hi) = (Vec3::new(250.0, -10.0, -150.0), Vec3::new(550.0, 300.0, 150.0));
+    let middle = (lo + hi) * 0.5;
+    let toward = (middle - view.eye).normalize();
+    let along = (view.pos - view.eye).normalize();
+    assert!(toward.dot(along) > 0.999, "{view:?} is off the line to the middle");
+    assert!(view.pos.distance(body.centre) >= body.radius, "{view:?} is inside the body");
+    assert!(view.pos.x < body.centre.x, "{view:?} is not in front");
+    // Well away from the lump the throw aims at.
+    assert!(view.pos.distance(lump.centre) > 150.0);
+    assert!(sim.captain(c).cursor_world.distance(lump.centre) < 0.01);
 }
 
 #[test]
-fn it_is_pushed_out_of_a_part_that_covers_the_aimed_one() {
-    // The aimed part is buried in a larger body between it and the captain.
-    let body = part(Vec3::new(150.0, 40.0, 0.0), 80.0, false);
-    let aimed = part(Vec3::new(190.0, 40.0, 0.0), 30.0, true);
-    let (sim, _, c) = locked(vec![body, aimed]);
+fn it_never_sits_inside_any_part() {
+    let a = part(Vec3::new(150.0, 40.0, 0.0), 80.0, false);
+    let b = part(Vec3::new(190.0, 40.0, 0.0), 30.0, true);
+    let (sim, _, c) = locked(vec![a, b]);
     let view = sim.captain(c).lock_view.unwrap();
-    assert!(view.pos.distance(body.centre) >= body.radius, "{view:?} is inside the body");
-    assert!(view.pos.distance(aimed.centre) >= aimed.radius, "{view:?} is inside the aimed part");
-    assert!(view.pos.x < body.centre.x, "{view:?} is not in front");
+    for p in [a, b] {
+        assert!(view.pos.distance(p.centre) >= p.radius - 0.01, "{view:?} is inside {p:?}");
+    }
+}
+
+#[test]
+fn a_ring_of_parts_with_nothing_in_the_middle_gets_the_cursor_at_its_near_side() {
+    let ring: Vec<_> = (0..6)
+        .map(|k| {
+            let a = k as f32 * std::f32::consts::TAU / 6.0;
+            part(Vec3::new(600.0 + 200.0 * a.cos(), 100.0, 200.0 * a.sin()), 40.0, k == 0)
+        })
+        .collect();
+    let (sim, _, c) = locked(ring.clone());
+    let view = sim.captain(c).lock_view.unwrap();
+    // In front of the first part the line to the middle enters, not buried in the ring.
+    assert!(view.pos.x < 400.0 && view.pos.x > 300.0, "{view:?}");
+    for p in &ring {
+        assert!(view.pos.distance(p.centre) >= p.radius - 0.01);
+    }
 }
 
 #[test]
