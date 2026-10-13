@@ -40,6 +40,8 @@ impl Sim {
                 // (interactBattle.cpp).
                 | PikiState::Enter { .. }
                 | PikiState::Exit { .. }
+                // Host extension: an Onion's plucker is on an errand and can't be hurt.
+                | PikiState::Plucker(_)
         )
     }
 
@@ -222,7 +224,7 @@ impl Sim {
         let pi = id.0 as usize;
         if matches!(
             self.pikis[pi].state,
-            PikiState::Fading { .. } | PikiState::Dead
+            PikiState::Fading { .. } | PikiState::Dead | PikiState::Plucker(_)
         ) {
             return;
         }

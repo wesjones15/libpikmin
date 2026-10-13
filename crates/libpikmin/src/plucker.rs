@@ -6,6 +6,10 @@
 //! one skeleton and motion set, so the Pikmin plays Olimar's own motion. Each plucked Pikmin
 //! joins the Onion's owner (Pikmin 1's plucked Pikmin join whoever pulled them). When nothing
 //! is left to pull, the plucker walks back and climbs in again (`ActEnter`, aiEnter.cpp).
+//!
+//! It always gets there: a plucker that stops making progress toward a sprout (a slope too
+//! steep, a wall, a ledge) is put down next to it and pulls it anyway, whatever the terrain
+//! would let Olimar do. It cannot be hurt, crushed, swallowed or killed on its errand.
 
 use glam::Vec3;
 
@@ -21,10 +25,9 @@ use crate::{CaptainId, Host, Sim};
 pub const PLUCKER_RANGE: f32 = 600.0;
 /// `NaviNukuAdjustState`: it pulls from this far short of the sprout.
 const PULL_DISTANCE: f32 = 6.0;
-/// Gives up on a sprout it hasn't got closer to in this long (a wall, a cliff).
+/// A plucker that hasn't got closer to its sprout in this long (a wall, a cliff, a slope) is
+/// put down beside it.
 const STUCK_TIME: f32 = 3.0;
-/// Sprouts given up on this outing, at most.
-const SKIPS: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PluckerJob {
@@ -40,8 +43,6 @@ pub enum PluckerJob {
 pub struct Plucker {
     pub onion: OnionId,
     pub job: PluckerJob,
-    /// Sprouts it couldn't reach this outing.
-    skipped: [Option<SproutId>; SKIPS],
 }
 
 impl Sim {
@@ -109,7 +110,6 @@ impl Sim {
         p.state = PikiState::Plucker(Plucker {
             onion,
             job: PluckerJob::Descend { leg, ratio: 1.0 },
-            skipped: [None; SKIPS],
         });
         self.events.push(Event::PluckerOut { piki: id, onion });
     }
@@ -122,7 +122,6 @@ impl Sim {
             .iter()
             .flatten()
             .filter(|s| s.pluckable() && s.claimed_by.is_none() && in_reach(opos, s.pos))
-            .filter(|s| !pl.skipped.contains(&Some(s.id)))
             .min_by(|a, b| dist_xz(a.pos, pos).total_cmp(&dist_xz(b.pos, pos)))
             .map(|s| s.id)
     }
@@ -211,20 +210,23 @@ impl Sim {
                 p.face = round_ang(p.face + 0.3 * ang_dist(yaw_of(dir), p.face));
                 let (best, stuck) = if dist < best - 2.0 { (dist, 0.0) } else { (best, stuck + dt) };
                 if stuck >= STUCK_TIME {
-                    // Can't get there: leave it for the next outing (its clock starts over).
-                    let mut skipped = pl.skipped;
-                    if let Some(slot) = skipped.iter_mut().find(|s| s.is_none()) {
-                        *slot = Some(sprout);
-                    }
-                    if let Some(Some(s)) = self.sprouts.get_mut(sprout.0 as usize) {
-                        s.unplucked = 0.0;
-                    }
-                    self.physics(pi, host, dt);
-                    let pl = Plucker { skipped, ..pl };
-                    if skipped.iter().all(Option::is_some) {
-                        return self.plucker_home(pi, pl.onion);
-                    }
-                    return self.plucker_next(pi, pl);
+                    // Can't walk there: put it down beside the sprout, on the Onion's side,
+                    // and let it pull.
+                    let onion = self.onions[pl.onion.0 as usize].pos;
+                    let back = (onion - spos).with_y(0.0).normalize_or(Vec3::X);
+                    let mut at = spos + back * PULL_DISTANCE;
+                    at.y = host.ground_height(at + Vec3::Y * 40.0).unwrap_or(spos.y);
+                    let p = &mut self.pikis[pi];
+                    p.pos = at;
+                    p.vel = Vec3::ZERO;
+                    p.target_vel = Vec3::ZERO;
+                    p.on_ground = true;
+                    p.face = yaw_of(-back);
+                    p.state = PikiState::Plucker(Plucker {
+                        job: PluckerJob::Pull { sprout, frame: 0.0, popped: false },
+                        ..pl
+                    });
+                    return;
                 }
                 p.state = PikiState::Plucker(Plucker { job: PluckerJob::Walk { sprout, best, stuck }, ..pl });
                 self.physics(pi, host, dt);
@@ -283,8 +285,9 @@ impl Sim {
     }
 }
 
+/// Near enough, at any height: the plucker is put down beside a sprout it can't walk to.
 fn in_reach(onion: Vec3, at: Vec3) -> bool {
-    dist_xz(onion, at) <= PLUCKER_RANGE && (at.y - onion.y).abs() < 200.0
+    dist_xz(onion, at) <= PLUCKER_RANGE
 }
 
 #[cfg(test)]
@@ -331,6 +334,71 @@ mod tests {
         assert_eq!(sim.onions()[0].stored_total(), 1, "the plucker climbed back in");
         let squad = sim.pikis().iter().filter(|p| p.is_alive() && p.state.in_squad()).count();
         assert_eq!(squad, 2, "plucked Pikmin joined the owner");
+    }
+
+    /// A wall across the way: nothing walks from x < 80 to x > 80.
+    struct Wall;
+
+    impl Host for Wall {
+        fn ground_height(&self, _pos: Vec3) -> Option<f32> {
+            Some(0.0)
+        }
+
+        fn walls(&self, centre: Vec3, radius: f32) -> Vec3 {
+            let mut c = centre;
+            if c.x + radius > 80.0 && c.x < 90.0 {
+                c.x = 80.0 - radius;
+            }
+            c
+        }
+    }
+
+    #[test]
+    fn a_plucker_blocked_by_the_terrain_is_put_down_at_the_sprout_and_still_plucks() {
+        let mut sim = Sim::new(Params::default(), 7);
+        let mut host = Wall;
+        let captain = sim.add_captain(Vec3::new(-3000.0, 0.0, 0.0));
+        let onion = sim.add_onion(Vec3::ZERO, &PikiColor::ALL);
+        sim.set_onion_owner(onion, Some(captain));
+        sim.set_auto_rejoin(true);
+        sim.store_in_onion(onion, PikiColor::Red, Happa::Leaf, 1);
+        sim.set_auto_pluck(Some(1.0));
+        sim.plant_sprout(PikiColor::Blue, Vec3::new(250.0, 0.0, 0.0));
+        let mut pulled = 0;
+        for _ in 0..(40 * crate::TICK_HZ) {
+            sim.step(&mut host);
+            pulled += sim.drain_events().filter(|e| matches!(e, Event::PluckerPulled { .. })).count();
+        }
+        assert_eq!(pulled, 1, "the wall must not stop it");
+        assert_eq!(sim.sprouts().count(), 0);
+    }
+
+    #[test]
+    fn a_plucker_cannot_be_hurt_on_its_errand() {
+        let mut sim = Sim::new(Params::default(), 7);
+        let mut host = FlatHost;
+        let captain = sim.add_captain(Vec3::new(3000.0, 0.0, 0.0));
+        let onion = sim.add_onion(Vec3::ZERO, &PikiColor::ALL);
+        sim.set_onion_owner(onion, Some(captain));
+        sim.store_in_onion(onion, PikiColor::Red, Happa::Leaf, 1);
+        sim.set_auto_pluck(Some(0.5));
+        sim.plant_sprout(PikiColor::Blue, Vec3::new(200.0, 0.0, 0.0));
+        run(&mut sim, &mut host, 4.0);
+        let plucker = sim
+            .pikis()
+            .iter()
+            .find(|p| matches!(p.state, PikiState::Plucker(_)))
+            .expect("a plucker is out")
+            .id;
+        let health = sim.piki(plucker).health;
+        let at = sim.piki(plucker).pos;
+        assert!(!sim.attack_piki(plucker, 1000.0));
+        assert_eq!(sim.attack_pikis_in_sphere(at, 500.0, 1000.0), 0);
+        assert_eq!(sim.crush_pikis_in_sphere(at, 500.0, 1000.0), 0);
+        assert_eq!(sim.flick_pikis_in_sphere(at, 500.0, 1000.0, at + Vec3::X), 0);
+        sim.kill_piki(plucker);
+        assert!(matches!(sim.piki(plucker).state, PikiState::Plucker(_)));
+        assert_eq!(sim.piki(plucker).health, health);
     }
 
     #[test]
