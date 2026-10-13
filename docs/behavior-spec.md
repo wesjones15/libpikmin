@@ -20,6 +20,13 @@ Navigation checks for low obstructions or short gaps, an unobstructed raised bod
 reachable landing before jumping. Pikmin may jump while approaching a carrying slot,
 but never during lifting or carrying. These are local probes, not a general path planner.
 
+Host jump pads supply full launch velocity and gravity through `Sim::launch_captain`.
+Following squad members queue that exact takeoff position and repeat its ballistic arc,
+including vertical pads; other captains' squads and busy Pikmin stay on their own jobs.
+Ordinary knockback does not queue a squad launch. Ground contact restores normal walking.
+`set_captain_hold` holds voluntary movement for roots and actions as well for stuns;
+external launches and gravity still run. These are host extensions, not Pikmin 1 behavior.
+
 Presentation uses the extracted shared animation bundle: `OCARRY` (motion 12, AnimInfo 45)
 is started by `NaviGeyzerState::init` in `plugPikiKando/naviState.cpp`; Pikmin use `ROLLJMP`
 (motion 34, AnimInfo 61), started by `PikiFlyingState::init` in `plugPikiKando/pikiState.cpp`.

@@ -297,7 +297,10 @@ impl Sim {
             // A Pikmin walking to the captain's hand has to reach him.
             if !matches!(p.state, PikiState::GoHang { .. }) {
                 for c in &self.captains {
-                    push_out(&mut p.pos, c.pos, navi_r + p.size);
+                    // A captain above a jump pad must not block followers on the floor below.
+                    if (p.pos.y - c.pos.y).abs() < navi_r + p.size {
+                        push_out(&mut p.pos, c.pos, navi_r + p.size);
+                    }
                 }
             }
             for c in &self.creatures.creatures {

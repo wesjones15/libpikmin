@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 10;
+pub const PIK_ABI_VERSION: u32 = 11;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -840,6 +840,25 @@ pub unsafe extern "C" fn pik_sim_set_captain_speed(sim: *mut PikSim, captain: u3
             }
         })
     }
+}
+
+/// Host control hold: 0 free, 1 movement only, 2 movement and actions.
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_captain_hold(sim: *mut PikSim, captain: u32, hold: u32) {
+    unsafe { with(sim, (), |s| s.sim.set_captain_hold(CaptainId(captain), hold != 0, hold >= 2)) }
+}
+
+/// Launch a captain with a host velocity, in sim units per second.
+/// `gravity` is host gravity in sim units/s² (0 uses disc tuning); `squad` queues the
+/// same takeoff for squad members when nonzero (pads, not knockback).
+/// # Safety
+/// `sim` from [`pik_sim_new`]; `velocity` readable (null is ignored).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_launch_captain(sim: *mut PikSim, captain: u32, velocity: *const PikVec3, gravity: f32, squad: u8) {
+    let Some(v) = (unsafe { velocity.as_ref() }) else { return; };
+    unsafe { with(sim, (), |s| s.sim.launch_captain(CaptainId(captain), (*v).into(), gravity, squad != 0)) }
 }
 
 /// Spawns a Pikmin of colour `color` ([`PikiColor::index`]) at `pos`, straight into

@@ -297,7 +297,7 @@ impl Sim {
     pub(crate) fn physics(&mut self, pi: usize, host: &mut dyn Host, dt: f32) {
         self.try_navigation_jump(pi, host);
         let accel = self.params.piki_creature.acceleration;
-        let gravity = self.params.ai.gravity;
+        let gravity = self.pikis[pi].jump.and_then(|j| j.gravity).unwrap_or(self.params.ai.gravity);
         let face_adjust = self.params.piki_creature.face_dir_adjust;
         let p = &mut self.pikis[pi];
         let mut on_ground = p.on_ground;

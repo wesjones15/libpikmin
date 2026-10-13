@@ -121,6 +121,9 @@ pub struct Captain {
     rearrange_pending: bool,
     pub(crate) input: CaptainInput,
     pub(crate) pressed: Pressed,
+    movement_held: bool,
+    actions_held: bool,
+    launched: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -174,6 +177,9 @@ impl Captain {
             rearrange_pending: false,
             input: CaptainInput::default(),
             pressed: Pressed::default(),
+            movement_held: false,
+            actions_held: false,
+            launched: false,
         }
     }
 
@@ -206,6 +212,43 @@ impl Captain {
 }
 
 impl Sim {
+    /// Host crowd control: roots hold voluntary movement, stuns also pause actions.
+    /// External launches and gravity continue while control is held.
+    pub fn set_captain_hold(&mut self, captain: CaptainId, movement: bool, actions: bool) {
+        if let Some(c) = self.captains.get_mut(captain.0 as usize) {
+            c.movement_held = movement || actions;
+            c.actions_held = actions;
+        }
+    }
+
+    /// Host launch (a jump pad, geyser or knockback), in sim units per second.
+    /// Positive `gravity` preserves a host pad's ballistic trajectory. `squad` queues
+    /// that takeoff for following Pikmin; ordinary knockback leaves it false.
+    pub fn launch_captain(&mut self, captain: CaptainId, velocity: Vec3, gravity: f32, squad: bool) {
+        if !velocity.is_finite() || !gravity.is_finite() || gravity < 0.0 { return; }
+        let gravity = (gravity > 0.0).then_some(gravity);
+        let mut cue = None;
+        if let Some(c) = self.captains.get_mut(captain.0 as usize) {
+            c.vel = velocity;
+            if let Some(g) = gravity {
+                // integrate applies gravity before position: centre the velocity on the tick.
+                c.vel.y += 0.5 * g * crate::TICK_DT;
+            }
+            c.on_ground = false;
+            c.launched = true;
+            c.pluck = None;
+            c.punch = None;
+            c.jump = Some(crate::jump::Jump { elapsed: 0.0, horizontal: velocity.with_y(0.0), gravity });
+            if squad {
+                cue = Some(crate::jump::JumpCue { origin: c.pos, horizontal: velocity.with_y(0.0),
+                    launch: Some((velocity.y, gravity.unwrap_or(self.params.ai.gravity))), tick: self.tick });
+            }
+        }
+        if let Some(cue) = cue {
+            self.queue_squad_jump(captain.0 as usize, cue);
+        }
+    }
+
     pub fn set_lock_target(&mut self, captain: CaptainId, target: Option<crate::host::CreatureId>) {
         if let Some(c) = self.captains.get_mut(captain.0 as usize) { c.lock_target = target; }
     }
@@ -221,6 +264,17 @@ impl Sim {
             c.whistle = WhistleState::Off;
             c.pluck = None;
             c.jump = None;
+            return;
+        }
+
+        if self.captains[ci].actions_held {
+            let held = CaptainInput { pose: input.pose, cursor: input.cursor, ..Default::default() };
+            self.captain_move(ci, host, dt, held, false);
+            let c = &mut self.captains[ci];
+            c.whistle = WhistleState::Off;
+            c.swarming = false;
+            if c.on_ground { c.jump = None; }
+            self.captain_formation(ci);
             return;
         }
 
@@ -243,7 +297,7 @@ impl Sim {
             return;
         }
 
-        if pressed.jump && !input.jump_blocked && input.pose.is_none()
+        if pressed.jump && !input.jump_blocked && !self.captains[ci].movement_held && input.pose.is_none()
             && self.captains[ci].on_ground && self.captains[ci].damage_frames <= 0.0
             && self.captains[ci].punch.is_none()
         {
@@ -288,7 +342,7 @@ impl Sim {
         let navi = &self.params.navi;
         let accel = self.params.navi_creature.acceleration;
         let face_adjust = self.params.navi_creature.face_dir_adjust;
-        let gravity = self.params.ai.gravity;
+        let gravity = self.captains[ci].jump.and_then(|j| j.gravity).unwrap_or(self.params.ai.gravity);
         let c = &mut self.captains[ci];
 
         c.neutral_time += dt;
@@ -296,11 +350,11 @@ impl Sim {
             c.neutral_time = 0.0;
         }
 
-        let stick = Vec3::new(
+        let stick = if c.movement_held { Vec3::ZERO } else { Vec3::new(
             input.stick.x.clamp(-1.0, 1.0),
             0.0,
             input.stick.y.clamp(-1.0, 1.0),
-        );
+        ) };
         let stick_mag = stick.length();
 
         // canNaviRunFast() always returns true in the shipped game, so it's always mRunSpeed.
@@ -336,7 +390,7 @@ impl Sim {
             }
         }
 
-        if locked {
+        if locked && !c.launched {
             c.target_vel = Vec3::ZERO;
             if let Some(g) = host.ground_height(c.pos + Vec3::new(0.0, 20.0, 0.0)) {
                 c.pos.y = g;
@@ -346,15 +400,23 @@ impl Sim {
             c.pos = pose.pos;
             c.vel = pose.vel;
             c.face = pose.face;
+            c.launched = false;
             c.on_ground = pose.vel.y <= 0.0 && host.ground_height(pose.pos + Vec3::Y)
                 .is_some_and(|g| (pose.pos.y - g).abs() < 2.0);
         } else {
             let mut on_ground = c.on_ground;
+            if c.movement_held && !c.launched {
+                c.vel.x = 0.0;
+                c.vel.z = 0.0;
+            }
+            // Keep a pad's horizontal throw through flight rather than accelerating back
+            // to the movement stick on the next tick. Ground contact restores normal walking.
+            let target = if c.launched { c.vel.with_y(0.0) } else { c.target_vel };
             integrate(
                 host,
                 &mut c.pos,
                 &mut c.vel,
-                c.target_vel,
+                target,
                 &mut on_ground,
                 navi.body_collision_radius,
                 accel,
@@ -362,6 +424,7 @@ impl Sim {
                 dt,
             );
             c.on_ground = on_ground;
+            if on_ground { c.launched = false; }
             let speed = c.vel.x.hypot(c.vel.z);
             if !aiming && speed > 1.0 {
                 c.face = round_ang(c.face + face_adjust * ang_dist(yaw_of(c.vel), c.face));

@@ -13,12 +13,15 @@ pub const JUMP_HEIGHT: f32 = 40.0;
 pub struct Jump {
     pub elapsed: f32,
     pub horizontal: Vec3,
+    /// Host jump pads supply their own gravity; voluntary jumps use disc tuning.
+    pub gravity: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct JumpCue {
     pub origin: Vec3,
     pub horizontal: Vec3,
+    pub launch: Option<(f32, f32)>,
     pub tick: u64,
 }
 
@@ -58,14 +61,20 @@ impl Sim {
         c.jump = Some(Jump {
             elapsed: 0.0,
             horizontal,
+            gravity: None,
         });
         let cue = JumpCue {
             origin,
             horizontal,
+            launch: None,
             tick: self.tick,
         };
-        let members = c.plate.members.clone();
-        let stationary = horizontal.length() < 1.0;
+        self.queue_squad_jump(ci, cue);
+    }
+
+    pub(crate) fn queue_squad_jump(&mut self, ci: usize, cue: JumpCue) {
+        let members = self.captains[ci].plate.members.clone();
+        let stationary = cue.launch.is_none() && cue.horizontal.length() < 1.0;
         for id in members {
             let pi = id.0 as usize;
             if !matches!(self.pikis[pi].state, PikiState::Squad { .. }) {
@@ -95,6 +104,7 @@ impl Sim {
         p.jump = Some(Jump {
             elapsed: 0.0,
             horizontal,
+            gravity: None,
         });
     }
 
@@ -138,6 +148,13 @@ impl Sim {
         {
             p.jump_queue.pop_front();
             self.start_piki_jump(pi, cue.horizontal);
+            if let Some((vertical, gravity)) = cue.launch {
+                let p = &mut self.pikis[pi];
+                // Repeat the pad from its origin, not from a formation slot beside it.
+                p.pos = cue.origin;
+                p.vel.y = vertical + 0.5 * gravity * crate::TICK_DT;
+                p.jump.as_mut().unwrap().gravity = Some(gravity);
+            }
         }
         let Some(jump) = self.pikis[pi].jump else {
             return false;

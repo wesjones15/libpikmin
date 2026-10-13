@@ -281,3 +281,100 @@ fn carrying_pikmin_do_not_jump_with_the_squad_or_over_obstacles() {
         assert!(sim.piki(p).jump.is_none());
     }
 }
+
+// Host extension regression: a pad targets a platform far above a voluntary jump's apex.
+struct PadPlatform;
+impl Host for PadPlatform {
+    fn ground_height(&self, pos: Vec3) -> Option<f32> {
+        let floor = if pos.x >= 300.0 { 300.0 } else { 0.0 };
+        (pos.y >= floor).then_some(floor)
+    }
+}
+
+#[test]
+fn jump_pad_squad_repeats_full_trajectory_and_reaches_high_platform() {
+    let (mut sim, c, p) = setup();
+    let other = sim.add_captain(Vec3::new(-100.0, 0.0, 0.0));
+    let other_p = sim.spawn_piki_in_squad(PikiColor::Blue, Vec3::new(-100.0, 0.0, 0.0), other).unwrap();
+    let v = Vec3::new(180.0, 400.0, 0.0);
+    sim.launch_captain(c, v, 200.0, true);
+    let mut captain_arc = Vec::new();
+    let mut piki_arc = Vec::new();
+    let mut launched = false;
+    let mut landed = false;
+    for _ in 0..180 {
+        sim.step(&mut PadPlatform);
+        if sim.captain(c).jump.is_some() { captain_arc.push(sim.captain(c).pos); }
+        if sim.piki(p).jump.is_some() {
+            launched = true;
+            piki_arc.push(sim.piki(p).pos);
+        } else if launched {
+            landed = true;
+            break;
+        }
+        assert!(sim.piki(other_p).jump.is_none(), "other captain's squad must stay behind");
+    }
+    assert!(launched && landed, "follower must launch and land");
+    assert!(captain_arc.len() > 30 && piki_arc.len() == captain_arc.len());
+    for (a, b) in captain_arc.iter().zip(&piki_arc) {
+        assert!((*a - *b).length() < 0.02, "captain {a}, follower {b}");
+    }
+    assert_eq!(sim.captain(c).pos.y, 300.0);
+    assert_eq!(sim.piki(p).pos.y, 300.0);
+    assert!(sim.piki(p).pos.x >= 300.0);
+}
+
+#[test]
+fn crowd_control_stops_input_but_not_external_launches() {
+    let (mut sim, c, p) = setup();
+    sim.set_captain_hold(c, true, true);
+    let pos = sim.captain(c).pos;
+    sim.set_input(c, CaptainInput { stick: Vec2::X, jump: true, throw: true, dismiss: true,
+        ..Default::default() });
+    for _ in 0..15 { sim.step(&mut FlatHost); }
+    assert_eq!(sim.captain(c).pos, pos);
+    assert!(matches!(sim.piki(p).state, PikiState::Squad { .. }));
+    sim.launch_captain(c, Vec3::new(100.0, 300.0, 0.0), 200.0, false);
+    sim.step(&mut FlatHost);
+    assert!(sim.captain(c).pos.x > 3.0 && sim.captain(c).pos.y > 9.0);
+    assert!(sim.piki(p).jump.is_none(), "knockback must not launch the squad");
+    sim.launch_captain(c, Vec3::splat(f32::NAN), 200.0, true);
+    sim.launch_captain(libpikmin::CaptainId(u32::MAX), Vec3::ZERO, 200.0, true);
+    assert!(sim.captain(c).vel.is_finite());
+    for _ in 0..100 { sim.step(&mut FlatHost); }
+    sim.set_captain_hold(c, false, false);
+    sim.set_input(c, CaptainInput { stick: Vec2::X, ..Default::default() });
+    sim.step(&mut FlatHost);
+    assert!(sim.captain(c).vel.x > 0.0, "movement resumes after hold");
+}
+
+#[test]
+fn root_holds_movement_and_jump_but_allows_throwing() {
+    let (mut sim, c, p) = setup();
+    sim.set_captain_hold(c, true, false);
+    let pos = sim.captain(c).pos;
+    sim.set_input(c, CaptainInput { stick: Vec2::X, jump: true, throw: true,
+        ..Default::default() });
+    for _ in 0..30 { sim.step(&mut FlatHost); }
+    assert_eq!(sim.captain(c).pos, pos);
+    assert!(!matches!(sim.piki(p).state, PikiState::Squad { .. }), "rooted captain can throw");
+}
+
+#[test]
+fn vertical_pad_sends_followers_to_the_pad_before_launching() {
+    let (mut sim, c, p) = setup();
+    sim.launch_captain(c, Vec3::new(0.0, 400.0, 0.0), 200.0, true);
+    sim.step(&mut FlatHost);
+    assert!(sim.piki(p).jump.is_none(), "distant follower must run to the vertical pad");
+    let mut launched = false;
+    for _ in 0..60 {
+        sim.step(&mut FlatHost);
+        if sim.piki(p).jump.is_some() {
+            launched = true;
+            assert!(sim.piki(p).pos.with_y(0.0).length() < 0.01);
+            assert!(sim.piki(p).vel.y > 300.0);
+            break;
+        }
+    }
+    assert!(launched, "follower at {:?}, state {:?}, captain {:?}", sim.piki(p).pos, sim.piki(p).state, sim.captain(c).pos);
+}
