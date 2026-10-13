@@ -75,6 +75,17 @@ pub mod effects {
         one("effects/pcr/rct_nke1.pcr", "effects/tex/iwa_1_32.bti"),
         one("effects/pcr/rct_nke2.pcr", "effects/tex/hokori4.bti"),
     ];
+    /// `EFF_Piki_GrowUp1`: sparkles on a sprout two seconds before it grows a stage
+    /// (`PikiHeadAI::WaitExec`).
+    pub const PIKI_GROW_UP1: EffectDef = one("effects/pcr/growup00.pcr", "effects/tex/growup00.bti");
+    /// `EFF_Piki_GrowUp2`: the burst as it does (`PikiHeadAI::GrowupedExec`).
+    pub const PIKI_GROW_UP2: EffectDef = one("effects/pcr/growup01.pcr", "effects/tex/growup01.bti");
+    /// `EFF_Piki_DeflowerPetals` and `EFF_Piki_DeflowerSpores`: a Pikmin getting up from a
+    /// knockdown a stage lower (`PikiFlickState`).
+    pub const PIKI_DEFLOWER: [EffectDef; 2] = [
+        one("effects/pcr/chiru.pcr", "effects/tex/hanabira.bti"),
+        one("effects/pcr/chiru_s.pcr", "effects/tex/ice_smok.bti"),
+    ];
     /// `EFF_CloudOfDust_1`
     pub const CLOUD_OF_DUST_1: EffectDef = one("effects/pcr/kch_kem1.pcr", "effects/tex/hokori4.bti");
 

@@ -438,6 +438,11 @@ impl Audio {
             Event::Bloomed { piki } => {
                 s.play("SEF_PIKI_GROW4", piki_pos(piki));
             }
+            // Host extension (kill growth): the sprout's stage sounds, `PikiHeadAI::GrowupedExec`.
+            Event::PikiGrew { piki, happa } => {
+                let n = if happa == libpikmin::Happa::Flower { 4 } else { 2 };
+                s.play(&format!("SEF_PIKI_GROW{n}"), piki_pos(piki));
+            }
             _ => {}
         });
         self.trying = trying;

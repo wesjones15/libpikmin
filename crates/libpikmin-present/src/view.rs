@@ -316,7 +316,24 @@ pub struct View {
     spots: HashSet<u32>,
     /// Onions a pellet just reached, for their `GoalEffect`.
     arrivals: Vec<libpikmin::onion::OnionId>,
+    /// Growth and deflowering seen in events, for their effects once the sim's positions are
+    /// to hand.
+    grown: Vec<Grown>,
+    /// The stage each sprout already sparkled for (`PikiHeadAI::WaitExec` once per stage).
+    sparkled: HashMap<libpikmin::SproutId, libpikmin::Happa>,
 }
+
+enum Grown {
+    Sprout(libpikmin::SproutId),
+    Piki(libpikmin::PikiId),
+    Deflowered(libpikmin::PikiId),
+}
+
+/// `PikiHeadAI::WaitExec`: the sparkle starts this many seconds before the next stage.
+const SPARKLE_LEAD: f32 = 2.0;
+/// How far above its feet a sprout's or Pikmin's growth effect appears (itemAI.cpp).
+const GROWTH_FX_LIFT: f32 = 13.0;
+
 
 /// `GoalItem::updateConeShrink` / `updateConeEmit`: the cone narrows or widens over 0.8 s.
 const CONE_TIME: f32 = 0.8;
@@ -399,6 +416,8 @@ impl View {
             cones: HashMap::new(),
             spots: HashSet::new(),
             arrivals: Vec::new(),
+            grown: Vec::new(),
+            sparkled: HashMap::new(),
         })
     }
 
@@ -412,6 +431,54 @@ impl View {
         }
         if let Event::PelletArrived { onion, .. } = e {
             self.arrivals.push(*onion);
+        }
+        match e {
+            Event::SproutGrew { sprout, .. } => self.grown.push(Grown::Sprout(*sprout)),
+            Event::PikiGrew { piki, .. } => self.grown.push(Grown::Piki(*piki)),
+            Event::Deflowered { piki } => self.grown.push(Grown::Deflowered(*piki)),
+            _ => {}
+        }
+    }
+
+    /// The sparkles before a sprout grows, the burst when it or a fighting Pikmin does, and
+    /// the petals of one that lost a stage (itemAI.cpp `PikiHeadAI`, pikiState.cpp
+    /// `PikiFlickState`).
+    fn growth_effects(&mut self, sim: &Sim) {
+        let grown = std::mem::take(&mut self.grown);
+        let Some(fx) = self.effects.as_mut() else {
+            self.sparkled.clear();
+            return;
+        };
+        let lift = Vec3::Y * GROWTH_FX_LIFT;
+        for sp in sim.sprouts() {
+            if let SproutState::Ready { timer } = sp.state
+                && timer < SPARKLE_LEAD
+                && sp.happa != libpikmin::Happa::Flower
+                && sp.claimed_by.is_none()
+                && self.sparkled.get(&sp.id) != Some(&sp.happa)
+            {
+                self.sparkled.insert(sp.id, sp.happa);
+                fx.spawn(fx_defs::PIKI_GROW_UP1, sp.pos + lift);
+            }
+        }
+        self.sparkled.retain(|id, _| sim.sprouts().any(|s| s.id == *id));
+        for g in grown {
+            match g {
+                Grown::Sprout(id) => {
+                    if let Some(sp) = sim.sprouts().find(|s| s.id == id) {
+                        fx.spawn(fx_defs::PIKI_GROW_UP2, sp.pos + lift);
+                    }
+                }
+                Grown::Piki(id) => {
+                    fx.spawn(fx_defs::PIKI_GROW_UP2, sim.piki(id).pos + lift);
+                }
+                Grown::Deflowered(id) => {
+                    let at = sim.piki(id).pos + lift;
+                    for def in fx_defs::PIKI_DEFLOWER {
+                        fx.spawn(def, at);
+                    }
+                }
+            }
         }
     }
 
@@ -720,6 +787,7 @@ impl View {
             }
         }
         self.animator.retain_sprouts(&live_sprouts);
+        self.growth_effects(sim);
 
         // Pikmin, with the leaf, bud or flower on joint 6 (`ViewPiki::demoDraw`).
         for p in sim.pikis() {

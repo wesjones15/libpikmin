@@ -200,6 +200,10 @@ impl Effects {
         defs.extend(
             [
                 effects::PIKI_DEAD_SOUL,
+                effects::PIKI_GROW_UP1,
+                effects::PIKI_GROW_UP2,
+                effects::PIKI_DEFLOWER[0],
+                effects::PIKI_DEFLOWER[1],
                 effects::ROCKET_C,
                 effects::ROCKET_COMPLETE[0],
                 effects::ROCKET_COMPLETE[1],
