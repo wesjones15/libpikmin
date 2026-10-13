@@ -1751,3 +1751,73 @@ fn calling_out_respects_the_field_limit() {
     assert_eq!(sim.onion_call_out(c, onion, PikiColor::Yellow, 20), 2);
     assert_eq!(sim.onion_call_out(c, onion, PikiColor::Yellow, 20), 0);
 }
+
+#[test]
+fn a_kill_raises_the_pikmin_that_fought_it_and_only_them() {
+    let mut sim = Sim::new(retail_params(), 9);
+    let mut host = TestHost::default();
+    let c = sim.add_captain(Vec3::ZERO);
+    squad(&mut sim, c, 3, Vec3::ZERO);
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 2.0, &mut ev);
+    let target = creature_at_cursor(&mut sim, &mut host, c, 1000.0);
+    throw_once(&mut sim, &mut host, c, &mut ev);
+    run(&mut sim, &mut host, 3.0, &mut ev);
+    let fighter = sim
+        .pikis()
+        .iter()
+        .find(|p| p.state.latched_to() == Some(target))
+        .expect("one latched")
+        .id;
+    assert!(host.hits.iter().any(|(id, _)| *id == target));
+
+    // Only the one that fought it moves up a stage, however many stood by.
+    sim.set_kill_growth(1);
+    assert_eq!(sim.credit_kill(target), 1);
+    assert_eq!(sim.piki(fighter).happa, Happa::Bud);
+    assert!(sim.pikis().iter().filter(|p| p.id != fighter).all(|p| p.happa == Happa::Leaf));
+    assert!(sim.drain_events().any(|e| matches!(e, Event::PikiGrew { piki, happa: Happa::Bud } if piki == fighter)));
+    assert_eq!(sim.credit_kill(target), 0, "the same death isn't counted twice");
+    assert_eq!(sim.piki(fighter).happa, Happa::Bud);
+}
+
+#[test]
+fn planted_sprouts_ripen_on_a_fixed_timer_and_wilt_after_their_flower_time() {
+    let mut sim = Sim::new(retail_params(), 4);
+    let mut host = TestHost::default();
+    sim.set_sprout_stages(20.0, 30.0);
+    let id = sim.plant_sprout(PikiColor::Red, Vec3::new(50.0, 0.0, 0.0));
+    let stage = |sim: &Sim| sim.sprouts().find(|s| s.id == id).map(|s| (s.happa, s.state));
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 19.5, &mut ev);
+    assert_eq!(stage(&sim).unwrap().0, Happa::Leaf);
+    run(&mut sim, &mut host, 1.0, &mut ev);
+    assert_eq!(stage(&sim).unwrap().0, Happa::Bud, "20 s as a leaf");
+    run(&mut sim, &mut host, 19.0, &mut ev);
+    assert_eq!(stage(&sim).unwrap().0, Happa::Bud);
+    run(&mut sim, &mut host, 1.5, &mut ev);
+    assert_eq!(stage(&sim).unwrap().0, Happa::Flower, "40 s from planting");
+    // The flower stands until its own time is up, longer than the plucker's wait.
+    run(&mut sim, &mut host, 28.0, &mut ev);
+    assert_eq!(stage(&sim).unwrap().0, Happa::Flower);
+    run(&mut sim, &mut host, 3.0, &mut ev);
+    assert_eq!(stage(&sim).unwrap().0, Happa::Leaf, "it wilted back");
+    let grew: Vec<_> = ev
+        .iter()
+        .filter_map(|e| if let Event::SproutGrew { happa, .. } = e { Some(*happa) } else { None })
+        .collect();
+    assert_eq!(grew, [Happa::Bud, Happa::Flower]);
+}
+
+#[test]
+fn growth_rate_speeds_the_stage_timer_but_not_the_flower() {
+    let mut sim = Sim::new(retail_params(), 4);
+    let mut host = TestHost::default();
+    sim.set_sprout_stages(20.0, 30.0);
+    sim.set_growth_rate(2.0);
+    let id = sim.plant_sprout(PikiColor::Blue, Vec3::new(50.0, 0.0, 0.0));
+    let mut ev = Vec::new();
+    run(&mut sim, &mut host, 20.5, &mut ev);
+    let s = sim.sprouts().find(|s| s.id == id).unwrap();
+    assert_eq!(s.happa, Happa::Flower, "two stages in 20 s at double rate");
+}

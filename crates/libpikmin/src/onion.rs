@@ -324,7 +324,7 @@ impl Sim {
 
     /// Plants a ready-to-pluck sprout directly (handy for hosts and tests).
     pub fn plant_sprout(&mut self, color: PikiColor, pos: Vec3) -> SproutId {
-        let timer = self.params.piki.grow_up_time;
+        let timer = self.sprout_stage.unwrap_or(self.params.piki.grow_up_time);
         self.insert_sprout(color, pos, Vec3::ZERO, 0.0, SproutState::Ready { timer }, None)
     }
 
@@ -495,8 +495,13 @@ impl Sim {
     /// `PikiHeadAI` states.
     pub(crate) fn update_sprouts(&mut self, host: &mut dyn Host, dt: f32) {
         let gravity = self.params.ai.gravity;
-        let pp = self.params.piki.clone();
+        let mut pp = self.params.piki.clone();
         let grow = dt * self.growth_rate;
+        // Host-fixed stage and flower times replace the disc's, and their random extra.
+        let fixed_stage = self.sprout_stage.is_some();
+        let fixed_flower = self.sprout_flower.is_some();
+        pp.grow_up_time = self.sprout_stage.unwrap_or(pp.grow_up_time);
+        pp.wilt_time = self.sprout_flower.unwrap_or(pp.wilt_time);
         for si in 0..self.sprouts.len() {
             let r = self.rng.f32() * 2.0;
             let Some(s) = self.sprouts[si].as_mut() else {
@@ -540,7 +545,7 @@ impl Sim {
                     let t = timer - grow;
                     s.state = if t < 0.0 {
                         SproutState::Ready {
-                            timer: pp.grow_up_time + r,
+                            timer: pp.grow_up_time + if fixed_stage { 0.0 } else { r },
                         }
                     } else {
                         SproutState::Tane { timer: t }
@@ -566,12 +571,12 @@ impl Sim {
                         } else {
                             Happa::Flower
                         };
-                        let next = if s.happa == Happa::Flower {
-                            pp.wilt_time
+                        let (next, fixed) = if s.happa == Happa::Flower {
+                            (pp.wilt_time, fixed_flower)
                         } else {
-                            pp.grow_up_time
+                            (pp.grow_up_time, fixed_stage)
                         };
-                        s.state = SproutState::Ready { timer: next + r };
+                        s.state = SproutState::Ready { timer: next + if fixed { 0.0 } else { r } };
                         self.events.push(Event::SproutGrew {
                             sprout: s.id,
                             happa: s.happa,

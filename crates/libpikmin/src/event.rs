@@ -192,6 +192,8 @@ pub enum Event {
         pos: Vec3,
         drop: f32,
     },
+    /// Host extension: a Pikmin grew to `happa` from kills ([`crate::Sim::set_kill_growth`]).
+    PikiGrew { piki: PikiId, happa: crate::Happa },
     /// Host extension: `captain` touched down after `drop` units of falling from his highest
     /// point; `stomp` for the landing of a stomp (which has its own event).
     CaptainLanded {

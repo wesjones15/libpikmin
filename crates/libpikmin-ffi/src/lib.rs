@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 13;
+pub const PIK_ABI_VERSION: u32 = 14;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -403,6 +403,8 @@ pub mod event_kind {
     pub const PIKI_STOMPED: u32 = 42;
     /// `a` the captain, `value` the fall in sim units, `c` 1 for a stomp's landing.
     pub const CAPTAIN_LANDED: u32 = 43;
+    /// `a` the Pikmin, `c` the stage it grew to (0 leaf, 1 bud, 2 flower) from kills.
+    pub const PIKI_GREW: u32 = 44;
 }
 
 /// One [`Event`]. `a` is the Pikmin, pellet, sprout or captain it's about (the first id in the
@@ -1671,6 +1673,7 @@ fn event(e: Event) -> PikEvent {
         Event::CaptainLanded { captain, drop, stomp } => {
             (v.kind, v.a, v.value, v.c) = (CAPTAIN_LANDED, captain.0, drop, stomp as i32)
         }
+        Event::PikiGrew { piki, happa } => (v.kind, v.a, v.c) = (PIKI_GREW, piki.0, happa_code(happa) as i32),
         Event::PikiStomped { piki, captain, pos } => {
             (v.kind, v.a, v.b, v.pos) = (PIKI_STOMPED, piki.0, captain.0 as i32, pos.into())
         }
@@ -1729,6 +1732,38 @@ pub unsafe extern "C" fn pik_sim_set_captain_jumps(sim: *mut PikSim, captain: u3
 pub unsafe extern "C" fn pik_sim_boost_captain_jump(sim: *mut PikSim, captain: u32, factor: f32) {
     // SAFETY: as documented.
     unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.boost_captain_jump(CaptainId(captain), factor) }) }
+}
+
+/// [`Sim::set_sprout_stages`]: seconds per planted sprout's stage and its flower's time
+/// (0: the disc's).
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_sprout_stages(sim: *mut PikSim, stage: f32, flower: f32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| s.sim.set_sprout_stages(stage, flower)) }
+}
+
+/// [`Sim::set_kill_growth`]: credited kills per growth stage (0: off).
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_kill_growth(sim: *mut PikSim, kills: u32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| s.sim.set_kill_growth(kills)) }
+}
+
+/// [`Sim::credit_kill`]: creature `creature` (the host's handle) died. Returns how many
+/// Pikmin grew.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_credit_kill(sim: *mut PikSim, creature: u64) -> u32 {
+    // SAFETY: as documented.
+    unsafe { with(sim, 0, |s| s.sim.credit_kill(creature)) }
 }
 
 /// Cooldown items: [`Sim::set_growth_rate`] and [`Sim::set_rejoin_delay`].

@@ -227,6 +227,11 @@ pub struct Piki {
     /// The tick it last latched onto a creature (see [`Sim::set_shake_protection`]).
     pub latched_at: u64,
     pub guided_throw: Option<(CreatureId, f32)>,
+    /// Creatures it has attacked, newest overwriting oldest (see [`Sim::credit_kill`]).
+    pub(crate) hit_log: [Option<CreatureId>; crate::growth::HIT_LOG],
+    pub(crate) hit_next: u8,
+    /// Kills credited toward its next stage (see [`Sim::set_kill_growth`]).
+    pub kill_credit: u8,
 }
 
 impl Piki {
@@ -740,6 +745,7 @@ impl Sim {
                     crate::host::DamageSource::Piki(id),
                 ) {
                     hit = true;
+                    self.note_attack(pi, a.target);
                     self.events.push(Event::Hit {
                         piki: id,
                         creature: a.target,
@@ -832,6 +838,7 @@ impl Sim {
                         && host.damage(a.target, dmg, None, crate::host::DamageSource::Piki(id))
                     {
                         hit = true;
+                        self.note_attack(pi, a.target);
                         self.events.push(Event::Hit {
                             piki: id,
                             creature: a.target,

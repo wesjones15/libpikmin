@@ -12,6 +12,7 @@ pub mod clock;
 pub mod damage;
 pub mod event;
 pub mod formation;
+pub mod growth;
 pub mod host;
 pub mod items;
 pub mod jump;

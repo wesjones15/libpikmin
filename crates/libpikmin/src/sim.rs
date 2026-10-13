@@ -34,6 +34,11 @@ pub struct Sim {
     pub(crate) rejoin_delay: f32,
     /// See [`Sim::set_growth_rate`].
     pub(crate) growth_rate: f32,
+    /// See [`Sim::set_sprout_stages`].
+    pub(crate) sprout_stage: Option<f32>,
+    pub(crate) sprout_flower: Option<f32>,
+    /// See [`Sim::set_kill_growth`].
+    pub(crate) kill_growth: u32,
     /// See [`Sim::set_auto_carry_range`].
     pub(crate) auto_carry_range: f32,
     /// See [`Sim::set_auto_pluck`].
@@ -70,6 +75,9 @@ impl Sim {
             shake_protection: 0,
             rejoin_delay: 0.5,
             growth_rate: 1.0,
+            sprout_stage: None,
+            sprout_flower: None,
+            kill_growth: 0,
             auto_carry_range: 0.0,
             auto_pluck_after: None,
             recovery: None,
@@ -122,6 +130,9 @@ impl Sim {
             idle_time: 0.0,
             latched_at: 0,
             guided_throw: None,
+            hit_log: [None; crate::growth::HIT_LOG],
+            hit_next: 0,
+            kill_credit: 0,
         });
         Some(id)
     }
