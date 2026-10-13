@@ -25,7 +25,7 @@ pub mod piki;
 pub mod plucker;
 mod sim;
 
-pub use captain::{Captain, CaptainInput, CaptainPose};
+pub use captain::{Captain, CaptainInput, CaptainPose, LockView};
 pub use carry::{Pellet, PelletDesc, PelletId, PelletState};
 pub use clock::{FixedClock, TICK_DT, TICK_HZ};
 pub use damage::DeathCause;

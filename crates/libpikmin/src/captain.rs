@@ -12,6 +12,14 @@ use crate::{CaptainId, Host, PikiId};
 /// How far above Olimar the cursor looks down for the ground. Pikmin's maps keep the cursor
 /// on a heightfield; a 3D host needs the probe to start above any slope within reach.
 const CURSOR_PROBE_LIFT: f32 = 100.0;
+/// How high above his feet the locked-on cursor looks back at him (host extension).
+const LOCK_EYE_HEIGHT: f32 = 24.0;
+/// A target this big (its parts' bounding radius) draws the cursor at its usual size; bigger
+/// ones scale it up, to `LOCK_MAX_SCALE` times.
+const LOCK_SCALE_SIZE: f32 = 40.0;
+const LOCK_MAX_SCALE: f32 = 6.0;
+/// Clear space between a locked-on target's surface and its cursor.
+const LOCK_MARGIN: f32 = 4.0;
 
 /// Per-frame controls for one captain. Buttons are levels (held = true); the sim detects edges.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -73,6 +81,19 @@ pub enum ThrowState {
     },
 }
 
+/// Host extension: where to draw a locked-on cursor. Pikmin 1's cursor lies on the ground; the
+/// part a lock aims at can be inside the enemy, so the view stands the cursor up in front of
+/// it, facing the captain.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LockView {
+    /// On the target's surface toward the captain, clear of its other parts.
+    pub pos: Vec3,
+    /// The captain's eye, which the cursor faces.
+    pub eye: Vec3,
+    /// How much bigger than usual to draw it: grows with the target so it reads on a big enemy.
+    pub scale: f32,
+}
+
 #[derive(Debug, Clone)]
 pub struct Captain {
     pub id: CaptainId,
@@ -132,6 +153,8 @@ pub struct Captain {
     pub can_stomp: bool,
     /// Stomping down since this height.
     pub stomp: Option<f32>,
+    /// Set while the lock-on target is alive and has a part to aim at.
+    pub lock_view: Option<LockView>,
     /// Highest point of the current time in the air (host extension: fall damage).
     pub(crate) air_peak: f32,
     /// The tick his current jump started, so later mid-air jumps reach his followers' cues.
@@ -198,6 +221,7 @@ impl Captain {
             air_jumps_used: 0,
             can_stomp: false,
             stomp: None,
+            lock_view: None,
             air_peak: pos.y,
             jump_tick: None,
             rearrange_pending: false,
@@ -485,11 +509,16 @@ impl Sim {
             .ground_height(c.pos + c.cursor + Vec3::Y * CURSOR_PROBE_LIFT)
             .unwrap_or(c.pos.y);
         c.cursor_world = Vec3::new(c.pos.x + c.cursor.x, ground + 1.0, c.pos.z + c.cursor.z);
+        c.lock_view = None;
         if let Some(target) = c.lock_target.and_then(|id| self.creatures.get(id)).filter(|t| t.alive)
             && let Some(part) = self.creatures.parts_of(target).iter().find(|p| p.stickable)
         {
             c.cursor_world = part.centre;
             c.cursor = Vec3::new(part.centre.x - c.pos.x, 0., part.centre.z - c.pos.z);
+            let eye = c.pos + Vec3::Y * LOCK_EYE_HEIGHT;
+            let pos = lock_marker(self.creatures.parts_of(target), part, eye);
+            let (_, size) = self.creatures.bounds(target);
+            c.lock_view = Some(LockView { pos, eye, scale: (size / LOCK_SCALE_SIZE).clamp(1.0, LOCK_MAX_SCALE) });
         }
     }
 
@@ -989,4 +1018,21 @@ impl Sim {
             captain: self.captains[ci].id,
         });
     }
+}
+
+/// Where a locked-on cursor floats: the aimed part's surface on the line to `eye`, then out
+/// along that line past any other part of the same creature that covers it, so it is never
+/// buried in the enemy's body.
+fn lock_marker(parts: &[crate::CreaturePart], aimed: &crate::CreaturePart, eye: Vec3) -> Vec3 {
+    let toward = (eye - aimed.centre).normalize_or(Vec3::Y);
+    let mut at = aimed.centre + toward * aimed.radius;
+    for _ in 0..4 {
+        let Some(cover) = parts.iter().find(|p| (at - p.centre).length() < p.radius) else { break };
+        let ray = (eye - at).normalize_or(toward);
+        let oc = at - cover.centre;
+        let b = oc.dot(ray);
+        let reach = -b + (b * b - (oc.length_squared() - cover.radius * cover.radius)).max(0.0).sqrt();
+        at += ray * (reach + 0.5);
+    }
+    at + toward * LOCK_MARGIN
 }
