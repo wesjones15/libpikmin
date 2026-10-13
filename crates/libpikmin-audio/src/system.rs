@@ -136,6 +136,9 @@ pub struct SoundSystem {
     view: Mat4,
     gaya_timer: u32,
     formation_on: bool,
+    /// Host extension: the trumpet track's volume layer (1 is the disc's level).
+    formation_outer: Option<usize>,
+    formation_gain: f32,
     gaya_outer: Option<usize>,
     gaya_volume: f32,
     pikis: u32,
@@ -184,6 +187,8 @@ impl SoundSystem {
             view: Mat4::IDENTITY,
             gaya_timer: 0,
             formation_on: false,
+            formation_outer: None,
+            formation_gain: 1.0,
             gaya_outer: None,
             gaya_volume: 0.0,
             pikis: 0,
@@ -438,6 +443,7 @@ impl SoundSystem {
     /// horizontal stick direction and magnitude through track 0x10007 ports 2/3.
     pub fn formation(&mut self, x: f32, y: f32) {
         let Some(track) = self.engine.track_handle(0x10007) else { return; };
+        self.apply_formation_gain(track);
         let x = (x.clamp(-1., 1.) * 74.) as i16;
         let y = (y.clamp(-1., 1.) * 74.) as i16;
         let magnitude = ((x as f32).hypot(y as f32)) as u16;
@@ -449,6 +455,33 @@ impl SoundSystem {
             self.formation_on = active;
         }
         if active { self.gaya_timer = 0; }
+    }
+
+    /// Host extension: plays the swarming trumpet `gain` times as loud as the disc's (0..4),
+    /// for a host whose own sounds drown it out.
+    pub fn set_formation_gain(&mut self, gain: f32) {
+        self.formation_gain = if gain.is_finite() { gain.clamp(0.0, 4.0) } else { 1.0 };
+        if let Some(track) = self.engine.track_handle(0x10007) {
+            self.apply_formation_gain(track);
+        }
+    }
+
+    /// Layers the gain over the track like `update_gaya` does the chatter's fade.
+    fn apply_formation_gain(&mut self, track: usize) {
+        let o = match self.formation_outer {
+            Some(o) => o,
+            None if self.formation_gain == 1.0 => return,
+            None => {
+                let o = self.engine.new_outer();
+                self.engine.tracks[track].outer = Some(o);
+                self.engine.outer_on(o, outer::VOLUME as u16);
+                self.formation_outer = Some(o);
+                o
+            }
+        };
+        if self.engine.outers[o].volume != self.formation_gain {
+            self.engine.set_outer_param(o, self.formation_gain, outer::VOLUME);
+        }
     }
 
     /// A cutscene's sound without the cutscene: `Jac_StartDemo` tells the demo track which

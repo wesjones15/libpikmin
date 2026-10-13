@@ -222,6 +222,22 @@ pub unsafe extern "C" fn pik_view_show_cursors(view: *mut PikView, show: u8) {
     unsafe { with_view(view, (), |v| v.view.show_cursors = show != 0) }
 }
 
+/// How loud the swarming trumpet plays, times the disc's level (default 1; 0 to 4).
+///
+/// # Safety
+/// `view` from [`pik_view_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_trumpet_gain(view: *mut PikView, gain: f32) {
+    // SAFETY: as documented.
+    unsafe {
+        with_view(view, (), |v| {
+            if let Some(a) = v.audio.as_ref() {
+                a.set_formation_gain(gain);
+            }
+        })
+    }
+}
+
 /// Runs `f` on a live view, poisoning it if `f` panics.
 ///
 /// # Safety

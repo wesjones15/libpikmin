@@ -154,6 +154,11 @@ impl Audio {
         self.gain.store(v.clamp(0.0, 4.0).to_bits(), Ordering::Relaxed);
     }
 
+    /// How loud the swarming trumpet plays against the disc's level (host tuning; 1 is the disc's).
+    pub fn set_formation_gain(&self, gain: f32) {
+        self.with(|s| s.set_formation_gain(gain));
+    }
+
     pub fn play_bgm(&mut self, id: usize) {
         self.bgm = id;
         self.with(|s| s.play_bgm(0, id));
