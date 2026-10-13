@@ -192,6 +192,13 @@ pub enum Event {
         pos: Vec3,
         drop: f32,
     },
+    /// Host extension: `captain` touched down after `drop` units of falling from his highest
+    /// point; `stomp` for the landing of a stomp (which has its own event).
+    CaptainLanded {
+        captain: CaptainId,
+        drop: f32,
+        stomp: bool,
+    },
     /// Host extension: one of `captain`'s Pikmin stomped down with him and landed at `pos`.
     PikiStomped {
         piki: PikiId,

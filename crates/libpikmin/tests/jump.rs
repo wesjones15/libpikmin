@@ -378,3 +378,70 @@ fn vertical_pad_sends_followers_to_the_pad_before_launching() {
     }
     assert!(launched, "follower at {:?}, state {:?}, captain {:?}", sim.piki(p).pos, sim.piki(p).state, sim.captain(c).pos);
 }
+
+fn landings(sim: &mut Sim) -> Vec<(f32, bool)> {
+    sim.drain_events()
+        .filter_map(|e| match e {
+            libpikmin::Event::CaptainLanded { drop, stomp, .. } => Some((drop, stomp)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn landing_reports_the_fall_from_the_peak() {
+    let (mut sim, c, _) = setup();
+    let _ = landings(&mut sim);
+    // A jump falls back as far as it rose.
+    sim.set_input(c, CaptainInput { jump: true, ..Default::default() });
+    sim.step(&mut FlatHost);
+    sim.set_input(c, CaptainInput::default());
+    let mut peak = sim.captain(c).pos.y;
+    let mut seen = Vec::new();
+    for _ in 0..90 {
+        sim.step(&mut FlatHost);
+        peak = peak.max(sim.captain(c).pos.y);
+        seen.extend(landings(&mut sim));
+    }
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert!((seen[0].0 - peak).abs() < 1.0 && !seen[0].1, "{seen:?} peak {peak}");
+
+    // Thrown up high by a pad, he falls from its apex, not from where he started.
+    sim.launch_captain(c, Vec3::new(0.0, 600.0, 0.0), 0.0, false);
+    let mut apex = 0.0f32;
+    let mut seen = Vec::new();
+    for _ in 0..300 {
+        sim.step(&mut FlatHost);
+        apex = apex.max(sim.captain(c).pos.y);
+        seen.extend(landings(&mut sim));
+    }
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert!(apex > 300.0 && (seen[0].0 - apex).abs() < 1.0, "{seen:?} apex {apex}");
+
+    // Standing still reports nothing.
+    for _ in 0..30 {
+        sim.step(&mut FlatHost);
+    }
+    assert!(landings(&mut sim).is_empty());
+}
+
+#[test]
+fn a_host_placed_captain_reports_no_fall() {
+    use libpikmin::CaptainPose;
+    let (mut sim, c, _) = setup();
+    let _ = landings(&mut sim);
+    let pose = |y: f32| CaptainInput {
+        pose: Some(CaptainPose { pos: Vec3::new(0.0, y, 0.0), ..Default::default() }),
+        ..Default::default()
+    };
+    sim.set_input(c, pose(5000.0));
+    sim.step(&mut FlatHost);
+    sim.set_input(c, pose(0.0));
+    sim.step(&mut FlatHost);
+    sim.set_input(c, CaptainInput::default());
+    for _ in 0..10 {
+        sim.step(&mut FlatHost);
+    }
+    let seen = landings(&mut sim);
+    assert!(seen.iter().all(|(d, _)| *d < 1.0), "{seen:?}");
+}

@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 12;
+pub const PIK_ABI_VERSION: u32 = 13;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -401,6 +401,8 @@ pub mod event_kind {
     pub const CAPTAIN_STOMPED: u32 = 41;
     /// `a` the Pikmin, `b` its captain, `pos` where it landed.
     pub const PIKI_STOMPED: u32 = 42;
+    /// `a` the captain, `value` the fall in sim units, `c` 1 for a stomp's landing.
+    pub const CAPTAIN_LANDED: u32 = 43;
 }
 
 /// One [`Event`]. `a` is the Pikmin, pellet, sprout or captain it's about (the first id in the
@@ -1665,6 +1667,9 @@ fn event(e: Event) -> PikEvent {
         Event::CaptainJumped { captain, air } => (v.kind, v.a, v.c) = (CAPTAIN_JUMPED, captain.0, air as i32),
         Event::CaptainStomped { captain, pos, drop } => {
             (v.kind, v.a, v.pos, v.value) = (CAPTAIN_STOMPED, captain.0, pos.into(), drop)
+        }
+        Event::CaptainLanded { captain, drop, stomp } => {
+            (v.kind, v.a, v.value, v.c) = (CAPTAIN_LANDED, captain.0, drop, stomp as i32)
         }
         Event::PikiStomped { piki, captain, pos } => {
             (v.kind, v.a, v.b, v.pos) = (PIKI_STOMPED, piki.0, captain.0 as i32, pos.into())

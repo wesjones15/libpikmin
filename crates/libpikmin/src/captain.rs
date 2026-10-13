@@ -132,6 +132,8 @@ pub struct Captain {
     pub can_stomp: bool,
     /// Stomping down since this height.
     pub stomp: Option<f32>,
+    /// Highest point of the current time in the air (host extension: fall damage).
+    pub(crate) air_peak: f32,
     /// The tick his current jump started, so later mid-air jumps reach his followers' cues.
     pub(crate) jump_tick: Option<u64>,
     rearrange_pending: bool,
@@ -196,6 +198,7 @@ impl Captain {
             air_jumps_used: 0,
             can_stomp: false,
             stomp: None,
+            air_peak: pos.y,
             jump_tick: None,
             rearrange_pending: false,
             input: CaptainInput::default(),
@@ -437,8 +440,11 @@ impl Sim {
             c.launched = false;
             c.on_ground = pose.vel.y <= 0.0 && host.ground_height(pose.pos + Vec3::Y)
                 .is_some_and(|g| (pose.pos.y - g).abs() < 2.0);
+            // The host places him (a teleport, or its own controller): no fall to report.
+            c.air_peak = c.pos.y;
         } else {
             let mut on_ground = c.on_ground;
+            let was_grounded = on_ground;
             if c.movement_held && !c.launched {
                 c.vel.x = 0.0;
                 c.vel.z = 0.0;
@@ -459,6 +465,15 @@ impl Sim {
             );
             c.on_ground = on_ground;
             if on_ground { c.launched = false; }
+            // Host extension: report how far he fell on touching down, for fall damage.
+            if !on_ground {
+                c.air_peak = if was_grounded { c.pos.y } else { c.air_peak.max(c.pos.y) };
+            } else if !was_grounded {
+                let drop = (c.air_peak - c.pos.y).max(0.0);
+                let (captain, stomp) = (c.id, c.stomp.is_some());
+                c.air_peak = c.pos.y;
+                self.events.push(crate::Event::CaptainLanded { captain, drop, stomp });
+            }
             let speed = c.vel.x.hypot(c.vel.z);
             if !aiming && speed > 1.0 {
                 c.face = round_ang(c.face + face_adjust * ang_dist(yaw_of(c.vel), c.face));
