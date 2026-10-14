@@ -25,7 +25,7 @@ pub struct SproutId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OnionAnim {
     Idle,
-    /// Host-controlled airborne following. Storage and deliveries wait until grounded.
+    /// Host-controlled airborne following. Storage waits until grounded; deliveries are taken (seeds become stored Pikmin).
     Hover,
     /// `GOAL_Effect`: "suction" plays after something is sucked in.
     Suction {
@@ -116,6 +116,12 @@ impl Onion {
         !matches!(self.anim, OnionAnim::Hover | OnionAnim::TakeOff { .. } | OnionAnim::Away | OnionAnim::Landing { .. })
     }
 
+    /// Carriers can bring things to it: on the ground, or hovering after the host lifted it
+    /// (a hovering Onion still takes pellets, but turns the seeds straight into stored Pikmin).
+    pub fn takes_deliveries(&self) -> bool {
+        self.grounded() || self.anim == OnionAnim::Hover
+    }
+
     /// Where carriers bring things (`getGoalPos`).
     pub fn goal_pos(&self) -> Vec3 {
         self.ship.as_ref().map_or(self.pos, |s| s.goal)
@@ -123,6 +129,13 @@ impl Onion {
 
     /// `GoalItem::suckMe`
     pub(crate) fn receive(&mut self, color: PikiColor, seeds: i32) {
+        if self.anim == OnionAnim::Hover {
+            // Hovering, it has nowhere to plant: the new Pikmin stay inside as leaves.
+            if seeds > 0 {
+                self.stored[color.index()][Happa::Leaf as usize] += seeds as u32;
+            }
+            return;
+        }
         if seeds < 0 {
             self.fireworks += 2;
         } else {
