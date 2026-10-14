@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 15;
+pub const PIK_ABI_VERSION: u32 = 16;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -405,6 +405,8 @@ pub mod event_kind {
     pub const CAPTAIN_LANDED: u32 = 43;
     /// `a` the Pikmin, `c` the stage it grew to (0 leaf, 1 bud, 2 flower) from kills.
     pub const PIKI_GREW: u32 = 44;
+    /// `a` the captain began a dismiss strike.
+    pub const STRIKE_STARTED: u32 = 45;
 }
 
 /// One [`Event`]. `a` is the Pikmin, pellet, sprout or captain it's about (the first id in the
@@ -1673,6 +1675,7 @@ fn event(e: Event) -> PikEvent {
         Event::CaptainLanded { captain, drop, stomp } => {
             (v.kind, v.a, v.value, v.c) = (CAPTAIN_LANDED, captain.0, drop, stomp as i32)
         }
+        Event::StrikeStarted { captain } => (v.kind, v.a) = (STRIKE_STARTED, captain.0),
         Event::PikiGrew { piki, happa } => (v.kind, v.a, v.c) = (PIKI_GREW, piki.0, happa_code(happa) as i32),
         Event::PikiStomped { piki, captain, pos } => {
             (v.kind, v.a, v.b, v.pos) = (PIKI_STOMPED, piki.0, captain.0 as i32, pos.into())
@@ -1764,6 +1767,26 @@ pub unsafe extern "C" fn pik_sim_set_kill_growth(sim: *mut PikSim, kills: u32) {
 pub unsafe extern "C" fn pik_sim_credit_kill(sim: *mut PikSim, creature: u64) -> u32 {
     // SAFETY: as documented.
     unsafe { with(sim, 0, |s| s.sim.credit_kill(creature)) }
+}
+
+/// [`Sim::set_dismiss_strike`]: the dismiss button strikes (0 or less for `damage_scale`: dismisses).
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_dismiss_strike(sim: *mut PikSim, damage_scale: f32, reach: f32, cooldown: f32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| s.sim.set_dismiss_strike(damage_scale, reach, cooldown)) }
+}
+
+/// [`Sim::set_squad_pace`]: Pikmin speed by stage as a multiple of their captain's top speed.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_squad_pace(sim: *mut PikSim, leaf: f32, bud: f32, flower: f32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| s.sim.set_squad_pace(leaf, bud, flower)) }
 }
 
 /// Cooldown items: [`Sim::set_growth_rate`] and [`Sim::set_rejoin_delay`].

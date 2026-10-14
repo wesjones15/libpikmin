@@ -151,6 +151,9 @@ pub struct Captain {
     pub stomp: Option<f32>,
     /// Set while the lock-on target is alive and has a part to aim at.
     pub lock_view: Option<LockView>,
+    /// Host extension: a dismiss strike in progress, and seconds until the next.
+    pub strike: Option<crate::strike::Strike>,
+    pub strike_cooldown: f32,
     /// Highest point of the current time in the air (host extension: fall damage).
     pub(crate) air_peak: f32,
     /// The tick his current jump started, so later mid-air jumps reach his followers' cues.
@@ -218,6 +221,8 @@ impl Captain {
             can_stomp: false,
             stomp: None,
             lock_view: None,
+            strike: None,
+            strike_cooldown: 0.0,
             air_peak: pos.y,
             jump_tick: None,
             rearrange_pending: false,
@@ -306,8 +311,11 @@ impl Sim {
         let pressed = std::mem::take(&mut self.captains[ci].pressed);
 
         self.update_captain_damage(ci, dt);
+        let cooldown = self.captains[ci].strike_cooldown;
+        self.captains[ci].strike_cooldown = (cooldown - dt).max(0.0);
         if self.captains[ci].down {
             let c = &mut self.captains[ci];
+            c.strike = None;
             c.vel = Vec3::ZERO;
             c.target_vel = Vec3::ZERO;
             c.whistle = WhistleState::Off;
@@ -376,13 +384,20 @@ impl Sim {
         if self.captain_punch(ci, host, dt, pressed) {
             return;
         }
+        if self.captain_strike(ci, host, dt) {
+            return;
+        }
         self.captain_whistle(ci, dt, input, pressed);
         if pressed.cycle {
             self.cycle_throw_color(ci, input.throw);
         }
         self.captain_throw(ci, dt, input, pressed);
         if pressed.dismiss {
-            self.dismiss(ci);
+            if self.dismiss_strike.is_some() {
+                self.start_strike(ci);
+            } else {
+                self.dismiss(ci);
+            }
         }
     }
 

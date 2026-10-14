@@ -39,6 +39,10 @@ pub struct Sim {
     pub(crate) sprout_flower: Option<f32>,
     /// See [`Sim::set_kill_growth`].
     pub(crate) kill_growth: u32,
+    /// See [`Sim::set_dismiss_strike`].
+    pub(crate) dismiss_strike: Option<crate::strike::StrikeSpec>,
+    /// See [`Sim::set_squad_pace`]: leaf, bud, flower.
+    pub(crate) pace: Option<[f32; 3]>,
     /// See [`Sim::set_auto_carry_range`].
     pub(crate) auto_carry_range: f32,
     /// See [`Sim::set_auto_pluck`].
@@ -78,6 +82,8 @@ impl Sim {
             sprout_stage: None,
             sprout_flower: None,
             kill_growth: 0,
+            dismiss_strike: None,
+            pace: None,
             auto_carry_range: 0.0,
             auto_pluck_after: None,
             recovery: None,

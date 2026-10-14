@@ -24,6 +24,7 @@ pub mod params;
 pub mod pellet_config;
 pub mod piki;
 pub mod plucker;
+pub mod strike;
 mod sim;
 
 pub use captain::{Captain, CaptainInput, CaptainPose, LockView};

@@ -329,6 +329,13 @@ impl Sim {
     /// `Piki::getSpeed`: lerp from walk to this Pikmin's max run speed.
     pub(crate) fn piki_speed(&self, pi: usize, ratio: f32) -> f32 {
         let pp = &self.params.piki;
+        // Host extension: a pace relative to the captain's own top speed.
+        if let (Some(pace), Some(cid)) = (self.pace, self.pikis[pi].captain) {
+            let c = &self.captains[cid.0 as usize];
+            let top = self.params.navi.run_speed * c.speed_scale * pace[self.pikis[pi].happa as usize];
+            let min = pp.min_move_speed.min(top);
+            return (top - min) * ratio + min;
+        }
         let scale = self.params.ai.do_scale_happa_move_speed != 0;
         let max = match self.pikis[pi].happa {
             Happa::Flower if scale => pp.max_flower_move_speed,

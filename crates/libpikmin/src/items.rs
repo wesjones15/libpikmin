@@ -40,6 +40,16 @@ impl Sim {
         }
     }
 
+    /// Makes every Pikmin with a captain walk and run as fast as `pace` times that captain's
+    /// full-tilt speed (his run speed with the host's speed scale), by stage: leaf, bud,
+    /// flower. Above 1 a Pikmin catches up with him while he runs; it replaces the stage
+    /// speeds and [`Sim::set_squad_speed`]. Any value 0 or less (or not a number) turns it
+    /// off.
+    pub fn set_squad_pace(&mut self, leaf: f32, bud: f32, flower: f32) {
+        let ok = |v: f32| v.is_finite() && v > 0.0;
+        self.pace = (ok(leaf) && ok(bud) && ok(flower)).then_some([leaf.min(10.0), bud.min(10.0), flower.min(10.0)]);
+    }
+
     /// Mid-air jumps `captain` may make before landing (Hopoo Feather). His squad repeats
     /// each one where it jumped with him.
     pub fn set_captain_air_jumps(&mut self, captain: CaptainId, jumps: u32) {
@@ -285,5 +295,35 @@ impl Sim {
             self.pikis[id.0 as usize].state = PikiState::Dead;
         }
         ids.len() as u32
+    }
+}
+
+#[cfg(test)]
+mod pace_tests {
+    use crate::{Happa, Params, PikiColor, Sim, Vec3};
+
+    #[test]
+    fn flower_pikmin_outrun_the_captain_and_leaf_and_bud_are_a_little_slower() {
+        let mut sim = Sim::new(Params::default(), 3);
+        let c = sim.add_captain(Vec3::ZERO);
+        let ids: Vec<_> = (0..3)
+            .map(|k| sim.spawn_piki_in_squad(PikiColor::Blue, Vec3::new(-30.0, 0.0, k as f32 * 8.0), c).unwrap())
+            .collect();
+        sim.set_captain_speed(c, 1.5);
+        sim.set_squad_pace(0.92, 0.97, 1.2);
+        sim.pikis[ids[1].0 as usize].happa = Happa::Bud;
+        sim.pikis[ids[2].0 as usize].happa = Happa::Flower;
+        let top = sim.params().navi.run_speed * 1.5;
+        let speed = |sim: &Sim, i: usize| sim.piki_speed(ids[i].0 as usize, 1.0);
+        assert!((speed(&sim, 2) - top * 1.2).abs() < 0.01);
+        assert!((speed(&sim, 1) - top * 0.97).abs() < 0.01);
+        assert!((speed(&sim, 0) - top * 0.92).abs() < 0.01);
+        assert!(speed(&sim, 2) > top && speed(&sim, 0) < top);
+        // Walking pace sits between the minimum and the top.
+        assert!(sim.piki_speed(ids[2].0 as usize, 0.5) < speed(&sim, 2));
+        // Off again: the disc's stage speeds, the flower the fastest.
+        sim.set_squad_pace(0.0, 1.0, 1.0);
+        assert!(speed(&sim, 2) > speed(&sim, 0));
+        assert!(speed(&sim, 2) < top * 1.2);
     }
 }

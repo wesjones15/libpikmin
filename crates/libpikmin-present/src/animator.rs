@@ -283,6 +283,9 @@ pub fn captain_motion(params: &Params, c: &Captain, throwing: bool) -> (Motion, 
         (Motion::OCarry, Clock::LoopFrom(30.0, 10.0))
     } else if let Some(p) = c.punch {
         (Motion::Punch, Clock::Sim(p.frame))
+    } else if let Some(s) = c.strike {
+        // The dismissal's own motion (`NaviReleaseState`).
+        (Motion::Fue, Clock::Sim(s.frame))
     } else if let Some(libpikmin::onion::Pluck {
         phase: PluckPhase::Pull { frame, fast, .. },
         ..

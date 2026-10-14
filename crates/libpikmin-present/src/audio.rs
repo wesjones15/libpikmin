@@ -342,7 +342,7 @@ impl Audio {
                 s.play("SE_PIKI_PULLED", Vec3::ZERO);
             }
             // `NaviBreakupState` (naviState.cpp).
-            Event::Dismissed { .. } => {
+            Event::Dismissed { .. } | Event::StrikeStarted { .. } => {
                 s.play("SE_BREAKUP", Vec3::ZERO);
             }
             // `NaviAttackState` (naviState.cpp): punch, and the hit on the enemy.
