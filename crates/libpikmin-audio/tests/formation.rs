@@ -60,3 +60,17 @@ fn trumpet_gain_makes_the_swarm_louder_without_clipping() {
     let (again, _) = trumpet(1.0);
     assert_eq!(again, disc_peak);
 }
+
+#[test]
+fn the_sundown_bell_exists_and_sounds() {
+    let Some(assets) = Assets::discover(None) else { return; };
+    let data = Arc::new(SoundData::load(&assets).unwrap());
+    let mut sound = SoundSystem::new(data, JaudioTables::load(&assets).unwrap());
+    assert!(sound.play("SYSSE_EVENING_ALERT", glam::Vec3::ZERO), "in the disc's sound table");
+    let mut energy = 0.;
+    for _ in 0..90 {
+        sound.frame();
+        energy += sound.render_native(1. / 30.).iter().map(|s| s * s).sum::<f32>();
+    }
+    assert!(energy > 0.01, "it makes sound: {energy}");
+}

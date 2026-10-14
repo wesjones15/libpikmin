@@ -37,6 +37,9 @@ fn pellet_owner(id: libpikmin::PelletId) -> u64 {
     4 << 56 | id.0 as u64
 }
 
+/// What plays when a captain goes down.
+pub const CAPTAIN_DOWN_SOUND: &str = "SYSSE_EVENING_ALERT";
+
 /// Sounds the 3D scene's animations asked for this frame.
 #[derive(Default, Clone, Copy)]
 pub struct SceneSounds<'a> {
@@ -354,9 +357,10 @@ impl Audio {
             Event::CaptainHurt { .. } => {
                 s.play("SE_DAMAGED", Vec3::ZERO);
             }
-            // `NaviDeadState` (naviState.cpp).
+            // `NaviDeadState` (naviState.cpp) plays `SE_PLAYER_DOWN`; here the sundown bell
+            // (`GameCoreSection::startSundownWarn`'s `SYSSE_EVENING_ALERT`) stands in for it.
             Event::CaptainDown { .. } => {
-                s.play("SE_PLAYER_DOWN", Vec3::ZERO);
+                s.play(CAPTAIN_DOWN_SOUND, Vec3::ZERO);
             }
             // `ActTransport::gotoLiftPos` (aiTransport.cpp): `SEF_PIKI_HANG` as each carrier takes
             // hold, and the pellet's `SE_LIFT_TRY` loop while it isn't up yet

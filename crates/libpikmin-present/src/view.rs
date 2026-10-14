@@ -940,7 +940,7 @@ impl View {
             let (pos, rot) = self.place_rot(k, c.pos, Quat::from_rotation_y(c.face), tick, alpha);
             let anim = self.animator.captain(&self.piki_anims, &params, c, dt);
             let mut root = crate::animator::captain_root(&params, c);
-            let fx_key = (8u64 << 48) | c.id.0 as u64;
+            let fx_key = (8u64 << 48) | ((c.id.0 as u64) << 8);
             if let Some(&p) = self.materialize.get(&c.id.0) {
                 // Beamed in: a thin tall figure that fills out, in the ship's healing effects
                 // (`NaviUfoState`'s recover burst, the goal spot's sparkles).
@@ -948,6 +948,17 @@ impl View {
                     if self.materializing.insert(c.id.0) {
                         fx.spawn(fx_defs::NAVI_RECOVER, pos);
                         fx.attach(fx_key, fx_defs::NAVI_SPARKLE, pos);
+                        // The Dolphin's own doorstep rings (`UfoItem::setSpotActive`), on its goal
+                        // spot nearest him.
+                        let goal = sim
+                            .onions()
+                            .iter()
+                            .filter(|o| o.ship.is_some())
+                            .map(|o| o.goal_pos())
+                            .min_by(|a, b| a.distance(c.pos).total_cmp(&b.distance(c.pos)));
+                        if let Some(goal) = goal {
+                            fx.attach(fx_key | 1, fx_defs::NAVI_RINGS, goal);
+                        }
                     }
                     fx.move_attached(fx_key, pos);
                 }
@@ -958,7 +969,7 @@ impl View {
             } else if self.materializing.remove(&c.id.0)
                 && let Some(fx) = self.effects.as_mut()
             {
-                fx.detach(fx_key);
+                fx.detach_where(|k| k & !255 == fx_key);
             }
             let pose = self.models[models::OLIMAR as usize].skel.pose(root, anim);
             let flash = c.damage_frames > 0.0 && (c.damage_frames as i32 / 2) % 2 == 0;

@@ -59,6 +59,8 @@ pub mod effects {
     /// `EFF_Rocket_NaviRecover`: the star burst when Olimar is healed at the ship
     /// (`NaviUfoState::exec`).
     pub const NAVI_RECOVER: EffectDef = one("effects/pcr/ore_rec.pcr", "effects/tex/star8_i.bti");
+    /// `EFF_Rocket_NaviNormalRings`: the rings on the ship's goal spot (`UfoItem::setSpotActive`).
+    pub const NAVI_RINGS: EffectDef = one("effects/pcr/ore_nml.pcr", "effects/tex/fuchibal.bti");
     /// `EFF_Rocket_NaviSparkle`: the glowing sparkles at the ship's goal spot (`UfoItem`).
     pub const NAVI_SPARKLE: EffectDef = one("effects/pcr/ore_kira.pcr", "effects/tex/ps_glow.bti");
     /// `EFF_Rocket_C`: sparkles over the ship when it powers up (`UfoItem::startLevelFlag`).

@@ -207,6 +207,7 @@ impl Effects {
                 effects::PIKI_DEFLOWER[1],
                 effects::ROCKET_C,
                 effects::NAVI_RECOVER,
+                effects::NAVI_RINGS,
                 effects::NAVI_SPARKLE,
                 effects::ROCKET_COMPLETE[0],
                 effects::ROCKET_COMPLETE[1],
