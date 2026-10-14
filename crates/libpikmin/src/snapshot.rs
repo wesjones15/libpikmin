@@ -175,6 +175,10 @@ impl Sim {
         self.nectar_drops = s.nectar_drops.clone();
         self.puddles = s.puddles.clone();
         self.next_nectar = s.next_nectar;
+        self.creatures.clear();
+        for &(id, pos, yaw) in &s.creatures {
+            self.creatures.push(id, pos, yaw, true, false, &[]);
+        }
     }
 
     /// As [`Sim::apply_snapshot`] of `to`, but positions and facings are `t` (0..1) of the way
