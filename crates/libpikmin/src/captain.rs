@@ -303,6 +303,14 @@ impl Sim {
         }
     }
 
+    /// Host extension: a throw with no lock-on is steered in flight toward the cursor point it
+    /// was thrown at, the way a locked-on throw follows its creature, so it arrives there after
+    /// `throw_flight_time` whatever the captain's speed or the cursor's height. This replaces
+    /// the original parabola's hold-time height; off by default.
+    pub fn set_cursor_homing(&mut self, on: bool) {
+        self.cursor_homing = on;
+    }
+
     pub fn set_lock_target(&mut self, captain: CaptainId, target: Option<crate::host::CreatureId>) {
         if let Some(c) = self.captains.get_mut(captain.0 as usize) { c.lock_target = target; }
     }
@@ -1001,7 +1009,14 @@ impl Sim {
         p.target_vel = p.vel;
         p.on_ground = false;
         p.state = PikiState::Flying { ground_frames: 0 };
-        p.guided_throw = c.lock_target.map(|target| (target, n.throw_flight_time.max(0.2)));
+        // A lock-on is followed; without one, a host that asks for it has the throw home on
+        // the cursor point (which also makes up for the captain's own speed).
+        let (creature, point) = (c.lock_target, self.cursor_homing.then_some(c.cursor_world));
+        p.guided_throw = (creature.is_some() || point.is_some()).then(|| crate::piki::GuidedThrow {
+            creature,
+            point: point.or(creature.map(|_| c.cursor_world)),
+            remaining: n.throw_flight_time.max(0.2),
+        });
         p.captain = Some(c.id);
         self.events.push(Event::Thrown {
             piki: id,

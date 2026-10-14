@@ -197,6 +197,16 @@ impl PikiState {
     }
 }
 
+/// Host extension: a throw re-aimed every tick so it arrives after `remaining` seconds. It
+/// follows `creature` (a lock-on) while that has a holdable part, else heads for `point`
+/// (the cursor where it was thrown; see [`Sim::set_cursor_homing`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GuidedThrow {
+    pub creature: Option<CreatureId>,
+    pub point: Option<Vec3>,
+    pub remaining: f32,
+}
+
 #[derive(Debug, Clone)]
 pub struct Piki {
     pub id: PikiId,
@@ -226,7 +236,8 @@ pub struct Piki {
     pub idle_time: f32,
     /// The tick it last latched onto a creature (see [`Sim::set_shake_protection`]).
     pub latched_at: u64,
-    pub guided_throw: Option<(CreatureId, f32)>,
+    /// A throw steered in flight (see [`GuidedThrow`]).
+    pub guided_throw: Option<GuidedThrow>,
     /// Creatures it has attacked, newest overwriting oldest (see [`Sim::credit_kill`]).
     pub(crate) hit_log: [Option<CreatureId>; crate::growth::HIT_LOG],
     pub(crate) hit_next: u8,
@@ -563,14 +574,17 @@ impl Sim {
     fn piki_flying(&mut self, pi: usize, host: &mut dyn Host, dt: f32) {
         // Re-solve the remaining arc against the current hurtbox, so moving/flying
         // targets are met through normal collision and latch, never a teleport.
-        if let Some((id, remaining)) = self.pikis[pi].guided_throw {
-            let target = self.creatures.get(id).filter(|c| c.alive)
-                .and_then(|c| self.creatures.parts_of(c).iter().find(|p| p.stickable));
-            if let Some(part) = target.filter(|_| remaining > 0.) {
-                let t = remaining.max(dt);
+        // A locked-on creature is followed to its first holdable part; with none (or once it
+        // has died) the throw keeps heading for the cursor point it was thrown at.
+        if let Some(g) = self.pikis[pi].guided_throw {
+            let part = g.creature.and_then(|id| self.creatures.get(id)).filter(|c| c.alive)
+                .and_then(|c| self.creatures.parts_of(c).iter().find(|p| p.stickable)).map(|p| p.centre);
+            let aim = part.or(g.point);
+            if let Some(aim) = aim.filter(|_| g.remaining > 0.) {
+                let t = g.remaining.max(dt);
                 let p = &mut self.pikis[pi];
-                p.vel = (part.centre - p.pos) / t + Vec3::Y * (self.params.ai.gravity * (t + dt) * 0.5);
-                p.guided_throw = Some((id, remaining - dt));
+                p.vel = (aim - p.pos) / t + Vec3::Y * (self.params.ai.gravity * (t + dt) * 0.5);
+                p.guided_throw = Some(GuidedThrow { remaining: g.remaining - dt, ..g });
             } else { self.pikis[pi].guided_throw = None; }
         }
         let p = &mut self.pikis[pi];
