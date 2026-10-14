@@ -120,6 +120,8 @@ pub struct Pellet {
     pub slots: Vec<Option<PikiId>>,
     /// Carriers in the order they grabbed on (the first one is the original's "stick leader").
     pub carriers: Vec<PikiId>,
+    /// Host terrain recovery: time with enough lifters but no movement or visible floor.
+    stalled: f32,
 }
 
 /// Height carriers lift the pellet by (`Pellet::startPick`, offset 8 / scale).
@@ -207,6 +209,7 @@ impl Sim {
             state: PelletState::Idle,
             slots: vec![None; desc.max_carriers.max(1) as usize],
             carriers: Vec::new(),
+            stalled: 0.0,
         });
         id
     }
@@ -357,6 +360,8 @@ impl Sim {
 
     pub(crate) fn update_pellets(&mut self, host: &mut dyn Host, dt: f32) {
         for i in 0..self.pellets.len() {
+            let before = self.pellets[i].pos;
+            let mut trying_to_move = false;
             match self.pellets[i].state.clone() {
                 PelletState::Idle => {
                     self.ground_pellet(i, host, 0.0);
@@ -364,6 +369,7 @@ impl Sim {
                     if self.lifted_carriers(&self.pellets[i]) >= min
                         && let Some((onion, color)) = self.decide_goal(i)
                     {
+                        trying_to_move = true;
                         let mut path = Vec::new();
                         let from = self.pellets[i].pos;
                         let to = self.onions[onion.0 as usize].goal_pos();
@@ -393,6 +399,8 @@ impl Sim {
                     mut path,
                     mut next,
                 } => {
+                    trying_to_move = self.lifted_carriers(&self.pellets[i]) >= self.pellets[i].desc.min_carriers.max(1)
+                        && self.onions[onion.0 as usize].grounded();
                     if !self.goal_still_majority(i, onion)
                         && let Some((o, c)) = self.decide_goal(i)
                     {
@@ -423,6 +431,57 @@ impl Sim {
                     speed,
                 } => self.suck_step(i, dt, onion, color, wait, start, progress, speed),
                 PelletState::Gone => {}
+            }
+            if trying_to_move && matches!(self.pellets[i].state, PelletState::Idle | PelletState::Carried { .. }) {
+                let pos = self.pellets[i].pos;
+                let missing_floor = host.ground_height(pos + Vec3::Y * 20.0).is_none();
+                if dist_xz(before, pos) < 0.1 || missing_floor {
+                    self.pellets[i].stalled += dt;
+                    if self.pellets[i].stalled >= 0.5 {
+                        self.recover_buried_pellet(i, host);
+                        self.pellets[i].stalled = 0.0;
+                    }
+                } else {
+                    self.pellets[i].stalled = 0.0;
+                }
+            } else {
+                self.pellets[i].stalled = 0.0;
+            }
+        }
+    }
+
+    /// Host extension to `ActTransport::moveToWayPoint`: a corpse can spawn inside host
+    /// terrain, below the normal downward probe. Once a full team stalls, search upward
+    /// in bounded steps for the first floor above it and lift the object and its holders.
+    /// Ordinary walls with no floor overhead still block; a void never invents a surface.
+    fn recover_buried_pellet(&mut self, i: usize, host: &mut dyn Host) {
+        let pos = self.pellets[i].pos;
+        let lift = if matches!(self.pellets[i].state, PelletState::Carried { .. }) { PICK_OFFSET } else { 0.0 };
+        let surface = [40.0, 80.0, 160.0, 320.0, 640.0, 1280.0].into_iter()
+            .filter_map(|above| host.ground_height(pos + Vec3::Y * above))
+            .find(|&g| g.is_finite() && g + lift > pos.y + 1.0);
+        let Some(g) = surface else { return };
+        self.pellets[i].pos.y = g + lift;
+        for id in self.pellets[i].carriers.clone() {
+            let PikiState::Carry(c) = self.pikis[id.0 as usize].state else { continue };
+            let mut slot = self.pellets[i].slot_world(c.slot);
+            if let Some(ground) = host.ground_height(slot + Vec3::Y * (self.pellets[i].desc.radius + 20.0)) {
+                slot.y = ground;
+            } else {
+                slot.y = g;
+            }
+            let p = &mut self.pikis[id.0 as usize];
+            p.pos = slot;
+            p.vel = Vec3::ZERO;
+            p.target_vel = Vec3::ZERO;
+            p.on_ground = true;
+        }
+        let p = &mut self.pellets[i];
+        if let PelletState::Carried { onion, path, next, .. } = &mut p.state {
+            let mut route = Vec::new();
+            if host.carry_path(p.pos, self.onions[onion.0 as usize].goal_pos(), &mut route) && !route.is_empty() {
+                *path = route;
+                *next = 0;
             }
         }
     }
@@ -499,6 +558,9 @@ impl Sim {
         let weight = self.carrier_weight(&self.pellets[i]);
         let speed = min_speed + (weight + 1.0 - min as f32) / maxc * (max_speed - min_speed);
 
+        // Get above rising ground before testing walls, so a slope isn't treated as a wall
+        // merely because the carry sphere still has the previous tick's lower height.
+        self.ground_pellet(i, host, PICK_OFFSET);
         let p = &mut self.pellets[i];
         let mut target = path[(*next).min(path.len() - 1)];
         while *next + 1 < path.len() && dist_xz(p.pos, target) < 10.0 {
@@ -757,6 +819,98 @@ mod tests {
             CarryPhase::Lift { frame: 30.0, lifted: true }
         };
         sim.pikis[id.0 as usize].state = PikiState::Carry(Carry { pellet, slot: slot as u32, phase });
+    }
+
+    struct BuriedHost {
+        surface: Option<f32>,
+        lower_floor: bool,
+        require_surface_path: bool,
+    }
+
+    impl Host for BuriedHost {
+        fn ground_height(&self, pos: Vec3) -> Option<f32> {
+            self.surface.filter(|&g| pos.y >= g)
+                .or_else(|| (self.lower_floor && pos.y >= -120.0).then_some(-120.0))
+        }
+
+        fn walls(&self, centre: Vec3, radius: f32) -> Vec3 {
+            // Terrain pins horizontal motion until the pellet's bottom clears the surface.
+            if centre.y - radius < self.surface.unwrap_or(f32::INFINITY) {
+                centre.with_x(0.0)
+            } else {
+                centre
+            }
+        }
+
+        fn carry_path(&mut self, from: Vec3, to: Vec3, out: &mut Vec<Vec3>) -> bool {
+            if self.require_surface_path && from.y < self.surface.unwrap_or(f32::INFINITY) {
+                return false;
+            }
+            out.push(to);
+            true
+        }
+    }
+
+    fn buried_team(count: usize) -> (Sim, PelletId) {
+        let mut sim = Sim::new(Params::default(), 19);
+        sim.add_onion(Vec3::new(500.0, 120.0, 0.0), &[PikiColor::Red]);
+        let mut desc = PelletDesc::numbered(&sim.params, 1, PikiColor::Red, Vec3::ZERO, 0.0);
+        desc.min_carriers = 2;
+        let pellet = sim.spawn_pellet(desc);
+        for _ in 0..count {
+            attach(&mut sim, PikiColor::Red, pellet);
+        }
+        (sim, pellet)
+    }
+
+    #[test]
+    fn a_full_buried_team_rises_and_delivers_even_if_the_initial_path_is_unavailable() {
+        for lower_floor in [false, true] {
+            for require_surface_path in [false, true] {
+                let (mut sim, pellet) = buried_team(2);
+                let mut host = BuriedHost { surface: Some(120.0), lower_floor, require_surface_path };
+                for _ in 0..30 {
+                    sim.step(&mut host);
+                }
+                assert!(sim.pellet(pellet).pos.y >= 120.0, "{:?}", sim.pellet(pellet));
+                assert!(sim.pellet(pellet).pos.x > 0.0, "must resume carrying");
+                assert_eq!(sim.pellet(pellet).carriers.len(), 2, "keep the full team attached");
+                for p in sim.pikis() {
+                    assert!(p.pos.y >= 120.0, "holder left underground: {:?}", p.pos);
+                }
+                for _ in 0..900 {
+                    sim.step(&mut host);
+                }
+                assert_eq!(sim.pellet(pellet).state, PelletState::Gone, "must complete delivery");
+            }
+        }
+    }
+
+    #[test]
+    fn terrain_recovery_requires_enough_lifters_and_a_real_surface() {
+        for (count, surface) in [(1, Some(120.0)), (2, None)] {
+            let (mut sim, pellet) = buried_team(count);
+            let mut host = BuriedHost { surface, lower_floor: false, require_surface_path: false };
+            for _ in 0..90 {
+                sim.step(&mut host);
+            }
+            assert_eq!(sim.pellet(pellet).pos.y, 0.0, "must not invent a surface or lift without a team");
+        }
+    }
+
+    #[test]
+    fn a_wall_without_higher_ground_still_blocks_a_full_team() {
+        let (mut sim, pellet) = buried_team(2);
+        struct WallHost;
+        impl Host for WallHost {
+            fn ground_height(&self, _pos: Vec3) -> Option<f32> { Some(0.0) }
+            fn walls(&self, centre: Vec3, _radius: f32) -> Vec3 { centre.with_x(0.0) }
+        }
+        for _ in 0..90 {
+            sim.step(&mut WallHost);
+        }
+        assert_eq!(sim.pellet(pellet).pos, Vec3::Y * PICK_OFFSET);
+        assert!(matches!(sim.pellet(pellet).state, PelletState::Carried { .. }));
     }
 
     #[test]
