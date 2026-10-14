@@ -41,6 +41,15 @@ impl Sim {
             .then(|| StrikeSpec { damage_scale, reach: reach.max(0.0), cooldown: cooldown.max(0.0) });
     }
 
+    /// Host extension: every captain's punch (`NaviAttackState`) does `damage` instead of the disc's
+    /// `punch_damage`. A strike is a multiple of the punch, so it follows. 0 or less (or not a
+    /// number) leaves the disc's value.
+    pub fn set_punch_damage(&mut self, damage: f32) {
+        if damage.is_finite() && damage > 0.0 {
+            self.params.navi.punch_damage = damage;
+        }
+    }
+
     /// The dismiss button was pressed with strikes on.
     pub(crate) fn start_strike(&mut self, ci: usize) {
         let Some(spec) = self.dismiss_strike else { return };
@@ -84,5 +93,21 @@ impl Sim {
         }
         self.captains[ci].strike = (strike.frame < STRIKE_END).then_some(strike);
         true
+    }
+}
+
+#[cfg(test)]
+mod punch_tests {
+    use crate::{Params, Sim};
+
+    #[test]
+    fn the_punch_damage_can_be_set_and_junk_is_ignored() {
+        let mut sim = Sim::new(Params::default(), 1);
+        sim.set_punch_damage(22.5);
+        assert_eq!(sim.params.navi.punch_damage, 22.5);
+        for bad in [0.0, -3.0, f32::NAN, f32::INFINITY] {
+            sim.set_punch_damage(bad);
+            assert_eq!(sim.params.navi.punch_damage, 22.5);
+        }
     }
 }

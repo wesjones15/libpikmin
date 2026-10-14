@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 18;
+pub const PIK_ABI_VERSION: u32 = 19;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -1777,6 +1777,16 @@ pub unsafe extern "C" fn pik_sim_credit_kill(sim: *mut PikSim, creature: u64) ->
 pub unsafe extern "C" fn pik_sim_set_dismiss_strike(sim: *mut PikSim, damage_scale: f32, reach: f32, cooldown: f32) {
     // SAFETY: as documented.
     unsafe { with(sim, (), |s| s.sim.set_dismiss_strike(damage_scale, reach, cooldown)) }
+}
+
+/// [`Sim::set_punch_damage`]: the punch's damage (and so the strike's).
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_punch_damage(sim: *mut PikSim, damage: f32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| s.sim.set_punch_damage(damage)) }
 }
 
 /// [`Sim::set_cursor_homing`]: throws without a lock-on are steered onto the cursor point.
