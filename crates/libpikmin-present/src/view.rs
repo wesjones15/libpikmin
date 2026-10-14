@@ -656,8 +656,8 @@ impl View {
     /// Captain `captain` is appearing in a beam, `progress` 0 (a thin column) to 1 (himself); 1 or more
     /// ends it. Hosts call it each frame while it lasts.
     pub fn set_materialize(&mut self, captain: u32, progress: f32) {
-        if progress.is_finite() && progress < 1.0 {
-            self.materialize.insert(captain, progress.max(0.0));
+        if progress.is_finite() && (0.0..1.0).contains(&progress) {
+            self.materialize.insert(captain, progress);
         } else {
             self.materialize.remove(&captain);
         }
@@ -937,11 +937,14 @@ impl View {
             let (pos, rot) = self.place_rot(k, c.pos, Quat::from_rotation_y(c.face), tick, alpha);
             let anim = self.animator.captain(&self.piki_anims, &params, c, dt);
             let mut root = crate::animator::captain_root(&params, c);
+            let mut beam = None;
             if let Some(&p) = self.materialize.get(&c.id.0) {
-                // Beamed in: a thin tall column of light-sized Olimar that settles to his shape.
+                // Beamed in: a thin tall figure that fills out, under a column of light.
                 let p = p.clamp(0.0, 1.0);
                 let ease = p * p * (3.0 - 2.0 * p);
-                root *= Mat4::from_scale(Vec3::new(ease.max(0.02), 1.0 + 0.8 * (1.0 - ease), ease.max(0.02)));
+                let tall = ((p * 1.6).min(1.0)).powi(2);
+                root *= Mat4::from_scale(Vec3::new(ease.max(0.02), tall.max(0.02), ease.max(0.02)));
+                beam = Some(1.0 - ease);
             }
             let pose = self.models[models::OLIMAR as usize].skel.pose(root, anim);
             let flash = c.damage_frames > 0.0 && (c.damage_frames as i32 / 2) % 2 == 0;
@@ -961,6 +964,13 @@ impl View {
                 radius: c.whistle_radius(&params),
             });
             self.push(k, kinds::CAPTAIN, models::OLIMAR, pos, rot, pose, &no_inputs, 1.0, f);
+            // A beam from the sky while he is beamed in (the Onions' light cone, narrowing as he forms).
+            if let Some(w) = beam.filter(|w| *w > 0.02) {
+                let model = models::BEAMS[2];
+                let root = Mat4::from_scale(Vec3::new(CONE_SCALE * w, CONE_SCALE, CONE_SCALE * w));
+                let bpose = self.models[model as usize].skel.pose(root, None);
+                self.push(key(kinds::BEAM, (1u64 << 32) | c.id.0 as u64), kinds::BEAM, model, pos, Quat::IDENTITY, bpose, &no_inputs, 1.0, 0);
+            }
             if !self.show_cursors {
                 continue;
             }
