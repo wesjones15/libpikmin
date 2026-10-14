@@ -380,14 +380,6 @@ impl View {
                 envs.push(usize::try_from(id).ok().and_then(|i| textures.list[i].env));
                 ids.push(id);
             }
-            // The Onion's truss band is a soft-edged alpha texture the game blends over its body.
-            // Blended, hosts sort it as one object without depth writes, so it shows through the
-            // legs' shoulders and other Onions; alpha tested it layers by depth like the rest.
-            if mi == models::ONION as usize {
-                for k in blends.iter_mut().filter(|k| **k == blend::TRANSLUCENT) {
-                    *k = blend::CUTOUT;
-                }
-            }
             vm.batch_texture = ids;
             vm.batch_blend = blends;
             vm.batch_env = envs;
