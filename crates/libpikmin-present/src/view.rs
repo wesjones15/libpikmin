@@ -41,6 +41,15 @@ pub mod models {
     pub const COUNT: usize = 19;
 }
 
+static REPAIRED_SHIP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Host extension: draw the S.S. Dolphin with the parts the sim has put on it (all 30 is the repaired
+/// ship, with its lights and effects) as models 19 and up ([`View::part_model`]). Off by default: the
+/// parts' models aren't loaded, which costs time and memory. Call before [`View::load`].
+pub fn set_repaired_ship(on: bool) {
+    REPAIRED_SHIP.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// What a draw is, for hosts that treat some kinds differently.
 pub mod kinds {
     pub const CAPTAIN: u8 = 0;
@@ -55,6 +64,8 @@ pub mod kinds {
     pub const SHIP: u8 = 9;
     /// An Onion's light cone (`GoalItem::mSpotModelEff`).
     pub const BEAM: u8 = 10;
+    /// A part on the ship (`models::COUNT` and up, see [`super::View::part_model`]).
+    pub const SHIP_PART: u8 = 11;
 }
 
 /// Draw flags.
@@ -257,6 +268,14 @@ mod interpolation_tests {
     }
 }
 
+/// A ship part's model and animations (`PelletShapeObject`).
+struct PartView {
+    model: u32,
+    file: String,
+    anims: Option<AnimSet>,
+    upper: Vec<bool>,
+}
+
 struct ShipFlight {
     ground_anchor: Option<Vec3>,
     animator: libpikmin_assets::ship::ShipAnimator,
@@ -279,6 +298,10 @@ pub struct View {
     ship_anims: AnimSet,
     ship_mgr: libpikmin_assets::AnimMgr,
     ship_contexts: Vec<usize>,
+    /// Which of the ship's level lights animates each of its materials (`LightAnimator`).
+    ship_lights: Vec<Option<usize>>,
+    /// Each of the 30 ship parts' model, animations and the joints its upper animator drives, when loaded.
+    parts: Vec<Option<PartView>>,
     ships: HashMap<u32, ShipFlight>,
     pub ship_sounds: Vec<(libpikmin::onion::OnionId, &'static str, bool)>,
     pub demo_sounds: Vec<Option<(u16, u16)>>,
@@ -357,6 +380,27 @@ impl View {
             .iter()
             .map(|p| ViewModel::load(assets, p))
             .collect::<Result<Vec<_>, _>>()?;
+        let mut parts: Vec<Option<PartView>> = Vec::new();
+        if REPAIRED_SHIP.load(std::sync::atomic::Ordering::Relaxed) {
+            let infos = assets.read(libpikmin_assets::ship::PEL_ANIM).ok()
+                .and_then(|d| libpikmin_assets::ship::parse_pel_anim(&d).ok()).unwrap_or_default();
+            for id in libpikmin_assets::ship::PART_IDS {
+                let loaded = infos.iter().find(|i| i.id == id).and_then(|info| {
+                    let vm = ViewModel::load(assets, &info.model()).ok()?;
+                    let anims = AnimSet::load(assets, &info.anim_mgr(), &info.bundle()).ok();
+                    let mut upper = vec![false; vm.skel.len()];
+                    if info.override_joint >= 0 {
+                        for j in vm.skel.subtree(info.override_joint as usize) { upper[j] = true; }
+                    }
+                    Some((vm, PartView { model: 0, file: info.file.clone(), anims, upper }))
+                });
+                parts.push(loaded.map(|(vm, mut part)| {
+                    part.model = models.len() as u32;
+                    models.push(vm);
+                    part
+                }));
+            }
+        }
         // Each material baked as it is with no per-draw inputs, which also says how opaque it is.
         let mut textures = Textures::default();
         for (mi, vm) in models.iter_mut().enumerate() {
@@ -384,6 +428,16 @@ impl View {
             vm.batch_blend = blends;
             vm.batch_env = envs;
         }
+        // The level lights animate the materials of four joints' subtrees (`UfoItem::UfoItem`).
+        let mut ship_lights = vec![None; models[models::SHIP as usize].model.materials.len()];
+        for (l, &root) in libpikmin_assets::ship::LIGHT_JOINTS.iter().enumerate() {
+            let vm = &models[models::SHIP as usize];
+            for j in vm.skel.subtree(root) {
+                for &(m, _) in &vm.model.joints[j].matpolys {
+                    if let Some(slot) = ship_lights.get_mut(m as usize) { *slot = Some(l); }
+                }
+            }
+        }
         let ante = models[models::OLIMAR as usize].model.coll.iter().find(|c| c.id == "ante").cloned();
         let ship_contexts = models[models::SHIP as usize].skel.override_map(&libpikmin_assets::ship::CONTEXT_JOINTS);
         Ok(View {
@@ -393,6 +447,8 @@ impl View {
             ship_anims: AnimSet::load(assets, libpikmin_assets::ship::SHIP_ANIM_MGR, libpikmin_assets::ship::SHIP_BUNDLE)?,
             ship_mgr: libpikmin_assets::AnimMgr::parse(&assets.read(libpikmin_assets::ship::SHIP_ANIM_MGR)?)?,
             ship_contexts,
+            ship_lights,
+            parts,
             ships: HashMap::new(),
             ship_sounds: Vec::new(),
             demo_sounds: Vec::new(),
@@ -618,9 +674,19 @@ impl View {
             if o.ship.is_some() {
                 use libpikmin_assets::ship::ShipCue;
                 if o.anim == libpikmin::onion::OnionAnim::Away { continue; }
+                // The parts on the ship, when their models are loaded (`set_repaired_ship`); else it is
+                // the bare wreck as before.
+                let (on_board, level) = match o.ship.as_ref() {
+                    Some(s) if !self.parts.is_empty() => (s.parts.clone(), params.ai.ship_level(s.parts.len() as u32)),
+                    _ => (Vec::new(), 0),
+                };
                 let flight = self.ships.entry(o.id.0).or_insert_with(|| {
-                    let mut animator = libpikmin_assets::ship::ShipAnimator::new(&self.ship_mgr, Vec::new());
-                    animator.start(&[], 0, &mut Vec::new());
+                    let part_mgrs = self.parts.iter().map(|p| {
+                        let p = p.as_ref()?;
+                        Some((p.anims.as_ref()?.mgr.clone(), p.upper.iter().any(|&u| u)))
+                    }).collect();
+                    let mut animator = libpikmin_assets::ship::ShipAnimator::new(&self.ship_mgr, part_mgrs);
+                    animator.start(&on_board, level, &mut Vec::new());
                     ShipFlight { animator, progress: None, flames: Vec::new(), ground_anchor: None }
                 });
                 let mut cues = Vec::new();
@@ -628,7 +694,7 @@ impl View {
                 if let Some(progress) = landing {
                     if flight.progress.is_none_or(|last| progress < last) {
                         cues.push(ShipCue::StopAttached);
-                        flight.animator.land(&[], 0, &mut cues);
+                        flight.animator.land(&on_board, level, &mut cues);
                     }
                     flight.animator.land_progress(progress, &mut cues);
                 } else if flight.progress.is_some() {
@@ -662,6 +728,28 @@ impl View {
                 });
                 let offset = ground_anchor - pose.joints[2].w_axis.truncate();
                 rebase_pose(&mut pose, offset);
+                // The level lights' frames per material, and each part on board posed on its joint
+                // of the ship (`PlayerState::renderParts`).
+                let light_frames: Vec<f32> = self.ship_lights.iter().map(|l| l.map_or(0.0, |l| animator.light_frame(l))).collect();
+                let mut part_joints: Vec<Option<Mat4>> = vec![None; self.parts.len()];
+                let mut part_poses = Vec::new();
+                for &part in &on_board {
+                    let Some(Some(pv)) = self.parts.get(part as usize) else { continue };
+                    let Some(ji) = vm.model.joint_index(&libpikmin_assets::ship::ship_joint(&pv.file)) else { continue };
+                    let jm = pose.joints[ji];
+                    part_joints[part as usize] = Some(jm);
+                    let Some(pa) = animator.part(part as usize) else { continue };
+                    let part_vm = &self.models[pv.model as usize];
+                    let ppose = match pv.anims.as_ref() {
+                        Some(set) => part_vm.skel.pose_by(jm, |k| {
+                            let p = if pv.upper.get(k).copied().unwrap_or(false) { pa.upper.as_ref()? } else { &pa.lower };
+                            let (_, a) = set.get(p.motion)?;
+                            Some((a, p.frame.clamp(0.0, a.frames.saturating_sub(1) as f32)))
+                        }),
+                        None => part_vm.skel.pose(jm, None),
+                    };
+                    part_poses.push((part, pv.model, ppose));
+                }
                 let direction = o.goal_pos() - o.pos;
                 let rot = Quat::from_rotation_y(direction.x.atan2(direction.z));
                 let sphere = |id: &str| {
@@ -692,8 +780,19 @@ impl View {
                                 && let Some(g) = e.spawn(fx, o.pos + Vec3::Y * lift)
                                 && let Some(n) = normal { g.oriented_normal = rot * n; }
                         }
-                        // Part-repair cues are outside this arrival-only scene.
-                        _ => {}
+                        ShipCue::JointEffect { fx, joint, offset, dir, normal } => {
+                            if let (Some(m), Some(e)) = (pose.joints.get(joint), self.effects.as_mut())
+                                && let Some(g) = e.spawn(fx, o.pos + rot * m.transform_point3(offset))
+                            {
+                                g.emit_dir = rot * dir;
+                                if let Some(n) = normal { g.oriented_normal = rot * n; }
+                            }
+                        }
+                        ShipCue::PartEffect { fx, part } => {
+                            if let (Some(Some(jm)), Some(e)) = (part_joints.get(part), self.effects.as_mut()) {
+                                e.spawn(fx, o.pos + rot * jm.w_axis.truncate());
+                            }
+                        }
                     }
                 }
                 if let Some(e) = self.effects.as_mut() {
@@ -702,7 +801,11 @@ impl View {
                     }
                 }
                 let at = self.place(key(kinds::SHIP, i as u64), o.pos, tick, alpha);
-                self.push(key(kinds::SHIP, i as u64), kinds::SHIP, models::SHIP, at, rot, pose, &no_inputs, 1.0, 0);
+                let lit = |m: usize| Inputs { frame: Some(light_frames.get(m).copied().unwrap_or(0.0)), ..Inputs::default() };
+                self.push(key(kinds::SHIP, i as u64), kinds::SHIP, models::SHIP, at, rot, pose, &lit, 1.0, 0);
+                for (part, model, ppose) in part_poses {
+                    self.push(key(kinds::SHIP_PART, ((o.id.0 as u64) << 8) | part as u64), kinds::SHIP_PART, model, at, rot, ppose, &no_inputs, 1.0, 0);
+                }
                 continue;
             }
             self.onion_light(sim, i, o, dt);

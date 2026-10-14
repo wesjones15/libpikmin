@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 21;
+pub const PIK_ABI_VERSION: u32 = 22;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -943,6 +943,17 @@ pub unsafe extern "C" fn pik_sim_add_ship(sim: *mut PikSim, pos: *const PikVec3,
     unsafe { with(sim, -1, |s| s.sim.add_ship(pos,
         pos + Vec3::new(yaw.sin(), 0.0, yaw.cos()) * 100.0,
         pos + Vec3::Y * 74.0).0 as i32) }
+}
+
+/// Fits ship part `part` (0..30) to the Dolphin `ship` ([`Sim::give_ship_part`]); with all 30 it is the
+/// repaired ship, which the view draws with them when [`pik_view_set_repaired_ship`] was on at load.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_give_ship_part(sim: *mut PikSim, ship: u32, part: u32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| s.sim.give_ship_part(OnionId(ship), part)) }
 }
 
 /// Updates a host-controlled Onion's pose and airborne state.

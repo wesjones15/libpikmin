@@ -222,6 +222,13 @@ pub unsafe extern "C" fn pik_view_show_cursors(view: *mut PikView, show: u8) {
     unsafe { with_view(view, (), |v| v.view.show_cursors = show != 0) }
 }
 
+/// Have views made after this draw the Dolphin's parts as the sim fits them (`animator`'s sibling,
+/// `view::set_repaired_ship`). Call before [`pik_view_new`]: the parts' models are loaded then.
+#[unsafe(no_mangle)]
+pub extern "C" fn pik_view_set_repaired_ship(on: u8) {
+    libpikmin_present::view::set_repaired_ship(on != 0);
+}
+
 /// Olimar jumps with the Pikmin's own jump motion (`animator::set_captain_pikmin_jump`).
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_view_set_captain_pikmin_jump(on: u8) {
