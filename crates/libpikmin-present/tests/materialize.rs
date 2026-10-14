@@ -16,7 +16,7 @@ fn extent(view: &View) -> f32 {
 }
 
 #[test]
-fn a_negative_progress_means_no_beam_and_a_beam_has_a_light_column() {
+fn a_negative_progress_means_no_beam_and_forming_has_healing_effects() {
     let Some(assets) = Assets::discover(None) else { return };
     let mut view = View::load(&assets).unwrap();
     let mut sim = Sim::new(Params::default(), 3);
@@ -32,7 +32,9 @@ fn a_negative_progress_means_no_beam_and_a_beam_has_a_light_column() {
     view.set_materialize(c.0, 0.3);
     view.update(&sim, 1.0, TICK_DT);
     assert!(extent(&view) < normal * 0.9, "forming");
-    assert!(view.draws.iter().any(|d| d.kind == kinds::BEAM), "under a beam");
+    assert!(!view.draws.iter().any(|d| d.kind == kinds::BEAM), "no Onion beam over him");
+    let fx = view.effects.as_ref().map(|e| e.running()).unwrap_or(0);
+    assert!(fx > 0, "the healing effects run while he forms");
     view.set_materialize(c.0, 1.0);
     view.update(&sim, 1.0, TICK_DT);
     assert!((extent(&view) - normal).abs() < normal * 0.03, "done: his full size");

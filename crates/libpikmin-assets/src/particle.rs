@@ -56,6 +56,11 @@ pub mod effects {
     const fn one(pcr: &'static str, tex: &'static str) -> EffectDef {
         EffectDef { pcr, tex, child_tex: None }
     }
+    /// `EFF_Rocket_NaviRecover`: the star burst when Olimar is healed at the ship
+    /// (`NaviUfoState::exec`).
+    pub const NAVI_RECOVER: EffectDef = one("effects/pcr/ore_rec.pcr", "effects/tex/star8_i.bti");
+    /// `EFF_Rocket_NaviSparkle`: the glowing sparkles at the ship's goal spot (`UfoItem`).
+    pub const NAVI_SPARKLE: EffectDef = one("effects/pcr/ore_kira.pcr", "effects/tex/ps_glow.bti");
     /// `EFF_Rocket_C`: sparkles over the ship when it powers up (`UfoItem::startLevelFlag`).
     pub const ROCKET_C: EffectDef = one("effects/pcr/rkt_c.pcr", "effects/tex/star4_i.bti");
     /// `EFF_Rocket_Complete1/2`: the same at the last level.

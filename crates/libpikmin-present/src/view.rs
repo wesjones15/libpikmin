@@ -337,6 +337,8 @@ pub struct View {
     cones: HashMap<u32, f32>,
     /// Captains appearing in a beam: how far along, 0..1 (see [`View::set_materialize`]).
     materialize: HashMap<u32, f32>,
+    /// Captains whose arrival effects are running.
+    materializing: HashSet<u32>,
     /// Onions whose beacon rings are on (`GoalItem::setSpotActive`).
     spots: HashSet<u32>,
     /// Onions a pellet just reached, for their `GoalEffect`.
@@ -473,6 +475,7 @@ impl View {
             show_cursors: true,
             cones: HashMap::new(),
             materialize: HashMap::new(),
+            materializing: HashSet::new(),
             spots: HashSet::new(),
             arrivals: Vec::new(),
             grown: Vec::new(),
@@ -937,14 +940,25 @@ impl View {
             let (pos, rot) = self.place_rot(k, c.pos, Quat::from_rotation_y(c.face), tick, alpha);
             let anim = self.animator.captain(&self.piki_anims, &params, c, dt);
             let mut root = crate::animator::captain_root(&params, c);
-            let mut beam = None;
+            let fx_key = (8u64 << 48) | c.id.0 as u64;
             if let Some(&p) = self.materialize.get(&c.id.0) {
-                // Beamed in: a thin tall figure that fills out, under a column of light.
+                // Beamed in: a thin tall figure that fills out, in the ship's healing effects
+                // (`NaviUfoState`'s recover burst, the goal spot's sparkles).
+                if let Some(fx) = self.effects.as_mut() {
+                    if self.materializing.insert(c.id.0) {
+                        fx.spawn(fx_defs::NAVI_RECOVER, pos);
+                        fx.attach(fx_key, fx_defs::NAVI_SPARKLE, pos);
+                    }
+                    fx.move_attached(fx_key, pos);
+                }
                 let p = p.clamp(0.0, 1.0);
                 let ease = p * p * (3.0 - 2.0 * p);
                 let tall = ((p * 1.6).min(1.0)).powi(2);
                 root *= Mat4::from_scale(Vec3::new(ease.max(0.02), tall.max(0.02), ease.max(0.02)));
-                beam = Some(1.0 - ease);
+            } else if self.materializing.remove(&c.id.0)
+                && let Some(fx) = self.effects.as_mut()
+            {
+                fx.detach(fx_key);
             }
             let pose = self.models[models::OLIMAR as usize].skel.pose(root, anim);
             let flash = c.damage_frames > 0.0 && (c.damage_frames as i32 / 2) % 2 == 0;
@@ -964,13 +978,6 @@ impl View {
                 radius: c.whistle_radius(&params),
             });
             self.push(k, kinds::CAPTAIN, models::OLIMAR, pos, rot, pose, &no_inputs, 1.0, f);
-            // A beam from the sky while he is beamed in (the Onions' light cone, narrowing as he forms).
-            if let Some(w) = beam.filter(|w| *w > 0.02) {
-                let model = models::BEAMS[2];
-                let root = Mat4::from_scale(Vec3::new(CONE_SCALE * w, CONE_SCALE, CONE_SCALE * w));
-                let bpose = self.models[model as usize].skel.pose(root, None);
-                self.push(key(kinds::BEAM, (1u64 << 32) | c.id.0 as u64), kinds::BEAM, model, pos, Quat::IDENTITY, bpose, &no_inputs, 1.0, 0);
-            }
             if !self.show_cursors {
                 continue;
             }

@@ -206,6 +206,8 @@ impl Effects {
                 effects::PIKI_DEFLOWER[0],
                 effects::PIKI_DEFLOWER[1],
                 effects::ROCKET_C,
+                effects::NAVI_RECOVER,
+                effects::NAVI_SPARKLE,
                 effects::ROCKET_COMPLETE[0],
                 effects::ROCKET_COMPLETE[1],
                 effects::ROCKET_GEP,
@@ -246,6 +248,11 @@ impl Effects {
     fn generator(&mut self, pcr: &Arc<Pcr>, pos: Vec3) -> Generator {
         self.seed = self.seed.wrapping_mul(747796405).wrapping_add(2891336453);
         Generator::new(pcr.clone(), pos, self.seed)
+    }
+
+    /// How many effects (one-shots and attached) are running.
+    pub fn running(&self) -> usize {
+        self.oneshots.len() + self.attached.len()
     }
 
     /// `EffectMgr::create` for a one-shot effect at `pos`; the generator, to set up further.
