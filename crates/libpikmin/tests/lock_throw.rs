@@ -66,6 +66,26 @@ fn locked_on_the_nearest_is_thrown_and_the_pick_is_kept() {
     assert_eq!(sim.captain(c).throw_color, Some(PikiColor::Blue), "the pick stays for after the lock");
 }
 
+/// A Pikmin close by in front of him and another a little farther behind: Any takes the
+/// plain nearest, not the one behind.
+#[test]
+fn any_takes_the_plain_nearest_even_in_front() {
+    let mut sim = Sim::new(Params::default(), 5);
+    let c = sim.add_captain(Vec3::ZERO);
+    let behind = sim.spawn_piki_in_squad(PikiColor::Red, Vec3::new(-50.0, 0.0, 0.0), c).unwrap();
+    let ahead = sim.spawn_piki_in_squad(PikiColor::Red, Vec3::new(45.0, 0.0, 0.0), c).unwrap();
+    // Hold them still where they are, and him facing +x.
+    let pose = libpikmin::captain::CaptainPose { pos: Vec3::ZERO, vel: Vec3::ZERO, face: std::f32::consts::FRAC_PI_2 };
+    sim.set_input(c, CaptainInput { pose: Some(pose), ..Default::default() });
+    sim.step(&mut Enemy);
+    sim.set_lock_target(c, Some(7));
+    sim.piki_mut(behind).pos = Vec3::new(-47.0, 0.0, 0.0);
+    sim.piki_mut(ahead).pos = Vec3::new(40.0, 0.0, 0.0);
+    sim.set_input(c, CaptainInput { pose: Some(pose), throw: true, ..Default::default() });
+    sim.step(&mut Enemy);
+    assert_eq!(in_hand(&sim, c), Some(ahead), "40 away in front beats 47 away behind");
+}
+
 #[test]
 fn the_colour_switch_includes_any_so_a_pick_is_never_stuck() {
     let (mut sim, c, _, _) = setup();

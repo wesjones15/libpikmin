@@ -857,6 +857,8 @@ impl Sim {
         // and the pick is left as it was.
         let want = if self.captains[ci].lock_target.is_some() { None } else { self.captains[ci].throw_color };
         let grab = self.params.navi.pluck_grab_range;
+        let nearest = want.is_none();
+        let reach = if nearest { 120.0 } else { 80.0 };
         let c = &self.captains[ci];
         let fwd = dir_of(c.face);
         // The nearest of the picked colour, and the nearest of any.
@@ -871,10 +873,13 @@ impl Sim {
             have_want |= want.is_some_and(|w| p.color == w);
             let diff = p.pos - c.pos;
             let mut len = diff.length();
-            if diff.dot(fwd) > -0.1 {
+            // The original prefers ones behind. Host extension: with no colour picked (Any, or
+            // locked on) it is the plain nearest, and reaches further, so a Pikmin running
+            // alongside him in front is still the one thrown.
+            if !nearest && diff.dot(fwd) > -0.1 {
                 len += 10.0;
             }
-            if len >= 80.0 {
+            if len >= reach {
                 continue;
             }
             if any.is_none_or(|(_, d)| len < d) {
