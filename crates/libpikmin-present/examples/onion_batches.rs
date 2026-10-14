@@ -13,6 +13,8 @@ fn main() {
             lo = lo.min(v.position);
             hi = hi.max(v.position);
         }
+        let m = &vm.model.materials[b.material];
+        println!("  pe {:x?} flags {:#x}", m.pe, m.flags);
         println!("batch {i}: material {} blend {} cull {:?} tris {} tex {} y {:.0}..{:.0} x {:.0}..{:.0} z {:.0}..{:.0}",
             b.material, vm.batch_blend[i], b.cull, b.indices.len() / 3, vm.batch_texture[i], lo.y, hi.y, lo.x, hi.x, lo.z, hi.z);
     }
