@@ -45,6 +45,12 @@ Workspace:
 - `crates/libpikmin-ffi/`: C ABI for hosts: `pikmin.dll`, `pik_*` functions (`pik_view_*` for
   drawing and sound), `PIK_ABI_VERSION`. ror2-olimar's `Native.cs` mirrors its structs and
   checks `pik_struct_sizes` at load; change both together (and the size test in `src/tests.rs`).
+  The replica path for networked hosts: `pik_sim_snapshot` on the server (`libpikmin::Snapshot`:
+  every entity field, the creatures' positions and the events since the last, encoded and decoded
+  by `snapshot.rs`), `pik_replica_new` / `pik_replica_apply` / `pik_replica_update` on every other
+  machine (a sim that never steps and blends between snapshots, so the view draws and sounds it as
+  the real one), and `pik_replica_overlay_captain` to show a client's own captain moving as his
+  local sim does. Round-trip tests compare the `Debug` output of every entity.
 - `crates/viewer/`: test host (macroquad) for play-testing without a game. Uses `libpikmin-present`'s animator and audio. Its enemies (Dwarf/Spotty
   Bulborbs, Honeywisps) are host-side ports of the Pikmin 1 strategies in `viewer/src/teki.rs`. 3D with the disc's
   models and animations (CPU skinning, a GLSL TEV interpreter for PVW materials); V switches to
