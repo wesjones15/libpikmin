@@ -416,6 +416,10 @@ pub enum Overlay {
     Bar { at: Vec3, width: f32, frac: f32, color: Color },
 }
 
+/// How long the arrival preview takes (`DolphinArrival` in the RoR2 host).
+const ARRIVE_SECONDS: f32 = 3.5;
+const ARRIVE_FX: u64 = 8 << 48;
+
 pub struct Scene3d {
     olimar: GpuModel,
     pikmin: [GpuModel; 3],
@@ -458,6 +462,10 @@ pub struct Scene3d {
     pub dist: f32,
     pub pitch: f32,
     pub camera: Camera3D,
+    /// `PIKMIN_ARRIVE`: seconds into the first captain's beam-in at the Dolphin's goal spot (a
+    /// preview of the host's arrival, see `libpikmin_present::View::set_materialize`).
+    pub arrive: Option<f32>,
+    arrive_fx: bool,
 }
 
 impl Scene3d {
@@ -529,6 +537,8 @@ impl Scene3d {
             dist: 420.0,
             pitch: 0.72,
             camera: Camera3D::default(),
+            arrive: None,
+            arrive_fx: false,
         })
     }
 
@@ -630,6 +640,9 @@ impl Scene3d {
 
         self.draw_ground(sim.captain(focus).pos);
         self.time += dt;
+        if let Some(t) = self.arrive.as_mut() {
+            *t += dt;
+        }
         let (eye, target) = (self.camera.position, self.camera.target);
         self.tev.view_rot = macroquad::math::Mat4::look_at_rh(eye, target, vec3(0.0, 1.0, 0.0));
         let d = target - eye;
@@ -1077,8 +1090,32 @@ impl Scene3d {
         let mut whistles = Vec::new();
         for (i, c) in sim.captains().iter().enumerate() {
             let anim = self.animator.captain(&self.piki_anims, &params, c, dt);
-            let root = srt_matrix(GVec3::ONE, GVec3::new(0.0, c.face, 0.0), c.pos)
-                * libpikmin_present::animator::captain_root(&params, c);
+            let mut pos = c.pos;
+            let mut beam = Mat4::IDENTITY;
+            if i == 0
+                && let Some(t) = self.arrive
+                && let Some(goal) = sim.onions().iter().find(|o| o.ship.is_some()).map(|o| o.goal_pos())
+            {
+                // A thin tall figure that fills out in the ship's healing effects
+                // (`libpikmin_present::View::update`'s materialize, `NaviUfoState`).
+                pos = goal;
+                let p = (t / ARRIVE_SECONDS).clamp(0.0, 1.0);
+                let ease = p * p * (3.0 - 2.0 * p);
+                let tall = ((p * 1.6).min(1.0)).powi(2);
+                beam = Mat4::from_scale(GVec3::new(ease.max(0.02), tall.max(0.02), ease.max(0.02)));
+                if let Some(fx) = self.effects.as_mut()
+                    && !self.arrive_fx
+                {
+                    self.arrive_fx = true;
+                    eprintln!("arrival at the Dolphin's goal spot {goal:?}");
+                    fx.spawn(effects::NAVI_RECOVER, pos);
+                    fx.attach(ARRIVE_FX, effects::NAVI_SPARKLE, pos);
+                    fx.attach(ARRIVE_FX | 1, effects::NAVI_RINGS, goal);
+                }
+            }
+            let root = srt_matrix(GVec3::ONE, GVec3::new(0.0, c.face, 0.0), pos)
+                * libpikmin_present::animator::captain_root(&params, c)
+                * beam;
             let flash = c.damage_frames > 0.0 && (c.damage_frames as i32 / 2) % 2 == 0;
             let joints = draw_model(
                 &self.olimar,

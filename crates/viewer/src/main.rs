@@ -23,6 +23,7 @@
 //! `PIKMIN_PART_TEXT=i` opens ship part i's description; `PIKMIN_SHIP_PARTS=n` puts parts
 //! 0..n on the ship and `PIKMIN_DELIVER=i` plays part i arriving at it; `PIKMIN_TAKEOFF=1`
 //! presses T at the start, `PIKMIN_TAKEOFF=2` also once everything is gone (to land).
+//! `PIKMIN_ARRIVE=1` plays the first captain's beam-in at the Dolphin's goal spot (3.5 s; pin the camera with `PIKMIN_FOCUS`).
 //! `PIKMIN_PLUCKER=n` sends an Onion's plucker out for a sprout left n seconds (default 10, `off` for none).
 
 use std::path::PathBuf;
@@ -333,6 +334,13 @@ async fn main() {
         if let [yaw, dist, pitch] = v[..] {
             (sc.yaw, sc.dist, sc.pitch) = (yaw, dist, pitch);
         }
+    }
+
+    // `PIKMIN_ARRIVE=1`: the first captain beams in at the Dolphin's goal spot, over 3.5 s.
+    if let Some(sc) = scene.as_mut()
+        && std::env::var_os("PIKMIN_ARRIVE").is_some()
+    {
+        sc.arrive = Some(0.0);
     }
 
     loop {
