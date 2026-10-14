@@ -117,3 +117,22 @@ fn with_any_picked_the_nearest_is_thrown() {
     press_throw(&mut sim, c);
     assert_eq!(in_hand(&sim, c), Some(red));
 }
+
+#[test]
+fn locked_on_a_pikmin_two_hundred_units_off_is_called_but_not_without_the_lock() {
+    for (locked, expected) in [(true, true), (false, false)] {
+        let mut sim = Sim::new(Params::default(), 5);
+        let c = sim.add_captain(Vec3::ZERO);
+        let far = sim.spawn_piki_in_squad(PikiColor::Red, Vec3::new(-200.0, 0.0, 0.0), c).unwrap();
+        let pose = libpikmin::captain::CaptainPose { pos: Vec3::ZERO, vel: Vec3::ZERO, face: std::f32::consts::FRAC_PI_2 };
+        sim.set_input(c, CaptainInput { pose: Some(pose), ..Default::default() });
+        sim.step(&mut Enemy);
+        if locked {
+            sim.set_lock_target(c, Some(7));
+        }
+        sim.piki_mut(far).pos = Vec3::new(-200.0, 0.0, 0.0);
+        sim.set_input(c, CaptainInput { pose: Some(pose), throw: true, ..Default::default() });
+        sim.step(&mut Enemy);
+        assert_eq!(in_hand(&sim, c) == Some(far), expected, "locked: {locked}");
+    }
+}

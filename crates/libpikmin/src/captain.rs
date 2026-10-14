@@ -869,7 +869,8 @@ impl Sim {
         let want = if self.captains[ci].lock_target.is_some() { None } else { self.captains[ci].throw_color };
         let grab = self.params.navi.pluck_grab_range;
         let nearest = want.is_none();
-        let reach = if nearest { 120.0 } else { 80.0 };
+        // Locked on, any Pikmin within 250 units is called (he runs to the captain); Any alone 120; a colour 80.
+        let reach = if self.captains[ci].lock_target.is_some() { 250.0 } else if nearest { 120.0 } else { 80.0 };
         let c = &self.captains[ci];
         let fwd = dir_of(c.face);
         // The nearest of the picked colour, and the nearest of any.
