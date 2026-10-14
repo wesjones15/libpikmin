@@ -820,28 +820,20 @@ impl Sim {
         bits
     }
 
-    /// Switches to the next colour in his squad (Red, Yellow, Blue, skipping colours he has
-    /// none of). A Pikmin already in his hand goes back and, with the button still `held`, one
-    /// of the new colour comes instead.
+    /// Steps the colour pick on: Any (the nearest Pikmin, the default), then Red, Yellow and
+    /// Blue in turn, skipping colours he has none of, then Any again. A Pikmin already in his
+    /// hand goes back and, with the button still `held`, one of the new pick comes instead.
     fn cycle_throw_color(&mut self, ci: usize, held: bool) {
         let bits = self.squad_colors(ci);
-        let now = match self.captains[ci].throw {
-            ThrowState::Wait { held: Some(id), .. } | ThrowState::Wait { pending: Some(id), .. } => {
-                Some(self.pikis[id.0 as usize].color)
-            }
-            _ => self.captains[ci].throw_color,
-        };
-        let at = now
-            .and_then(|c| Self::CYCLE.iter().position(|&x| x == c))
-            .unwrap_or(Self::CYCLE.len() - 1);
-        let next = (1..=3)
-            .map(|k| Self::CYCLE[(at + k) % 3])
-            .find(|c| bits & (1 << c.index()) != 0);
-        let Some(next) = next else {
-            return;
-        };
-        self.captains[ci].throw_color = Some(next);
-        if now != Some(next) && matches!(self.captains[ci].throw, ThrowState::Wait { .. }) {
+        let now = self.captains[ci].throw_color;
+        // Places 0 (Any), 1.. (the colours in `CYCLE`).
+        let at = now.and_then(|c| Self::CYCLE.iter().position(|&x| x == c)).map_or(0, |k| k + 1);
+        let next = (1..=Self::CYCLE.len() + 1)
+            .map(|k| (at + k) % (Self::CYCLE.len() + 1))
+            .find(|&k| k == 0 || bits & (1 << Self::CYCLE[k - 1].index()) != 0)
+            .map_or(None, |k| (k > 0).then(|| Self::CYCLE[k - 1]));
+        self.captains[ci].throw_color = next;
+        if now != next && matches!(self.captains[ci].throw, ThrowState::Wait { .. }) {
             self.cancel_throw(ci);
             if held {
                 self.start_throw_wait(ci);

@@ -65,3 +65,35 @@ fn locked_on_the_nearest_is_thrown_and_the_pick_is_kept() {
     assert_eq!(in_hand(&sim, c), Some(red), "the nearest, not the picked Blue");
     assert_eq!(sim.captain(c).throw_color, Some(PikiColor::Blue), "the pick stays for after the lock");
 }
+
+#[test]
+fn the_colour_switch_includes_any_so_a_pick_is_never_stuck() {
+    let (mut sim, c, _, _) = setup();
+    // setup() stopped on Blue; the next step is Any, the nearest.
+    sim.set_input(c, CaptainInput { cycle: true, ..Default::default() });
+    sim.step(&mut Enemy);
+    sim.set_input(c, CaptainInput::default());
+    sim.step(&mut Enemy);
+    assert_eq!(sim.captain(c).throw_color, None);
+    // And around again: Red, then Blue (no Yellow in the squad), then Any.
+    let mut seen = Vec::new();
+    for _ in 0..3 {
+        sim.set_input(c, CaptainInput { cycle: true, ..Default::default() });
+        sim.step(&mut Enemy);
+        sim.set_input(c, CaptainInput::default());
+        sim.step(&mut Enemy);
+        seen.push(sim.captain(c).throw_color);
+    }
+    assert_eq!(seen, [Some(PikiColor::Red), Some(PikiColor::Blue), None]);
+}
+
+#[test]
+fn with_any_picked_the_nearest_is_thrown() {
+    let (mut sim, c, red, _) = setup();
+    sim.set_input(c, CaptainInput { cycle: true, ..Default::default() });
+    sim.step(&mut Enemy);
+    sim.set_input(c, CaptainInput::default());
+    sim.step(&mut Enemy);
+    press_throw(&mut sim, c);
+    assert_eq!(in_hand(&sim, c), Some(red));
+}
