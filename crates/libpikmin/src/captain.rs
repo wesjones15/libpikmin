@@ -850,10 +850,12 @@ impl Sim {
     }
 
     /// `NaviThrowWaitState::init`: pick the nearest squad member within 80, preferring ones behind.
-    /// With a colour picked (`throw_color`) only that colour; when he has none of it left,
+    /// With a colour picked (`throw_color`, and not locked on) only that colour; when he has none of it left,
     /// the nearest of any colour, which becomes the pick.
     fn start_throw_wait(&mut self, ci: usize) -> bool {
-        let want = self.captains[ci].throw_color;
+        // Host extension: locked onto an enemy, the nearest Pikmin goes whatever colour is picked,
+        // and the pick is left as it was.
+        let want = if self.captains[ci].lock_target.is_some() { None } else { self.captains[ci].throw_color };
         let grab = self.params.navi.pluck_grab_range;
         let c = &self.captains[ci];
         let fwd = dir_of(c.face);
