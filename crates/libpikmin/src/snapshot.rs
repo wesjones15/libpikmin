@@ -49,6 +49,9 @@ pub struct Snapshot {
     pub nectar_drops: Vec<NectarDrop>,
     pub puddles: Vec<Puddle>,
     pub next_nectar: u32,
+    /// Where the host's creatures were (id, position, yaw), so a replica can place the sounds of
+    /// what they do. Not their parts: nothing on a replica latches onto them.
+    pub creatures: Vec<(u64, Vec3, f32)>,
     /// What happened since the snapshot before (sounds, effects and animation cues).
     pub events: Vec<Event>,
 }
@@ -66,6 +69,7 @@ impl Snapshot {
             nectar_drops: sim.nectar_drops.clone(),
             puddles: sim.puddles.clone(),
             next_nectar: sim.next_nectar,
+            creatures: sim.creatures.creatures.iter().map(|c| (c.id, c.pos, c.yaw)).collect(),
             events: events.to_vec(),
         }
     }
@@ -103,6 +107,12 @@ impl Snapshot {
         for p in &self.puddles {
             w_puddle(&mut w, p);
         }
+        w.len(self.creatures.len());
+        for (id, pos, yaw) in &self.creatures {
+            w.u64(*id);
+            w.vec3(*pos);
+            w.f32(*yaw);
+        }
         w.len(self.events.len());
         for e in &self.events {
             w_event(&mut w, e);
@@ -133,6 +143,8 @@ impl Snapshot {
         let n = r.len()?;
         let puddles = (0..n).map(|_| r_puddle(&mut r)).collect::<Option<Vec<_>>>()?;
         let n = r.len()?;
+        let creatures = (0..n).map(|_| Some((r.u64()?, r.vec3()?, r.f32()?))).collect::<Option<Vec<_>>>()?;
+        let n = r.len()?;
         let events = (0..n).map(|_| r_event(&mut r)).collect::<Option<Vec<_>>>()?;
         (r.pos == bytes.len()).then_some(Snapshot {
             tick,
@@ -144,6 +156,7 @@ impl Snapshot {
             nectar_drops,
             puddles,
             next_nectar,
+            creatures,
             events,
         })
     }

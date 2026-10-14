@@ -1252,6 +1252,11 @@ pub unsafe extern "C" fn pik_replica_apply(sim: *mut PikSim, bytes: *const u8, l
             r.prev = r.cur.take();
             let from = r.prev.clone().unwrap_or_else(|| snap.clone());
             s.sim.apply_snapshot_blend(&from, &snap, 0.0);
+            // Where the creatures were, for the sounds of what they do.
+            s.frame.clear();
+            for &(id, pos, yaw) in &snap.creatures {
+                s.frame.creatures.push(CreatureView { id, pos, yaw, alive: true, flying: false, parts_start: 0, parts_len: 0 });
+            }
             r.cur = Some(snap);
             1
         })

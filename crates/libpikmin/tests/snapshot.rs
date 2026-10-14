@@ -84,6 +84,8 @@ fn a_round_trip_reproduces_every_entity() {
     assert!(bytes.len() < 60_000, "a busy snapshot is {} bytes", bytes.len());
     let decoded = Snapshot::decode(&bytes).expect("decodes");
     assert_eq!(decoded.events, events);
+    assert_eq!(decoded.creatures, snap.creatures);
+    assert_eq!(decoded.creatures.len(), 1, "the arena's one creature went over");
     assert_eq!(decoded.tick, sim.tick());
 
     let mut replica = Sim::default();
