@@ -236,6 +236,20 @@ fn ship_parts_screens_and_font_load() {
     assert!(a.advance > i.advance && i.advance > 0, "A {a:?} i {i:?}");
 }
 
+#[test]
+fn hud_number_textures_decode_from_the_users_disc() {
+    let Some(disc) = Assets::discover(None) else { return };
+    for digit in 0..10 {
+        for shadow in [false, true] {
+            let image = libpikmin_assets::screen::number_texture(&disc, digit, shadow).unwrap();
+            assert_eq!((image.width, image.height), (64, 64));
+            assert_eq!(image.rgba.len(), 64 * 64 * 4);
+            assert!(image.rgba.chunks_exact(4).any(|p| p[3] > 0));
+        }
+    }
+    assert!(libpikmin_assets::screen::number_texture(&disc, 10, false).is_err());
+}
+
 /// The ship's motions through a delivery: it opens up and stops at `kiso_t`'s Action0 key,
 /// carries on when the part is in, then the part fits itself (Appear) and settles into its
 /// After loop while the first upgrade plays and the lights start blinking.

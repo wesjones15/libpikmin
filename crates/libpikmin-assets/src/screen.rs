@@ -386,3 +386,14 @@ impl Font {
         self.glyphs.get((c as usize).checked_sub(0x20)?)
     }
 }
+
+/// A HUD digit from `zen::NumberTex::NumberTex` (drawCommon.cpp), separate from
+/// `bigFont.bti`'s dialogue glyphs. These files are extracted with `screen/eng_tex/`.
+pub fn number_texture(assets: &crate::Assets, digit: u32, shadow: bool) -> Result<Image, Error> {
+    if digit > 9 {
+        return Err(Error::Bad("HUD digit must be 0..9".into()));
+    }
+    let suffix = if shadow { "sha64" } else { "64" };
+    let path = format!("screen/eng_tex/{digit}_{suffix}.bti");
+    Ok(crate::texture::decode_bti(&assets.read(&path)?)?.0)
+}
