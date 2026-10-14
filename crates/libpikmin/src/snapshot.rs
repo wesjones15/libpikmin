@@ -181,6 +181,23 @@ impl Sim {
         }
     }
 
+    /// A replica's captain shown as another sim's (a client predicting his own movement locally):
+    /// where he is, how he moves and where his cursor is come from `from`, so his own controls feel
+    /// instant; what he is doing with the squad (throwing, whistling, plucking) stays the server's.
+    /// `pos` and `face` override `from`'s when given (the host's smoothed body).
+    pub fn overlay_captain_motion(&mut self, id: CaptainId, from: &Captain, pos: Option<Vec3>, face: Option<f32>) {
+        let Some(c) = self.captains.iter_mut().find(|c| c.id == id) else { return };
+        c.pos = pos.unwrap_or(from.pos);
+        c.face = face.unwrap_or(from.face);
+        c.vel = from.vel;
+        c.target_vel = from.target_vel;
+        c.on_ground = from.on_ground;
+        c.jump = from.jump;
+        c.cursor = from.cursor;
+        c.cursor_world = from.cursor_world;
+        c.neutral_time = from.neutral_time;
+    }
+
     /// As [`Sim::apply_snapshot`] of `to`, but positions and facings are `t` (0..1) of the way
     /// from where `from` had them (entities it also has, by id), so motion is smooth at the rate
     /// the snapshots arrive. Anything new in `to`, or with a different id order, is as `to` has it.

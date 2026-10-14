@@ -474,6 +474,30 @@ fn a_replica_follows_the_server_through_snapshots() {
             d
         }).fold(0.0f32, f32::max);
         assert!(worst < 120.0, "the replica is {worst} units off");
+        // Showing the captain as another sim's: a mover that has run ahead of the server.
+        let mover = pik_sim_new(std::ptr::null(), 5);
+        pik_sim_add_captain(mover, &PikVec3::default());
+        pik_sim_set_input(mover, 0, &PikInput { stick_x: 1.0, ..Default::default() });
+        for _ in 0..20 {
+            pik_sim_advance(mover, &h, 1.0 / 30.0);
+        }
+        let mut ahead = PikCaptain::default();
+        pik_sim_captain(mover, 0, &mut ahead);
+        pik_replica_update(replica, 0.0);
+        pik_replica_overlay_captain(replica, 0, mover, 0, std::ptr::null(), 0.0);
+        let mut shown = PikCaptain::default();
+        pik_sim_captain(replica, 0, &mut shown);
+        assert_eq!(shown.pos.x, ahead.pos.x, "the replica's captain is where the mover has him");
+        let smoothed = PikVec3 { x: ahead.pos.x + 1.0, y: ahead.pos.y, z: ahead.pos.z };
+        pik_replica_overlay_captain(replica, 0, mover, 0, &smoothed, 0.5);
+        pik_sim_captain(replica, 0, &mut shown);
+        assert_eq!((shown.pos.x, shown.face), (smoothed.x, 0.5), "or where the host says");
+        // A plain sim is left alone.
+        let before = ahead.pos.x;
+        pik_replica_overlay_captain(mover, 0, mover, 0, &smoothed, 0.5);
+        pik_sim_captain(mover, 0, &mut ahead);
+        assert_eq!(ahead.pos.x, before);
+        pik_sim_free(mover);
         // A replica only takes snapshots, and refuses nonsense and a plain sim.
         assert_eq!(pik_replica_apply(replica, bytes.as_ptr(), 5), 0);
         assert_eq!(pik_replica_apply(server, bytes.as_ptr(), 10), 0, "not a replica");

@@ -1287,6 +1287,40 @@ pub unsafe extern "C" fn pik_replica_update(sim: *mut PikSim, dt: f32) {
     }
 }
 
+/// On a replica, shows `captain` (the server's id for this player's captain) moving as captain
+/// `from_captain` of `mover` does, so a client's own Olimar responds at once instead of a round
+/// trip late. `pos` (3 floats) and `face` (angle) override the mover's, if `pos` is non-null: pass
+/// the smoothed body. Call after [`pik_replica_update`] each frame, before the view.
+///
+/// # Safety
+/// `replica` from [`pik_replica_new`]; `mover` from [`pik_sim_new`]; `pos` null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_replica_overlay_captain(
+    replica: *mut PikSim,
+    captain: u32,
+    mover: *mut PikSim,
+    from_captain: u32,
+    pos: *const PikVec3,
+    face: f32,
+) {
+    // SAFETY: as documented.
+    let Some(m) = (unsafe { mover.as_ref() }) else { return };
+    if m.poisoned {
+        return;
+    }
+    let Some(from) = m.sim.captains().get(from_captain as usize).cloned() else { return };
+    // SAFETY: as documented.
+    let pos = unsafe { pos.as_ref() }.map(|p| Vec3::from(*p));
+    // SAFETY: as documented.
+    unsafe {
+        with(replica, (), |s| {
+            if s.replica.is_some() {
+                s.sim.overlay_captain_motion(CaptainId(captain), &from, pos, pos.map(|_| face));
+            }
+        })
+    }
+}
+
 /// How far into the next tick the clock is (0..1), for drawing between ticks.
 ///
 /// # Safety
