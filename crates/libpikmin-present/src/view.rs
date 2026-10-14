@@ -335,6 +335,8 @@ pub struct View {
     pub show_cursors: bool,
     /// Each Onion's light cone width, 0..1 (`GoalItem::startConeShrink` / `startConeEmit`).
     cones: HashMap<u32, f32>,
+    /// Captains appearing in a beam: how far along, 0..1 (see [`View::set_materialize`]).
+    materialize: HashMap<u32, f32>,
     /// Onions whose beacon rings are on (`GoalItem::setSpotActive`).
     spots: HashSet<u32>,
     /// Onions a pellet just reached, for their `GoalEffect`.
@@ -470,6 +472,7 @@ impl View {
             time: 0.0,
             show_cursors: true,
             cones: HashMap::new(),
+            materialize: HashMap::new(),
             spots: HashSet::new(),
             arrivals: Vec::new(),
             grown: Vec::new(),
@@ -648,6 +651,16 @@ impl View {
             self.texture_ids.push(id);
         }
         self.draws.push(Draw { key: k, kind, flags, model, pos, rot, first_vertex, first_color, alpha });
+    }
+
+    /// Captain `captain` is appearing in a beam, `progress` 0 (a thin column) to 1 (himself); 1 or more
+    /// ends it. Hosts call it each frame while it lasts.
+    pub fn set_materialize(&mut self, captain: u32, progress: f32) {
+        if progress.is_finite() && progress < 1.0 {
+            self.materialize.insert(captain, progress.max(0.0));
+        } else {
+            self.materialize.remove(&captain);
+        }
     }
 
     /// Poses everything in `sim` for this frame. `alpha` is how far into the next tick the
@@ -923,7 +936,13 @@ impl View {
             let k = key(kinds::CAPTAIN, c.id.0 as u64);
             let (pos, rot) = self.place_rot(k, c.pos, Quat::from_rotation_y(c.face), tick, alpha);
             let anim = self.animator.captain(&self.piki_anims, &params, c, dt);
-            let root = crate::animator::captain_root(&params, c);
+            let mut root = crate::animator::captain_root(&params, c);
+            if let Some(&p) = self.materialize.get(&c.id.0) {
+                // Beamed in: a thin tall column of light-sized Olimar that settles to his shape.
+                let p = p.clamp(0.0, 1.0);
+                let ease = p * p * (3.0 - 2.0 * p);
+                root *= Mat4::from_scale(Vec3::new(ease.max(0.02), 1.0 + 0.8 * (1.0 - ease), ease.max(0.02)));
+            }
             let pose = self.models[models::OLIMAR as usize].skel.pose(root, anim);
             let flash = c.damage_frames > 0.0 && (c.damage_frames as i32 / 2) % 2 == 0;
             let f = if flash { flags::FLASH } else { 0 };
