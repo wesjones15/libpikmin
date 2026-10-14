@@ -50,7 +50,7 @@ fn setup(strike: bool) -> (Sim, Arena, libpikmin::CaptainId) {
     let mut arena = Arena::default();
     arena.creatures = vec![(1, Vec3::new(70.0, 0.0, 0.0)), (2, Vec3::new(-50.0, 0.0, 30.0)), (3, Vec3::new(900.0, 0.0, 0.0))];
     if strike {
-        sim.set_dismiss_strike(3.0, 60.0, 4.0);
+        sim.set_dismiss_strike(3.0, 60.0, 4.0, 2.0);
     }
     run(&mut sim, &mut arena, 2.0);
     (sim, arena, c)
@@ -78,7 +78,7 @@ fn a_strike_hits_everything_around_for_more_than_a_punch_and_leaves_the_squad_al
     assert_eq!(ids, [1, 2], "both nearby creatures, not the far one");
     for (_, amount, from) in &arena.hits {
         assert_eq!(*amount, 30.0, "3x a 10 damage punch");
-        assert_eq!(*from, DamageSource::Captain(c));
+        assert_eq!(*from, DamageSource::Strike(c));
     }
     assert_eq!(sim.pikis().iter().filter(|p| p.state.in_squad()).count(), 4, "nobody is dismissed");
     assert!(sim.captain(c).strike.is_none());
@@ -97,4 +97,35 @@ fn the_cooldown_blocks_a_second_strike_for_four_seconds() {
     press(&mut sim, c, &mut arena);
     run(&mut sim, &mut arena, 1.0);
     assert!(arena.hits.len() > first, "ready after 4 s");
+}
+
+#[test]
+fn a_strike_sends_the_squad_charging_the_way_he_struck_for_a_couple_of_seconds() {
+    let (mut sim, mut arena, c) = setup(true);
+    // He faces +x (yaw 90 degrees); the squad trails behind at -x.
+    let pose = libpikmin::CaptainPose { pos: Vec3::ZERO, vel: Vec3::ZERO, face: std::f32::consts::FRAC_PI_2 };
+    sim.set_input(c, CaptainInput { pose: Some(pose), ..Default::default() });
+    run(&mut sim, &mut arena, 0.5);
+    assert!(!sim.captain(c).swarming);
+    sim.set_input(c, CaptainInput { pose: Some(pose), dismiss: true, ..Default::default() });
+    sim.step(&mut arena);
+    sim.set_input(c, CaptainInput { pose: Some(pose), ..Default::default() });
+    run(&mut sim, &mut arena, 0.5);
+    let c0 = sim.captain(c);
+    assert!(c0.swarming, "the squad swarms");
+    assert!((c0.plate_yaw - std::f32::consts::FRAC_PI_2).abs() < 0.2, "toward +x, got {}", c0.plate_yaw);
+    run(&mut sim, &mut arena, 2.0);
+    assert!(!sim.captain(c).swarming, "and settles back after the charge");
+}
+
+#[test]
+fn a_stick_swarm_beats_the_charge() {
+    let (mut sim, mut arena, c) = setup(true);
+    let pose = libpikmin::CaptainPose { pos: Vec3::ZERO, vel: Vec3::ZERO, face: std::f32::consts::FRAC_PI_2 };
+    sim.set_input(c, CaptainInput { pose: Some(pose), dismiss: true, ..Default::default() });
+    sim.step(&mut arena);
+    sim.set_input(c, CaptainInput { pose: Some(pose), swarm: libpikmin::Vec2::new(0.0, -1.0), ..Default::default() });
+    run(&mut sim, &mut arena, 0.5);
+    let yaw = sim.captain(c).plate_yaw;
+    assert!((yaw - std::f32::consts::PI).abs() < 0.3, "toward -z, got {yaw}");
 }

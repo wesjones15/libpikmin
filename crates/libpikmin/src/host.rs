@@ -10,6 +10,8 @@ pub enum DamageSource {
     Piki(PikiId),
     /// A captain's punch (`NaviAttackState`).
     Captain(CaptainId),
+    /// Host extension: a captain's dismiss strike ([`crate::Sim::set_dismiss_strike`]).
+    Strike(CaptainId),
 }
 
 /// Host-chosen stable handle for a creature (enemy, animal, boss...).

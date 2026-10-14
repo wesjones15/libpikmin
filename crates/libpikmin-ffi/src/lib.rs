@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 19;
+pub const PIK_ABI_VERSION: u32 = 20;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -121,6 +121,8 @@ pub struct PikHost {
 
 pub const PIK_SOURCE_PIKI: u32 = 0;
 pub const PIK_SOURCE_CAPTAIN: u32 = 1;
+/// A captain's dismiss strike.
+pub const PIK_SOURCE_STRIKE: u32 = 2;
 
 /// One captain's controls ([`CaptainInput`]). Buttons are levels; the sim finds the edges.
 #[repr(C)]
@@ -637,6 +639,7 @@ impl Host for FfiHost<'_> {
         let (kind, id) = match from {
             DamageSource::Piki(p) => (PIK_SOURCE_PIKI, p.0),
             DamageSource::Captain(c) => (PIK_SOURCE_CAPTAIN, c.0),
+            DamageSource::Strike(c) => (PIK_SOURCE_STRIKE, c.0),
         };
         let part = part.map_or(-1, |p| p as i32);
         // SAFETY: as above.
@@ -1774,9 +1777,9 @@ pub unsafe extern "C" fn pik_sim_credit_kill(sim: *mut PikSim, creature: u64) ->
 /// # Safety
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn pik_sim_set_dismiss_strike(sim: *mut PikSim, damage_scale: f32, reach: f32, cooldown: f32) {
+pub unsafe extern "C" fn pik_sim_set_dismiss_strike(sim: *mut PikSim, damage_scale: f32, reach: f32, cooldown: f32, charge: f32) {
     // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.set_dismiss_strike(damage_scale, reach, cooldown)) }
+    unsafe { with(sim, (), |s| s.sim.set_dismiss_strike(damage_scale, reach, cooldown, charge)) }
 }
 
 /// [`Sim::set_punch_damage`]: the punch's damage (and so the strike's).

@@ -154,6 +154,8 @@ pub struct Captain {
     /// Host extension: a dismiss strike in progress, and seconds until the next.
     pub strike: Option<crate::strike::Strike>,
     pub strike_cooldown: f32,
+    /// Host extension: the squad swarming the way a strike went (direction in world XZ, seconds left).
+    pub charge: Option<(Vec2, f32)>,
     /// Highest point of the current time in the air (host extension: fall damage).
     pub(crate) air_peak: f32,
     /// The tick his current jump started, so later mid-air jumps reach his followers' cues.
@@ -186,7 +188,12 @@ pub(crate) struct Pressed {
 }
 
 impl Captain {
-    pub fn swarm_input(&self) -> Vec2 { if self.swarming { self.input.swarm } else { Vec2::ZERO } }
+    pub fn swarm_input(&self) -> Vec2 { if self.swarming { self.swarm_now() } else { Vec2::ZERO } }
+
+    /// The swarm direction in force: the stick's, else a strike's charge.
+    fn swarm_now(&self) -> Vec2 {
+        if self.input.swarm.length() > 0.05 { self.input.swarm } else { self.charge.map_or(Vec2::ZERO, |(d, _)| d) }
+    }
     pub(crate) fn new(id: CaptainId, pos: Vec3, health: f32) -> Self {
         Self {
             id,
@@ -223,6 +230,7 @@ impl Captain {
             lock_view: None,
             strike: None,
             strike_cooldown: 0.0,
+            charge: None,
             air_peak: pos.y,
             jump_tick: None,
             rearrange_pending: false,
@@ -321,9 +329,11 @@ impl Sim {
         self.update_captain_damage(ci, dt);
         let cooldown = self.captains[ci].strike_cooldown;
         self.captains[ci].strike_cooldown = (cooldown - dt).max(0.0);
+        self.captains[ci].charge = self.captains[ci].charge.and_then(|(d, t)| (t > dt).then_some((d, t - dt)));
         if self.captains[ci].down {
             let c = &mut self.captains[ci];
             c.strike = None;
+            c.charge = None;
             c.vel = Vec3::ZERO;
             c.target_vel = Vec3::ZERO;
             c.whistle = WhistleState::Off;
@@ -547,7 +557,8 @@ impl Sim {
         let navi = &self.params.navi;
         let plate_parms = &self.params.plate;
         let c = &self.captains[ci];
-        let swarm = Vec3::new(c.input.swarm.x, 0.0, c.input.swarm.y);
+        let sw = c.swarm_now();
+        let swarm = Vec3::new(sw.x, 0.0, sw.y);
         let dead_zone = 0.05;
 
         if swarm.length() > dead_zone {

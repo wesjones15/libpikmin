@@ -23,6 +23,8 @@ pub struct StrikeSpec {
     pub reach: f32,
     /// Seconds before the next strike.
     pub cooldown: f32,
+    /// Seconds the squad charges out the way he struck (a swarm), 0 for none.
+    pub charge: f32,
 }
 
 /// A strike in progress.
@@ -35,10 +37,17 @@ pub struct Strike {
 impl Sim {
     /// Makes the dismiss button strike instead of dismissing: `damage_scale` times a punch's
     /// damage to every creature within `reach` units of its edge, then `cooldown` seconds
-    /// before the next. A scale of 0 or less puts the dismissal back.
-    pub fn set_dismiss_strike(&mut self, damage_scale: f32, reach: f32, cooldown: f32) {
+    /// before the next. A scale of 0 or less puts the dismissal back. The strike also sends the
+    /// squad charging for `charge` seconds, as a swarm toward what he struck at (the creature he
+    /// is locked onto, else the way he faces).
+    pub fn set_dismiss_strike(&mut self, damage_scale: f32, reach: f32, cooldown: f32, charge: f32) {
         self.dismiss_strike = (damage_scale.is_finite() && damage_scale > 0.0 && reach.is_finite() && cooldown.is_finite())
-            .then(|| StrikeSpec { damage_scale, reach: reach.max(0.0), cooldown: cooldown.max(0.0) });
+            .then(|| StrikeSpec {
+                damage_scale,
+                reach: reach.max(0.0),
+                cooldown: cooldown.max(0.0),
+                charge: if charge.is_finite() { charge.max(0.0) } else { 0.0 },
+            });
     }
 
     /// Host extension: every captain's punch (`NaviAttackState`) does `damage` instead of the disc's
@@ -59,6 +68,10 @@ impl Sim {
         }
         c.strike = Some(Strike { frame: 0.0, hit: false });
         c.strike_cooldown = spec.cooldown;
+        // Toward the locked creature if there is one, else the way he faces.
+        let aim = c.lock_target.and_then(|id| self.creatures.get(id)).map(|t| t.pos - c.pos);
+        let dir = aim.filter(|d| d.x.hypot(d.z) > 1.0).map_or(crate::math::dir_of(c.face), |d| d.normalize_or_zero());
+        c.charge = (spec.charge > 0.0).then(|| (crate::Vec2::new(dir.x, dir.z), spec.charge));
         let captain = c.id;
         self.events.push(Event::StrikeStarted { captain });
     }
@@ -86,7 +99,7 @@ impl Sim {
                 .map(|c| c.id)
                 .collect();
             for creature in targets {
-                if host.damage(creature, damage, None, crate::host::DamageSource::Captain(cid)) {
+                if host.damage(creature, damage, None, crate::host::DamageSource::Strike(cid)) {
                     self.events.push(Event::Punched { captain: cid, creature, damage });
                 }
             }
