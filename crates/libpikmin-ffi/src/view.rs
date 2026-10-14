@@ -222,6 +222,12 @@ pub unsafe extern "C" fn pik_view_show_cursors(view: *mut PikView, show: u8) {
     unsafe { with_view(view, (), |v| v.view.show_cursors = show != 0) }
 }
 
+/// Olimar jumps with the Pikmin's own jump motion (`animator::set_captain_pikmin_jump`).
+#[unsafe(no_mangle)]
+pub extern "C" fn pik_view_set_captain_pikmin_jump(on: u8) {
+    libpikmin_present::animator::set_captain_pikmin_jump(on != 0);
+}
+
 /// How loud the swarming trumpet plays, times the disc's level (default 1; 0 to 4).
 ///
 /// # Safety

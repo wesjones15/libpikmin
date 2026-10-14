@@ -280,7 +280,11 @@ pub fn captain_motion(params: &Params, c: &Captain, throwing: bool) -> (Motion, 
     } else if c.damage_frames > 0.0 {
         (Motion::Damage, Clock::Sim(params.anim.damage.end - c.damage_frames))
     } else if c.jump.is_some() {
-        (Motion::OCarry, Clock::LoopFrom(30.0, 10.0))
+        if CAPTAIN_PIKMIN_JUMP.load(std::sync::atomic::Ordering::Relaxed) {
+            (Motion::RollJmp, Clock::Loop(30.0))
+        } else {
+            (Motion::OCarry, Clock::LoopFrom(30.0, 10.0))
+        }
     } else if let Some(p) = c.punch {
         (Motion::Punch, Clock::Sim(p.frame))
     } else if let Some(s) = c.strike {
@@ -301,6 +305,15 @@ pub fn captain_motion(params: &Params, c: &Captain, throwing: bool) -> (Motion, 
     } else {
         locomotion(speed, th, rate)
     }
+}
+
+static CAPTAIN_PIKMIN_JUMP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Host extension: Olimar's jump plays the Pikmin's own (`RollJmp`, the tumble a thrown or jumping
+/// Pikmin plays; Pikmin and Olimar share the motion table) instead of the geyser ride tipped
+/// upright. Off by default.
+pub fn set_captain_pikmin_jump(on: bool) {
+    CAPTAIN_PIKMIN_JUMP.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// How far Olimar tips forward while jumping. His jump reuses the geyser ride (`OCarry`),
