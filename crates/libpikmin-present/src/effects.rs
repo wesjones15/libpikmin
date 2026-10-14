@@ -75,6 +75,7 @@ struct Whistle {
     /// `NaviFue`: 24 sparkles on the circle.
     circle: Vec<Generator>,
     stopped: bool,
+    state: WhistleState,
 }
 
 /// Where a captain's whistle is this frame.
@@ -295,22 +296,38 @@ impl Effects {
         for f in frames {
             let on = !matches!(f.state, WhistleState::Off);
             // `NaviGatherState::exec`: the effects stop 0.5 s before the call ends.
-            let ending = matches!(f.state, WhistleState::Calling { timer, .. } if timer > hold_time - 0.5);
-            if on && !self.whistles.contains_key(&f.captain) {
+            // Hosts using a shorter call must still get particles until release/end.
+            let ending = hold_time > 0.5
+                && matches!(f.state, WhistleState::Calling { timer, .. } if timer > hold_time - 0.5);
+            let restarted = self.whistles.get(&f.captain).is_some_and(|w| match (w.state, f.state) {
+                (WhistleState::Off, _) => true,
+                (WhistleState::Calling { .. }, WhistleState::Expanding { .. }) => true,
+                (WhistleState::Expanding { timer: old }, WhistleState::Expanding { timer })
+                | (WhistleState::Calling { timer: old, .. }, WhistleState::Calling { timer, .. }) => timer < old,
+                _ => false,
+            });
+            if on && (!self.whistles.contains_key(&f.captain) || restarted) {
+                // A rapid second whistle gets fresh emitters while the old particles fade.
+                if let Some(w) = self.whistles.remove(&f.captain) {
+                    for mut g in w.beam.into_iter().chain(w.circle) {
+                        g.finish();
+                        self.oneshots.push(g);
+                    }
+                }
                 let pcrs: Vec<_> = self.defs[..3].iter().map(|(_, d)| d.pcr.clone()).collect();
                 let mut beam: Vec<_> = pcrs.iter().map(|p| self.generator(p, f.antenna)).collect();
                 // `setOrientedConstZAxis(true)` on B.
                 beam[1].fixed_normal = true;
                 let circle_pcr = self.defs[3].1.pcr.clone();
                 let circle = (0..24).map(|_| self.generator(&circle_pcr, f.cursor)).collect();
-                self.whistles.insert(f.captain, Whistle { beam, circle, stopped: false });
+                self.whistles.insert(f.captain, Whistle { beam, circle, stopped: false, state: f.state });
             }
-            if let Some(w) = self.whistles.get_mut(&f.captain)
-                && (!on || ending)
-                && !w.stopped
-            {
-                w.stopped = true;
-                w.beam.iter_mut().chain(w.circle.iter_mut()).for_each(Generator::finish);
+            if let Some(w) = self.whistles.get_mut(&f.captain) {
+                w.state = f.state;
+                if (!on || ending) && !w.stopped {
+                    w.stopped = true;
+                    w.beam.iter_mut().chain(w.circle.iter_mut()).for_each(Generator::finish);
+                }
             }
         }
         self.acc += dt;
@@ -336,7 +353,8 @@ impl Effects {
                 // `Navi::renderCircle`: 24 points around the cursor at the whistle radius.
                 for (i, g) in w.circle.iter_mut().enumerate() {
                     let a = i as f32 * (std::f32::consts::TAU / 24.0) + ring;
-                    g.emit_pos = f.cursor.with_y(0.0) + Vec3::new(f.radius * a.sin(), 0.0, f.radius * a.cos());
+                    // Keep the cursor's world height on hosts whose terrain isn't at y=0.
+                    g.emit_pos = f.cursor + Vec3::new(f.radius * a.sin(), 0.0, f.radius * a.cos());
                     g.update(1.0, &mut |_| {});
                 }
             }
@@ -349,13 +367,17 @@ impl Effects {
                 if frames.iter().any(|f| f.captain == *id) {
                     continue;
                 }
+                w.stopped = true;
+                w.state = WhistleState::Off;
                 w.beam.iter_mut().chain(w.circle.iter_mut()).for_each(|g| {
                     g.finish();
                     g.update(1.0, &mut |_| {});
                 });
             }
             self.whistles.retain(|_, w| {
-                !(w.stopped
+                // Keep a drained, stopped call until it ends, so holding it doesn't start
+                // new emitters every frame after the early cutoff.
+                !(w.stopped && matches!(w.state, WhistleState::Off)
                     && w.beam.iter().chain(w.circle.iter()).all(|g| {
                         g.is_finished() && g.particles.is_empty() && g.children.is_empty()
                     }))
@@ -398,6 +420,109 @@ impl Effects {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libpikmin_assets::particle::{Keyed, flags};
+
+    fn effects() -> Effects {
+        // Synthetic, asset-free emitter: one white particle per tick, alive for 12 ticks.
+        let mut pcr = Pcr::parse(&[0; 256]).unwrap();
+        pcr.billboard = true;
+        pcr.flags = flags::SHAPE_SPHERE | flags::VEL_DIRECTIONAL;
+        pcr.emit_dir = Vec3::Y;
+        pcr.rate = Keyed::Const(1.0);
+        pcr.life = 12;
+        pcr.max_frame = 60;
+        pcr.size = 1.0;
+        pcr.anim.duration = 12;
+        pcr.anim.thresholds = vec![0.0, 1.0];
+        pcr.anim.prim = vec![[255; 4]; 2];
+        pcr.anim.env = vec![[0; 4]; 2];
+        let defs = effects::NAVI_WHISTLE.into_iter().chain([effects::WHISTLE_CIRCLE])
+            .map(|d| (d, Def {
+                pcr: Arc::new(pcr.clone()),
+                tex: Texture { image: Image { width: 1, height: 1, rgba: vec![255; 4] }, wrap: [false; 2] },
+                child_tex: None,
+            })).collect();
+        Effects { defs, oneshots: Vec::new(), attached: Vec::new(), whistles: HashMap::new(), ring_angle: 0.0, acc: 0.0, seed: 1 }
+    }
+
+    fn frame(state: WhistleState) -> WhistleFrame {
+        WhistleFrame {
+            captain: CaptainId(0), state,
+            antenna: Vec3::new(0.0, 260.0, 0.0),
+            cursor: Vec3::new(100.0, 240.0, 0.0),
+            captain_pos: Vec3::new(0.0, 240.0, 0.0), radius: 30.0,
+        }
+    }
+
+    #[test]
+    fn a_rapid_second_whistle_emits_while_the_first_fades() {
+        let mut fx = effects();
+        let mut f = frame(WhistleState::Expanding { timer: 0.1 });
+        fx.update(&[f], 1.0, 1.0 / 30.0);
+        f.state = WhistleState::Off;
+        fx.update(&[f], 1.0, 1.0 / 30.0);
+        assert!(fx.whistles[&f.captain].stopped);
+        f.state = WhistleState::Expanding { timer: 0.0 };
+        fx.update(&[f], 1.0, 1.0 / 30.0);
+        let w = &fx.whistles[&f.captain];
+        assert!(!w.stopped);
+        assert!(w.beam.iter().all(|g| !g.is_finished() && !g.particles.is_empty()));
+        assert!(!fx.oneshots.is_empty(), "old particles keep fading");
+        assert!(!fx.batches(Vec3::X, Vec3::Y).is_empty());
+    }
+
+    #[test]
+    fn a_short_call_keeps_emitting_and_its_ring_uses_the_cursor_height() {
+        let mut fx = effects();
+        let f = frame(WhistleState::Calling { timer: 0.05, radius: 30.0 });
+        fx.update(&[f], 0.15, 1.0 / 30.0);
+        let w = &fx.whistles[&f.captain];
+        assert!(!w.stopped, "a short host call must not end before it emits");
+        assert!(w.circle.iter().all(|g| !g.particles.is_empty()));
+        for g in &w.circle {
+            for p in &g.particles {
+                assert_eq!(p.global.y, f.cursor.y, "sparkle ring must not be buried at world y=0");
+            }
+        }
+    }
+
+    #[test]
+    fn a_finished_call_does_not_respawn_until_a_new_whistle() {
+        let mut fx = effects();
+        let mut f = frame(WhistleState::Expanding { timer: 0.1 });
+        fx.update(&[f], 1.0, 1.0 / 30.0);
+        f.state = WhistleState::Calling { timer: 0.75, radius: 30.0 };
+        for _ in 0..30 {
+            fx.update(&[f], 1.0, 1.0 / 30.0);
+        }
+        assert!(fx.whistles[&f.captain].stopped);
+        assert!(fx.batches(Vec3::X, Vec3::Y).is_empty());
+        // A new press can arrive without a rendered Off frame between sim ticks.
+        f.state = WhistleState::Expanding { timer: 0.0 };
+        fx.update(&[f], 1.0, 1.0 / 30.0);
+        assert!(!fx.whistles[&f.captain].stopped);
+        assert!(!fx.batches(Vec3::X, Vec3::Y).is_empty());
+    }
+
+    #[test]
+    fn a_reset_expansion_timer_restarts_emitters_and_departed_captains_are_cleaned_up() {
+        let mut fx = effects();
+        let mut f = frame(WhistleState::Expanding { timer: 0.1 });
+        fx.update(&[f], 1.0, 1.0 / 30.0);
+        f.state = WhistleState::Expanding { timer: 0.0 };
+        fx.update(&[f], 1.0, 1.0 / 30.0);
+        assert!(!fx.oneshots.is_empty(), "timer reset must create a fresh whistle");
+        for _ in 0..30 {
+            fx.update(&[], 1.0, 1.0 / 30.0);
+        }
+        assert!(fx.whistles.is_empty());
+        assert!(fx.oneshots.is_empty());
     }
 }
 
