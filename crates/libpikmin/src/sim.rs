@@ -252,6 +252,11 @@ impl Sim {
         self.tick
     }
 
+    /// Sets the tick count, for a replica that presents a server's sim (see [`crate::snapshot`]).
+    pub fn set_tick(&mut self, tick: u64) {
+        self.tick = tick;
+    }
+
     /// Fraction of the way to the next tick, for render interpolation.
     pub fn alpha(&self) -> f32 {
         self.clock.alpha()

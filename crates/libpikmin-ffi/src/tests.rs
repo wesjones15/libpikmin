@@ -434,3 +434,53 @@ fn unified_onion_flight_preserves_every_colour_and_blocks_transfers() {
         pik_sim_free(sim);
     }
 }
+
+#[test]
+fn a_replica_follows_the_server_through_snapshots() {
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        let server = pik_sim_new(std::ptr::null(), 4);
+        let c = pik_sim_add_captain(server, &PikVec3::default());
+        for i in 0..30 {
+            let at = PikVec3 { x: -20.0 - i as f32 * 2.0, y: 0.0, z: (i % 4) as f32 * 6.0 };
+            pik_sim_spawn_piki(server, (i % 3) as u32, &at, c);
+        }
+        let mut world = World::default();
+        let h = host(&mut world);
+        let replica = pik_replica_new(std::ptr::null());
+        let mut bytes = vec![0u8; 64 * 1024];
+        let mut seen = 0;
+        for tick in 0..90 {
+            pik_sim_set_input(server, 0, &PikInput { stick_x: 0.5, whistle: (tick == 30) as u8, ..Default::default() });
+            pik_sim_advance(server, &h, 1.0 / 30.0);
+            if tick % 3 == 2 {
+                let n = pik_sim_snapshot(server, bytes.as_mut_ptr(), bytes.len() as u32);
+                assert!(n > 0, "a snapshot fits");
+                assert_eq!(pik_replica_apply(replica, bytes.as_ptr(), n), 1);
+                seen += 1;
+            }
+            pik_replica_update(replica, 1.0 / 30.0);
+        }
+        assert!(seen >= 20);
+        // The replica has the server's Pikmin, within a snapshot's travel of where they are.
+        let mut a = vec![PikPiki::default(); 64];
+        let mut b = vec![PikPiki::default(); 64];
+        let na = pik_sim_pikis(server, a.as_mut_ptr(), 64) as usize;
+        let nb = pik_sim_pikis(replica, b.as_mut_ptr(), 64) as usize;
+        assert_eq!((na, nb), (30, 30));
+        let worst = a[..na].iter().zip(&b[..nb]).map(|(x, y)| {
+            let d = (x.pos.x - y.pos.x).hypot(x.pos.z - y.pos.z);
+            assert_eq!(x.color, y.color);
+            d
+        }).fold(0.0f32, f32::max);
+        assert!(worst < 120.0, "the replica is {worst} units off");
+        // A replica only takes snapshots, and refuses nonsense and a plain sim.
+        assert_eq!(pik_replica_apply(replica, bytes.as_ptr(), 5), 0);
+        assert_eq!(pik_replica_apply(server, bytes.as_ptr(), 10), 0, "not a replica");
+        // Too small a buffer takes nothing, so the events are still there for the next try.
+        let mut tiny = [0u8; 8];
+        assert_eq!(pik_sim_snapshot(server, tiny.as_mut_ptr(), 8), 0);
+        pik_sim_free(server);
+        pik_sim_free(replica);
+    }
+}

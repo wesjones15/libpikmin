@@ -29,7 +29,7 @@ use libpikmin::carry::PelletState;
 use libpikmin::onion::{OnionAnim, SproutState};
 use libpikmin::{
     CaptainId, CaptainInput, CaptainPose, CreatureFrame, CreatureId, CreaturePart, DamageSource,
-    DeathCause, Event, Happa, Host, OnionId, Params, PelletDesc, PikiColor, PikiId, PikiState, Sim, Vec2,
+    DeathCause, Event, Happa, Host, OnionId, Params, PelletDesc, PikiColor, PikiId, PikiState, Sim, Snapshot, Vec2,
     Vec3,
 };
 use libpikmin::host::CreatureView;
@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 24;
+pub const PIK_ABI_VERSION: u32 = 25;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -626,8 +626,21 @@ pub struct PikSim {
     pending: VecDeque<Event>,
     /// Events for [`pik_view_update`] (animations, sounds).
     view_log: Vec<Event>,
+    /// Events for the next [`pik_sim_snapshot`] (what clients' replicas need to play).
+    net_log: Vec<Event>,
+    /// Set on a replica ([`pik_replica_new`]): the sim a client lays the server's snapshots over.
+    replica: Option<Replica>,
     params_source: CString,
     poisoned: bool,
+}
+
+/// A replica's snapshots: the newest and the one before, blended between as time passes.
+struct Replica {
+    prev: Option<Snapshot>,
+    cur: Option<Snapshot>,
+    /// Seconds since `cur` arrived, and the usual gap between arrivals.
+    since: f32,
+    interval: f32,
 }
 
 struct FfiHost<'a> {
@@ -729,6 +742,8 @@ pub unsafe extern "C" fn pik_sim_new(assets_dir: *const c_char, seed: u64) -> *m
             frame: CreatureFrame::default(),
             pending: VecDeque::new(),
             view_log: Vec::new(),
+            net_log: Vec::new(),
+            replica: None,
             params_source: CString::new(source).unwrap_or_default(),
             poisoned: false,
         })),
@@ -1151,11 +1166,118 @@ pub unsafe extern "C" fn pik_sim_advance(sim: *mut PikSim, host: *const PikHost,
             if s.view_log.len() + events.len() <= EVENT_BACKLOG {
                 s.view_log.extend_from_slice(&events);
             }
+            if s.net_log.len() + events.len() <= EVENT_BACKLOG {
+                s.net_log.extend_from_slice(&events);
+            }
             s.pending.extend(events);
             while s.pending.len() > EVENT_BACKLOG {
                 s.pending.pop_front();
             }
             ticks
+        })
+    }
+}
+
+/// Encodes the sim's entities, and the events since the last call, into `out` (at most `cap`
+/// bytes) for [`pik_replica_apply`] on another machine; returns the length, or 0 if it didn't fit
+/// (nothing is consumed then). The server calls this a few times a second.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`]; `out` writable for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_snapshot(sim: *mut PikSim, out: *mut u8, cap: u32) -> u32 {
+    if out.is_null() {
+        return 0;
+    }
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, 0, |s| {
+            let bytes = Snapshot::of(&s.sim, &s.net_log).encode();
+            if bytes.len() > cap as usize {
+                return 0;
+            }
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len());
+            s.net_log.clear();
+            bytes.len() as u32
+        })
+    }
+}
+
+/// Creates a replica: a sim that never steps, only holds what the server's snapshots say, so the
+/// view can draw and sound it as it would the real one. Tuning loads as in [`pik_sim_new`] (it
+/// should match the server's). Free with [`pik_sim_free`].
+///
+/// # Safety
+/// `assets_dir` null or a nul-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_replica_new(assets_dir: *const c_char) -> *mut PikSim {
+    // SAFETY: as documented.
+    let sim = unsafe { pik_sim_new(assets_dir, 0) };
+    // SAFETY: just made, or null.
+    if let Some(s) = unsafe { sim.as_mut() } {
+        s.replica = Some(Replica { prev: None, cur: None, since: 0.0, interval: 0.1 });
+    }
+    sim
+}
+
+/// A snapshot from the server's [`pik_sim_snapshot`] arrived. Returns whether it was accepted
+/// (this is a replica, and the bytes are a snapshot of this build). The events in it play at the
+/// next [`pik_view_update`].
+///
+/// # Safety
+/// `sim` from [`pik_replica_new`]; `bytes` readable for `len`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_replica_apply(sim: *mut PikSim, bytes: *const u8, len: u32) -> u8 {
+    if bytes.is_null() {
+        return 0;
+    }
+    // SAFETY: as documented.
+    let data = unsafe { std::slice::from_raw_parts(bytes, len as usize) };
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, 0, |s| {
+            let Some(r) = s.replica.as_mut() else { return 0 };
+            let Some(snap) = Snapshot::decode(data) else { return 0 };
+            // A newer one only: a late packet from before the one on hand is dropped.
+            if r.cur.as_ref().is_some_and(|c| snap.tick < c.tick) {
+                return 0;
+            }
+            if s.view_log.len() + snap.events.len() <= EVENT_BACKLOG {
+                s.view_log.extend_from_slice(&snap.events);
+            }
+            if r.cur.is_some() {
+                r.interval += (r.since.clamp(0.02, 0.5) - r.interval) * 0.2;
+            }
+            r.since = 0.0;
+            r.prev = r.cur.take();
+            let from = r.prev.clone().unwrap_or_else(|| snap.clone());
+            s.sim.apply_snapshot_blend(&from, &snap, 0.0);
+            r.cur = Some(snap);
+            1
+        })
+    }
+}
+
+/// Moves a replica `dt` seconds on: positions blend from the previous snapshot toward the newest
+/// over the usual gap between them, and the tick advances at 30 Hz so the view's per-tick work
+/// (sounds, animation) runs at its normal rate. Call once a frame before [`pik_view_update`].
+///
+/// # Safety
+/// `sim` from [`pik_replica_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_replica_update(sim: *mut PikSim, dt: f32) {
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, (), |s| {
+            let Some(r) = s.replica.as_mut() else { return };
+            let Some(cur) = r.cur.as_ref() else { return };
+            r.since += dt.clamp(0.0, 0.25);
+            let from = r.prev.as_ref().unwrap_or(cur);
+            let t = (r.since / r.interval).min(1.0);
+            s.sim.apply_snapshot_blend(from, cur, t);
+            // Time past the newest snapshot, so the view still sees ticks go by while waiting.
+            let ahead = (r.since * libpikmin::TICK_HZ as f32) as u64;
+            s.sim.set_tick(cur.tick + ahead);
         })
     }
 }
