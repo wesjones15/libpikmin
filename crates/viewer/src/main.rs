@@ -23,6 +23,7 @@
 //! `PIKMIN_PART_TEXT=i` opens ship part i's description; `PIKMIN_SHIP_PARTS=n` puts parts
 //! 0..n on the ship and `PIKMIN_DELIVER=i` plays part i arriving at it; `PIKMIN_TAKEOFF=1`
 //! presses T at the start, `PIKMIN_TAKEOFF=2` also once everything is gone (to land).
+//! `PIKMIN_PLUCKER=n` sends an Onion's plucker out for a sprout left n seconds (default 10, `off` for none).
 
 use std::path::PathBuf;
 
@@ -219,6 +220,12 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
     sim.add_onion(Vec3::new(-220.0, 0.0, -260.0), &[PikiColor::Red]);
     sim.add_onion(Vec3::new(0.0, 0.0, -340.0), &[PikiColor::Yellow]);
     sim.add_onion(Vec3::new(220.0, 0.0, -260.0), &[PikiColor::Blue]);
+    // The Onions' pluckers (host extension): a sprout nobody pulls for `PIKMIN_PLUCKER` seconds (default 10,
+    // `off` for none) sends a Pikmin out of its Onion to pluck it. O gives the nearest Onion seeds.
+    match std::env::var("PIKMIN_PLUCKER").as_deref() {
+        Ok("off") => {}
+        v => sim.set_auto_pluck(Some(v.ok().and_then(|v| v.parse().ok()).unwrap_or(10.0))),
+    }
     // The S.S. Dolphin to the west facing east, and three of its parts: the Main Engine,
     // the Whimsical Radar and the Automatic Gear.
     if let Ok(a) = assets {
@@ -502,7 +509,7 @@ async fn main() {
                 menu = Some(onion_menu::OnionMenu::new(o, active_id));
             }
             if let Some(n) = std::env::var("PIKMIN_PUTAWAY").ok().and_then(|v| v.parse().ok()) {
-                let onions: Vec<_> = g.sim.onions().iter().map(|o| (o.id, o.colors[0])).collect();
+                let onions: Vec<_> = g.sim.onions().iter().filter(|o| !o.colors.is_empty()).map(|o| (o.id, o.colors[0])).collect();
                 for (o, c) in onions {
                     g.sim.onion_put_away(active_id, o, c, n);
                 }
@@ -642,6 +649,7 @@ async fn main() {
                 .sim
                 .onions()
                 .iter()
+                .filter(|o| !o.colors.is_empty())
                 .min_by(|a, b| (a.pos - me).length().total_cmp(&(b.pos - me).length()))
                 .map(|o| (o.id, o.colors[0]))
             {
