@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 23;
+pub const PIK_ABI_VERSION: u32 = 24;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -499,6 +499,35 @@ pub unsafe extern "C" fn pik_assets_complete(dir: *const c_char) -> u8 {
         return 0;
     };
     catch_unwind(|| libpikmin_assets::extract::is_complete(&dir) as u8).unwrap_or(0)
+}
+
+/// One disc HUD digit (0..9), optionally its coloured shadow. RGBA8, rows top first,
+/// like `pik_view_texture`. Null `rgba` queries the dimensions without copying pixels.
+/// Returns 0 for a missing/bad asset, invalid digit or insufficient output space.
+///
+/// # Safety
+/// `dir` null or nul-terminated UTF-8; `info` null or writable; `rgba` null or writable
+/// for `len` bytes. This does not need a sim or a model view.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_number_texture(
+    dir: *const c_char, digit: u32, shadow: u8, info: *mut PikTexture, rgba: *mut u8, len: u32,
+) -> u8 {
+    let Some(root) = (unsafe { path_arg(dir) }) else { return 0 };
+    catch_unwind(|| {
+        let assets = libpikmin_assets::Assets { root };
+        let Ok(image) = libpikmin_assets::screen::number_texture(&assets, digit, shadow != 0) else { return 0 };
+        // SAFETY: caller promises writable outputs of the documented lengths.
+        unsafe {
+            if let Some(info) = info.as_mut() {
+                *info = PikTexture { width: image.width, height: image.height, wrap_s: 1, wrap_t: 1, _pad: [0; 2] };
+            }
+            if !rgba.is_null() {
+                if (len as usize) < image.rgba.len() { return 0; }
+                std::ptr::copy_nonoverlapping(image.rgba.as_ptr(), rgba, image.rgba.len());
+            }
+        }
+        1
+    }).unwrap_or(0)
 }
 
 /// Looks for a Pikmin disc image (.iso/.gcm/.ciso) in each of the `;`-separated folders in

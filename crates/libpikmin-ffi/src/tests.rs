@@ -2,6 +2,27 @@
 
 use super::*;
 
+#[test]
+fn hud_digits_cross_the_abi_and_short_buffers_are_rejected() {
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    let mut info = PikTexture::default();
+    let mut short = [0xAB; 4];
+    unsafe {
+        assert_eq!(pik_number_texture(std::ptr::null(), 0, 0, &mut info, std::ptr::null_mut(), 0), 0);
+        assert_eq!(pik_number_texture(dir.as_ptr(), 10, 0, &mut info, std::ptr::null_mut(), 0), 0);
+        assert_eq!(pik_number_texture(dir.as_ptr(), 0, 0, &mut info, short.as_mut_ptr(), 4), 0);
+        assert_eq!(short, [0xAB; 4]);
+        for digit in 0..10 {
+            assert_eq!(pik_number_texture(dir.as_ptr(), digit, 0, &mut info, std::ptr::null_mut(), 0), 1);
+            assert_eq!((info.width, info.height), (64, 64));
+            let mut rgba = vec![0; (info.width * info.height * 4) as usize];
+            assert_eq!(pik_number_texture(dir.as_ptr(), digit, 0, &mut info, rgba.as_mut_ptr(), rgba.len() as u32), 1);
+            assert!(rgba.chunks_exact(4).any(|p| p[3] != 0));
+        }
+    }
+}
+
 #[derive(Default)]
 struct World {
     ground_calls: u32,
