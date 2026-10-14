@@ -24,6 +24,7 @@ pub mod params;
 pub mod pellet_config;
 pub mod piki;
 pub mod plucker;
+pub mod snapshot;
 pub mod strike;
 mod sim;
 
@@ -39,6 +40,7 @@ pub use onion::{Onion, OnionId, Sprout, SproutId, SproutState};
 pub use params::Params;
 pub use piki::{Happa, KnockPhase, Piki, PikiColor, PikiState};
 pub use sim::Sim;
+pub use snapshot::Snapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PikiId(pub u32);

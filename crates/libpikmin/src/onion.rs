@@ -170,7 +170,7 @@ pub struct Sprout {
     pub happa: Happa,
     pub pos: Vec3,
     pub vel: Vec3,
-    air_resist: f32,
+    pub(crate) air_resist: f32,
     pub state: SproutState,
     /// The Onion that shot it (`mParentOnion`): its sounds play on that Onion's emitter.
     pub onion: Option<OnionId>,

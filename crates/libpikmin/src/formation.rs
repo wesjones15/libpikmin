@@ -29,7 +29,7 @@ pub struct Plate {
     pub centre: Vec3,
     /// `mPlateOffset`: point between the captain and the plate.
     pub offset: Vec3,
-    velocity: Vec3,
+    pub(crate) velocity: Vec3,
 }
 
 impl Plate {

@@ -160,11 +160,11 @@ pub struct Captain {
     pub(crate) air_peak: f32,
     /// The tick his current jump started, so later mid-air jumps reach his followers' cues.
     pub(crate) jump_tick: Option<u64>,
-    rearrange_pending: bool,
+    pub(crate) rearrange_pending: bool,
     pub(crate) input: CaptainInput,
     pub(crate) pressed: Pressed,
-    movement_held: bool,
-    actions_held: bool,
+    pub(crate) movement_held: bool,
+    pub(crate) actions_held: bool,
     pub(crate) launched: bool,
 }
 

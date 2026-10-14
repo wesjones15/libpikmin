@@ -121,7 +121,7 @@ pub struct Pellet {
     /// Carriers in the order they grabbed on (the first one is the original's "stick leader").
     pub carriers: Vec<PikiId>,
     /// Host terrain recovery: time with enough lifters but no movement or visible floor.
-    stalled: f32,
+    pub(crate) stalled: f32,
 }
 
 /// Height carriers lift the pellet by (`Pellet::startPick`, offset 8 / scale).
