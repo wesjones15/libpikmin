@@ -24,6 +24,7 @@
 //! 0..n on the ship and `PIKMIN_DELIVER=i` plays part i arriving at it; `PIKMIN_TAKEOFF=1`
 //! presses T at the start, `PIKMIN_TAKEOFF=2` also once everything is gone (to land).
 //! `PIKMIN_ARRIVE=1` plays the first captain's beam-in at the Dolphin's goal spot (3.5 s; pin the camera with `PIKMIN_FOCUS`).
+//! `PIKMIN_REPLICA=1` draws a replica of the sim fed by snapshots, as another machine would see it.
 //! `PIKMIN_PLUCKER=n` sends an Onion's plucker out for a sprout left n seconds (default 10, `off` for none).
 
 use std::path::PathBuf;
@@ -43,6 +44,7 @@ mod message;
 mod onion_menu;
 mod sound;
 mod render3d;
+mod replica;
 mod teki;
 mod tev;
 
@@ -323,6 +325,8 @@ async fn main() {
     let shot = std::env::var_os("PIKMIN_SHOT").map(PathBuf::from);
     let mut frames = 0u32;
     let shot_frame: u32 = std::env::var("PIKMIN_SHOT_FRAME").ok().and_then(|v| v.parse().ok()).unwrap_or(120);
+    // `PIKMIN_REPLICA=1`: draw a replica fed by snapshots instead of the sim (see replica.rs).
+    let mut replica = std::env::var_os("PIKMIN_REPLICA").map(|_| replica::Replica::new(g.sim.params().clone()));
     // `PIKMIN_AUTOPLAY=1`: the active captain walks at the nearest creature and keeps throwing.
     let autoplay = std::env::var_os("PIKMIN_AUTOPLAY").is_some();
     // `PIKMIN_TRACE=1`: print every enemy's state once a second.
@@ -728,7 +732,10 @@ async fn main() {
             }
         }
         g.sim.advance(&mut g.world, sim_dt);
-        let events: Vec<_> = g.sim.drain_events().collect();
+        let mut events: Vec<_> = g.sim.drain_events().collect();
+        if let Some(r) = replica.as_mut() {
+            events = r.step(&g.sim, events, get_frame_time());
+        }
         for e in events {
             if let Some(sc) = scene.as_mut() {
                 sc.on_event(&e);
@@ -800,7 +807,7 @@ async fn main() {
         if let Some(sc) = scene.as_mut().filter(|_| view3d) {
             clear_background(Color::from_rgba(150, 190, 225, 255));
             sc.paused = paused;
-            let overlays = sc.draw(&g.sim, active, &g.world.tekis, dt);
+            let overlays = sc.draw(replica.as_ref().map_or(&g.sim, |r| &r.sim), active, &g.world.tekis, dt);
             for o in overlays {
                 match o {
                     render3d::Overlay::Text { at, text, color, size } => {
