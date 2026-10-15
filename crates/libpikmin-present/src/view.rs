@@ -950,11 +950,17 @@ impl View {
         for c in sim.captains() {
             live.insert(crate::animator::captain_key(c.id));
             let k = key(kinds::CAPTAIN, c.id.0 as u64);
-            let (pos, rot) = self.place_rot(k, c.pos, Quat::from_rotation_y(c.face), tick, alpha);
+            let (mut pos, rot) = self.place_rot(k, c.pos, Quat::from_rotation_y(c.face), tick, alpha);
             let anim = self.animator.captain(&self.piki_anims, &params, c, dt);
             let mut root = crate::animator::captain_root(&params, c);
             let fx_key = (8u64 << 48) | ((c.id.0 as u64) << 8);
             if let Some(&p) = self.materialize.get(&c.id.0) {
+                // Host extension: transport from the Dolphin's hatch to the captain's
+                // held arrival pose, using NaviUfoState's own recovery effects.
+                if let Some(ship) = sim.onions().iter().filter(|o| o.ship.is_some())
+                    .min_by(|a, b| a.pos.distance(c.pos).total_cmp(&b.pos.distance(c.pos))) {
+                    pos = (ship.suck_pos() + Vec3::Y * 30.0).lerp(pos, p.clamp(0.0, 1.0));
+                }
                 // Beamed in: a thin tall figure that fills out, in the ship's healing effects
                 // (`NaviUfoState`'s recover burst, the goal spot's sparkles).
                 if let Some(fx) = self.effects.as_mut() {
