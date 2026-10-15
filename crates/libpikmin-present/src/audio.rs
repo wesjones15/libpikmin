@@ -73,11 +73,11 @@ pub struct Audio {
     sys: Arc<Mutex<SoundSystem>>,
     /// Output gain, as f32 bits.
     gain: Arc<AtomicU32>,
-    cutoff: Arc<AtomicU32>,
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
     whistling: bool,
     onion_spot: bool,
+    external_death_sting: bool,
     bgm: usize,
     /// Pellets whose `SE_LIFT_TRY` loop is on (`Pellet::mIsPlayTrySound`).
     trying: Vec<libpikmin::PelletId>,
@@ -109,15 +109,13 @@ impl Audio {
         }
         let sys = Arc::new(Mutex::new(sys));
         let gain = Arc::new(AtomicU32::new(1f32.to_bits()));
-        let cutoff = Arc::new(AtomicU32::new(0f32.to_bits()));
         let stop = Arc::new(AtomicBool::new(false));
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(u32, u16), String>>();
         let (shared, g, st) = (sys.clone(), gain.clone(), stop.clone());
-        let lowpass = cutoff.clone();
         let thread = std::thread::Builder::new()
             .name("pikmin-audio".into())
             .spawn(move || {
-                let stream = open_stream(shared, g, lowpass);
+                let stream = open_stream(shared, g);
                 match stream {
                     Ok((stream, rate, channels)) => {
                         let _ = ready_tx.send(Ok((rate, channels)));
@@ -140,11 +138,11 @@ impl Audio {
         Ok(Audio {
             sys,
             gain,
-            cutoff,
             stop,
             thread: Some(thread),
             whistling: false,
             onion_spot: false,
+            external_death_sting: false,
             bgm: 0,
             trying: Vec::new(),
             rate,
@@ -159,11 +157,6 @@ impl Audio {
     /// Output volume, 0..1 (the host's sound-effects volume).
     pub fn set_volume(&self, v: f32) {
         self.gain.store(v.clamp(0.0, 4.0).to_bits(), Ordering::Relaxed);
-    }
-
-    /// A host can soften the output; standalone viewers retain the disc mix by default.
-    pub fn set_lowpass(&self, cutoff: f32) {
-        self.cutoff.store(cutoff.max(0.0).to_bits(), Ordering::Relaxed);
     }
 
     /// How loud the swarming trumpet plays against the disc's level (host tuning; 1 is the disc's).
@@ -188,6 +181,18 @@ impl Audio {
     /// A system (menu) sound by name.
     pub fn play(&self, name: &str) {
         self.with(|s| s.play(name, Vec3::ZERO));
+    }
+
+    /// Give a host the full vanilla bell as stereo 32 kHz PCM, so its death player can
+    /// outlive this scene's audio stream. Ten seconds includes both phrases and the decay.
+    pub fn take_death_sting(&mut self) -> Option<Vec<f32>> {
+        let (data, tables) = self.with(|s| (s.engine.data.clone(), s.tables.clone()))?;
+        let mut bell = SoundSystem::new(data, tables);
+        if !bell.play(CAPTAIN_DOWN_SOUND, Vec3::ZERO) { return None; }
+        let mut pcm = vec![0.0; 32000 * 10 * 2];
+        bell.render(&mut pcm, 32000.0);
+        self.external_death_sting = true;
+        Some(pcm)
     }
 
     /// A command for the cutscene sound track (`Jac_DemoSound`), or `None` to end it.
@@ -301,6 +306,7 @@ impl Audio {
         let piki_pos = |id: libpikmin::PikiId| sim.piki(id).pos;
         let teki_pos = |id: CreatureId| creatures.pos(id);
         let mut trying = std::mem::take(&mut self.trying);
+        let external_death_sting = self.external_death_sting;
         self.with(|s| match *e {
             Event::Recruited { piki, .. } => {
                 // `PikiLookAtState::init` (pikiState.cpp): the call and the Pikmin's answer.
@@ -369,7 +375,7 @@ impl Audio {
             // `NaviDeadState` (naviState.cpp) plays `SE_PLAYER_DOWN`; here the sundown bell
             // (`GameCoreSection::startSundownWarn`'s `SYSSE_EVENING_ALERT`) stands in for it.
             Event::CaptainDown { .. } => {
-                s.play(CAPTAIN_DOWN_SOUND, Vec3::ZERO);
+                if !external_death_sting { s.play(CAPTAIN_DOWN_SOUND, Vec3::ZERO); }
             }
             // `ActTransport::gotoLiftPos` (aiTransport.cpp): `SEF_PIKI_HANG` as each carrier takes
             // hold, and the pellet's `SE_LIFT_TRY` loop while it isn't up yet
@@ -468,7 +474,7 @@ impl Audio {
 }
 
 /// Opens the default output device and starts rendering `sys` into it.
-fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>, cutoff: Arc<AtomicU32>) -> Result<(cpal::Stream, u32, u16), String> {
+fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>) -> Result<(cpal::Stream, u32, u16), String> {
     let device = cpal::default_host()
         .default_output_device()
         .ok_or("no output device")?;
@@ -480,7 +486,6 @@ fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>, cutoff: Arc<A
     let rate = config.sample_rate().0;
     let mut scratch = Vec::new();
     let ch = channels as usize;
-    let mut filter = crate::audio_filter::LowPass::new(rate as f32);
     let stream = device
         .build_output_stream(
             &config.into(),
@@ -488,15 +493,13 @@ fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>, cutoff: Arc<A
                 let frames = out.len() / ch;
                 scratch.clear();
                 scratch.resize(frames * 2, 0.0);
-                if let Ok(mut s) = sys.lock() {
-                    s.render(&mut scratch, rate as f32);
-                }
                 let g = f32::from_bits(gain.load(Ordering::Relaxed));
-                filter.set_cutoff(f32::from_bits(cutoff.load(Ordering::Relaxed)));
+                if let Ok(mut s) = sys.lock() {
+                    s.render_with_gain(&mut scratch, rate as f32, g);
+                }
                 for (f, o) in scratch.as_chunks::<2>().0.iter().zip(out.chunks_exact_mut(ch)) {
-                    let f = filter.process(*f);
                     for (c, v) in o.iter_mut().enumerate() {
-                        *v = (f[c.min(1)] * g).clamp(-1.0, 1.0);
+                        *v = if ch == 1 { (f[0] + f[1]) * 0.5 } else if c < 2 { f[c] } else { 0.0 };
                     }
                 }
             },

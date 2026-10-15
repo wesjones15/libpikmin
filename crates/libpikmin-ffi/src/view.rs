@@ -261,20 +261,28 @@ pub unsafe extern "C" fn pik_view_set_trumpet_gain(view: *mut PikView, gain: f32
     }
 }
 
+/// Transfer death-bell playback to the host. Writes 640000 stereo f32 samples at 32000 Hz
+/// and suppresses the view's duplicate CaptainDown sound. Returns 0 on failure/short buffer.
+/// The PCM comes from the user's disc; it must not be distributed with the mod.
+///
+/// # Safety
+/// `view` from [`pik_view_new`]; `out` writable for `max` f32 samples.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_take_death_sting(view: *mut PikView, out: *mut f32, max: u32) -> u32 {
+    if out.is_null() || max < 640000 { return 0; }
+    unsafe {
+        with_view(view, 0, |v| {
+            let Some(pcm) = v.audio.as_mut().and_then(Audio::take_death_sting) else { return 0; };
+            std::ptr::copy_nonoverlapping(pcm.as_ptr(), out, pcm.len());
+            pcm.len() as u32
+        })
+    }
+}
+
 /// Runs `f` on a live view, poisoning it if `f` panics.
 ///
 /// # Safety
 /// `view` null or from [`pik_view_new`], not aliased for the call.
-/// Host playback tone; zero cutoff keeps the unfiltered disc mix.
-/// # Safety
-/// `view` must be null or live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn pik_view_set_audio_lowpass(view: *mut PikView, cutoff: f32) {
-    unsafe { with_view(view, (), |v| {
-        if let Some(a) = &v.audio { a.set_lowpass(cutoff); }
-    }) }
-}
-
 unsafe fn with_view<R>(view: *mut PikView, fallback: R, f: impl FnOnce(&mut PikView) -> R) -> R {
     // SAFETY: as documented.
     let Some(v) = (unsafe { view.as_mut() }) else {

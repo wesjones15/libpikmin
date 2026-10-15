@@ -313,6 +313,13 @@ impl SoundSystem {
 
     /// Renders interleaved stereo at `rate` Hz into `out`, running the sound system as needed.
     pub fn render(&mut self, out: &mut [f32], rate: f32) {
+        self.render_with_gain(out, rate, 1.0);
+    }
+
+    /// Host mix gain must precede saturation; attenuating clipped PCM cannot restore peaks.
+    /// Standalone tools retain unity gain through `render`.
+    pub fn render_with_gain(&mut self, out: &mut [f32], rate: f32, gain: f32) {
+        let gain = if gain.is_finite() { gain.clamp(0.0, 4.0) } else { 0.0 };
         let step = DAC_RATE as f64 / rate as f64;
         for frame in out.as_chunks_mut::<2>().0 {
             while self.resample_pos >= 1.0 || self.out.len() < 2 {
@@ -329,7 +336,7 @@ impl SoundSystem {
             }
             let f = self.resample_pos as f32;
             for c in 0..2 {
-                frame[c] = (self.last[c] + (self.next[c] - self.last[c]) * f).clamp(-1.0, 1.0);
+                frame[c] = ((self.last[c] + (self.next[c] - self.last[c]) * f) * gain).clamp(-1.0, 1.0);
             }
             self.resample_pos += step;
         }
