@@ -1,0 +1,47 @@
+use libpikmin::{Params, Sim, Vec3, PikiColor, PelletDesc, PelletState};
+use libpikmin::host::FlatHost;
+
+#[test]
+fn loose_pickup_requires_descent_and_works_without_any_pikmin() {
+    let mut s = Sim::new(Params::default(), 1);
+    let o = s.add_onion(Vec3::ZERO, &[PikiColor::Red]);
+    let p = s.spawn_pellet(PelletDesc::numbered(s.params(), 1, PikiColor::Red, Vec3::ZERO, 0.0));
+    s.set_onion_pose(o, Vec3::Y * 125.0, true);
+    assert!(!s.collect_ground_pellet(o, p));
+    s.set_onion_pose(o, Vec3::Y * 40.0, true);
+    assert!(s.collect_ground_pellet(o, p));
+    assert!(!s.collect_ground_pellet(o, p), "no duplicate pickup");
+    for _ in 0..150 { s.step(&mut FlatHost); }
+    assert_eq!(s.pellet(p).state, PelletState::Gone);
+    assert_eq!(s.onions()[0].stored_total(), 2);
+}
+
+#[test]
+fn dormancy_locks_stock_ignores_pellets_and_survives_snapshots() {
+    let mut s = Sim::new(Params::default(), 2);
+    let c = s.add_captain(Vec3::ZERO);
+    let o = s.add_onion(Vec3::ZERO, &[PikiColor::Red]);
+    s.store_in_onion(o, PikiColor::Red, libpikmin::Happa::Leaf, 5);
+    let p = s.spawn_pellet(PelletDesc::numbered(s.params(), 1, PikiColor::Red, Vec3::ZERO, 0.0));
+    s.spawn_squad(c, Vec3::ZERO, 3);
+    s.make_onion_dormant(o, 2.0, Vec3::ZERO);
+    assert!(!s.onions()[0].grounded());
+    assert!(!s.onions()[0].takes_deliveries());
+    assert_eq!(s.onion_call_out(c, o, PikiColor::Red, 5), 0);
+    assert_eq!(s.recruit_to_pellet(p, None, 1000.0), 0);
+    assert!(!s.collect_ground_pellet(o, p));
+    s.set_onion_pose(o, Vec3::Y * 1000.0, true);
+    assert_eq!(s.onions()[0].pos, Vec3::ZERO, "flight cannot reactivate a dormant Onion");
+    for _ in 0..45 { s.step(&mut FlatHost); }
+    let d = s.onions()[0].dormancy.unwrap();
+    assert!(d.progress < 0.001 && !d.reviving);
+    assert!(d.remaining > 0.0);
+    // Lifecycle clocks are authoritative replica state, not local host timers.
+    let snap = libpikmin::Snapshot::of(&s, &[]);
+    let decoded = libpikmin::Snapshot::decode(&snap.encode()).unwrap();
+    assert_eq!(format!("{:?}", snap), format!("{:?}", decoded));
+    for _ in 0..120 { s.step(&mut FlatHost); }
+    assert!(s.onions()[0].dormancy.is_none(), "revived after timer plus startup");
+    assert!(s.onions()[0].grounded());
+    assert_eq!(s.onions()[0].stored_total(), 5);
+}

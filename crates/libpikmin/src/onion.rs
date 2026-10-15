@@ -75,6 +75,16 @@ pub struct Onion {
     pub owner: Option<CaptainId>,
     /// Seconds its owner has had no Pikmin anywhere (see [`Sim::set_emergency_recovery`]).
     pub(crate) extinct_for: f32,
+    /// Host extension: disabled Onions fold shut, wait, then replay their disc startup.
+    pub dormancy: Option<OnionDormancy>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OnionDormancy {
+    pub remaining: f32,
+    /// 0 is the dormant pose, 1 the live end of the startup clip.
+    pub progress: f32,
+    pub reviving: bool,
 }
 
 /// The S.S. Dolphin as a carry goal (`UfoItem`).
@@ -113,13 +123,13 @@ impl Onion {
     /// On the ground: it can be used, delivered to and called from. Not while taking off,
     /// away, or landing.
     pub fn grounded(&self) -> bool {
-        !matches!(self.anim, OnionAnim::Hover | OnionAnim::TakeOff { .. } | OnionAnim::Away | OnionAnim::Landing { .. })
+        self.dormancy.is_none() && !matches!(self.anim, OnionAnim::Hover | OnionAnim::TakeOff { .. } | OnionAnim::Away | OnionAnim::Landing { .. })
     }
 
     /// Carriers can bring things to it: on the ground, or hovering after the host lifted it
     /// (a hovering Onion still takes pellets, but turns the seeds straight into stored Pikmin).
     pub fn takes_deliveries(&self) -> bool {
-        self.grounded() || self.anim == OnionAnim::Hover
+        self.dormancy.is_none() && (self.grounded() || self.anim == OnionAnim::Hover)
     }
 
     /// Where carriers bring things (`getGoalPos`).
@@ -234,6 +244,7 @@ impl Sim {
             ship: None,
             owner: None,
             extinct_for: 0.0,
+            dormancy: None,
         });
         id
     }
@@ -256,6 +267,7 @@ impl Sim {
             ship: Some(Ship { goal, suck, parts: Vec::new() }),
             owner: None,
             extinct_for: 0.0,
+            dormancy: None,
         });
         id
     }
@@ -268,6 +280,7 @@ impl Sim {
     /// stock, queued exits and seeds survive the flight. Hosts supply terrain-safe poses.
     pub fn set_onion_pose(&mut self, onion: OnionId, pos: Vec3, flying: bool) {
         if !pos.is_finite() || self.onions.get(onion.0 as usize).is_none() { return; }
+        if self.onions[onion.0 as usize].dormancy.is_some() { return; }
         if flying && self.onions[onion.0 as usize].grounded() {
             self.onion_take_off(onion);
             // Finish exits at the old feet before moving the Onion's airborne legs.
@@ -293,6 +306,58 @@ impl Sim {
             } else { OnionAnim::Idle };
             self.events.push(Event::OnionLanded { onion });
         }
+    }
+
+    /// RoR2 extension. Stock survives; workers and unfinished deliveries are released.
+    /// Visual reference: GoalAI::BootInit / GoalItem::startBoot, not a second model.
+    pub fn make_onion_dormant(&mut self, onion: OnionId, seconds: f32, ground: Vec3) {
+        if !seconds.is_finite() || !ground.is_finite() { return; }
+        let Some(o) = self.onions.get_mut(onion.0 as usize) else { return };
+        if o.ship.is_some() || o.dormancy.is_some() { return; }
+        o.pos = ground;
+        o.flight_motion = None;
+        o.anim = OnionAnim::Idle;
+        o.dormancy = Some(OnionDormancy { remaining: seconds.max(0.0), progress: 1.0, reviving: false });
+        o.exits.clear(); // Queued exits have not yet been deducted from stock.
+        for p in &mut self.pikis {
+            if matches!(p.state, PikiState::Enter { onion: id, .. } | PikiState::Exit { onion: id, .. } if id == onion) {
+                p.state = PikiState::Idle;
+                p.on_ground = false;
+            }
+        }
+        // Release all holders of jobs with no remaining live destination. Re-evaluate
+        // automatically after revival; no Pikmin spends the downtime gripping a pellet.
+        let jobs: Vec<_> = self.pellets.iter().filter(|p| !self.pellet_has_destination(p))
+            .map(|p| p.id).collect();
+        for id in jobs {
+            let workers: Vec<_> = self.pikis.iter().filter(|p| matches!(p.state, PikiState::Carry(c) if c.pellet == id))
+                .map(|p| p.id).collect();
+            for worker in workers { self.leave_current(worker); self.pikis[worker.0 as usize].state = PikiState::Idle; }
+        }
+        for p in &mut self.pellets {
+            if matches!(p.state, crate::PelletState::Sucking { onion: id, .. } if id == onion) {
+                p.state = crate::PelletState::Idle;
+                p.scale = 1.0;
+            }
+        }
+    }
+
+    /// Hovering host pickup after descending and dwelling. Loose pellets are allowed as
+    /// an extinction recovery aid. Never steals a pellet carried towards another Onion.
+    pub fn collect_ground_pellet(&mut self, onion: OnionId, pellet: crate::PelletId) -> bool {
+        let Some(o) = self.onions.get(onion.0 as usize) else { return false };
+        let Some(p) = self.pellets.get(pellet.0 as usize) else { return false };
+        if o.ship.is_some() || !o.takes_deliveries() || o.anim != OnionAnim::Hover
+            || p.desc.ship_part.is_some() || p.state != crate::PelletState::Idle
+            || dist_xz(o.pos, p.pos) > 20.0 || (o.pos.y - p.pos.y).abs() > 90.0 { return false; }
+        let color = p.desc.color.filter(|&c| o.accepts(c)).unwrap_or(o.colors[0]);
+        let p = &mut self.pellets[pellet.0 as usize];
+        let workers = std::mem::take(&mut p.carriers);
+        p.slots.iter_mut().for_each(|s| *s = None);
+        p.state = crate::PelletState::Sucking { onion, color, wait: 1.5, start: p.pos, progress: 0.0, speed: 0.0 };
+        self.events.push(Event::PelletArrived { pellet, onion });
+        for id in workers { self.pikis[id.0 as usize].state = PikiState::Idle; }
+        true
     }
 
     /// The first accepted colour controls only the model/animation palette. Reordering
@@ -427,6 +492,20 @@ impl Sim {
         let feed = dt * self.growth_rate;
         for oi in 0..self.onions.len() {
             let o = &mut self.onions[oi];
+            if let Some(d) = o.dormancy.as_mut() {
+                if d.reviving {
+                    d.progress = (d.progress + dt / 3.0).min(1.0);
+                    if d.progress >= 1.0 {
+                        o.dormancy = None;
+                        self.events.push(Event::OnionLanded { onion: o.id });
+                    }
+                } else {
+                    d.remaining = (d.remaining - dt).max(0.0);
+                    d.progress = (d.progress - dt / 1.5).max(0.0);
+                    if d.remaining <= 0.0 && d.progress <= 0.0 { d.reviving = true; }
+                }
+                continue;
+            }
             let colour = o.colors.first().map_or(0, |c| c.index());
             match o.anim {
                 OnionAnim::Idle | OnionAnim::Away | OnionAnim::Hover => {}

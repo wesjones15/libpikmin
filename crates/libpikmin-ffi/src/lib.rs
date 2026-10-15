@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 26;
+pub const PIK_ABI_VERSION: u32 = 27;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -1011,6 +1011,23 @@ pub unsafe extern "C" fn pik_sim_set_onion_pose(sim: *mut PikSim, onion: u32, po
     unsafe { with(sim, (), |s| s.sim.set_onion_pose(OnionId(onion), pos.into(), flying != 0)) }
 }
 
+/// Disables an Onion, retaining its stock, until its timed disc startup completes.
+/// # Safety
+/// `sim` from pik_sim_new; `ground` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_make_onion_dormant(sim: *mut PikSim, onion: u32, seconds: f32, ground: *const PikVec3) {
+    let Some(ground) = (unsafe { ground.as_ref() }).copied() else { return };
+    unsafe { with(sim, (), |s| s.sim.make_onion_dormant(OnionId(onion), seconds, ground.into())) }
+}
+
+/// Loose ground pickup; validates destination, proximity and pellet state.
+/// # Safety
+/// `sim` from pik_sim_new.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_collect_ground_pellet(sim: *mut PikSim, onion: u32, pellet: u32) -> u8 {
+    unsafe { with(sim, 0, |s| s.sim.collect_ground_pellet(OnionId(onion), PelletId(pellet)) as u8) }
+}
+
 /// Selects a host-timed disc flight transition without changing gameplay availability.
 /// # Safety
 /// `sim` from [`pik_sim_new`]. `landing` selects landing rather than takeoff.
@@ -1660,7 +1677,7 @@ pub unsafe extern "C" fn pik_sim_onions(sim: *mut PikSim, out: *mut PikOnion, ma
                     id: o.id.0,
                     colors: o.colors.iter().fold(0, |m, c| m | 1 << c.index()),
                     stored: o.stored.map(|by_happa| by_happa.iter().sum()),
-                    anim: match o.anim {
+                    anim: if let Some(d) = o.dormancy { if d.reviving { 8 } else { 7 } } else { match o.anim {
                         OnionAnim::Idle => 0,
                         OnionAnim::Hover => 6,
                         OnionAnim::Suction { .. } => 1,
@@ -1668,7 +1685,7 @@ pub unsafe extern "C" fn pik_sim_onions(sim: *mut PikSim, out: *mut PikOnion, ma
                         OnionAnim::TakeOff { .. } => 3,
                         OnionAnim::Away => 4,
                         OnionAnim::Landing { .. } => 5,
-                    },
+                    } },
                     is_ship: o.ship.is_some() as u8,
                     _pad: [0; 2],
                 };

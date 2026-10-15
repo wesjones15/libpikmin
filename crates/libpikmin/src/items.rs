@@ -174,7 +174,7 @@ impl Sim {
         let Some(pellet) = self
             .pellets
             .iter()
-            .filter(|pl| pl.can_take_carrier() && matches!(pl.state, crate::carry::PelletState::Idle))
+            .filter(|pl| pl.can_take_carrier() && self.pellet_has_destination(pl) && matches!(pl.state, crate::carry::PelletState::Idle))
             .filter(|pl| (pl.pos.y - pos.y).abs() < 60.0)
             .map(|pl| (pl.id, crate::math::dist_xz(pos, pl.pos) - pl.desc.radius - size))
             .filter(|&(_, d)| d <= range)
@@ -206,6 +206,7 @@ impl Sim {
             };
             let id = o.id;
             let extinct = o.ship.is_none()
+                && o.dormancy.is_none()
                 && !self.captains[owner.0 as usize].down
                 && o.stored_total() == 0
                 && o.queue.is_empty()

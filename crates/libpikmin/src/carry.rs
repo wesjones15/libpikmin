@@ -222,6 +222,7 @@ impl Sim {
     /// volunteer for its drop. Never steal held Pikmin or workers on another job.
     pub fn recruit_to_pellet(&mut self, pellet: PelletId, defeated: Option<CreatureId>, range: f32) -> usize {
         let Some(pel) = self.pellets.get(pellet.0 as usize) else { return 0; };
+        if !self.pellet_has_destination(pel) { return 0; }
         let pos = pel.pos;
         let limit = pel.slots.len();
         let mut candidates: Vec<_> = self.pikis.iter().enumerate()
@@ -247,6 +248,7 @@ impl Sim {
 
     /// `ActTransport::init`: head for a random free slot.
     pub(crate) fn start_carry(&mut self, pi: usize, pellet: PelletId) -> bool {
+        if !self.pellet_has_destination(&self.pellets[pellet.0 as usize]) { return false; }
         let r = self.rng.f32();
         let Some(slot) = self.pellets[pellet.0 as usize].random_free_slot(r) else {
             return false;
@@ -528,7 +530,8 @@ impl Sim {
         }
 
         let goal = self.onions[onion.0 as usize].goal_pos();
-        if dist_xz(self.pellets[i].pos, goal) < 10.0 {
+        if dist_xz(self.pellets[i].pos, goal) < 10.0
+            && (goal.y - self.pellets[i].pos.y).abs() <= 90.0 {
             // `PelletGoalState`: carriers let go and the Onion takes over.
             let p = &mut self.pellets[i];
             let carriers = std::mem::take(&mut p.carriers);
@@ -796,10 +799,15 @@ impl Sim {
         let range = self.params.piki.idle_work_search_range;
         self.pellets
             .iter()
-            .filter(|p| p.can_take_carrier())
+            .filter(|p| p.can_take_carrier() && self.pellet_has_destination(p))
             .map(|p| (p.id, dist_xz(pos, p.pos)))
             .filter(|&(id, d)| d <= self.pellets[id.0 as usize].desc.radius + range + size)
             .min_by(|a, b| a.1.total_cmp(&b.1))
+    }
+
+    pub(crate) fn pellet_has_destination(&self, p: &Pellet) -> bool {
+        self.onions.iter().any(|o| o.takes_deliveries()
+            && o.ship.is_some() == p.desc.ship_part.is_some())
     }
 }
 
@@ -1065,7 +1073,8 @@ mod tests {
         for _ in 0..30 * 40 {
             // It drifts away while they carry.
             x += 0.5;
-            sim.set_onion_pose(red, Vec3::new(x, 120.0, 0.0), true);
+            // The host must lower it within suction reach before handoff.
+            sim.set_onion_pose(red, Vec3::new(x, 60.0, 0.0), true);
             sim.step(&mut host);
         }
         let o = &sim.onions()[0];
