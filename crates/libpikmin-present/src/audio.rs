@@ -73,6 +73,7 @@ pub struct Audio {
     sys: Arc<Mutex<SoundSystem>>,
     /// Output gain, as f32 bits.
     gain: Arc<AtomicU32>,
+    cutoff: Arc<AtomicU32>,
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
     whistling: bool,
@@ -108,13 +109,15 @@ impl Audio {
         }
         let sys = Arc::new(Mutex::new(sys));
         let gain = Arc::new(AtomicU32::new(1f32.to_bits()));
+        let cutoff = Arc::new(AtomicU32::new(0f32.to_bits()));
         let stop = Arc::new(AtomicBool::new(false));
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(u32, u16), String>>();
         let (shared, g, st) = (sys.clone(), gain.clone(), stop.clone());
+        let lowpass = cutoff.clone();
         let thread = std::thread::Builder::new()
             .name("pikmin-audio".into())
             .spawn(move || {
-                let stream = open_stream(shared, g);
+                let stream = open_stream(shared, g, lowpass);
                 match stream {
                     Ok((stream, rate, channels)) => {
                         let _ = ready_tx.send(Ok((rate, channels)));
@@ -137,6 +140,7 @@ impl Audio {
         Ok(Audio {
             sys,
             gain,
+            cutoff,
             stop,
             thread: Some(thread),
             whistling: false,
@@ -155,6 +159,11 @@ impl Audio {
     /// Output volume, 0..1 (the host's sound-effects volume).
     pub fn set_volume(&self, v: f32) {
         self.gain.store(v.clamp(0.0, 4.0).to_bits(), Ordering::Relaxed);
+    }
+
+    /// A host can soften the output; standalone viewers retain the disc mix by default.
+    pub fn set_lowpass(&self, cutoff: f32) {
+        self.cutoff.store(cutoff.max(0.0).to_bits(), Ordering::Relaxed);
     }
 
     /// How loud the swarming trumpet plays against the disc's level (host tuning; 1 is the disc's).
@@ -459,7 +468,7 @@ impl Audio {
 }
 
 /// Opens the default output device and starts rendering `sys` into it.
-fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>) -> Result<(cpal::Stream, u32, u16), String> {
+fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>, cutoff: Arc<AtomicU32>) -> Result<(cpal::Stream, u32, u16), String> {
     let device = cpal::default_host()
         .default_output_device()
         .ok_or("no output device")?;
@@ -471,6 +480,7 @@ fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>) -> Result<(cp
     let rate = config.sample_rate().0;
     let mut scratch = Vec::new();
     let ch = channels as usize;
+    let mut filter = crate::audio_filter::LowPass::new(rate as f32);
     let stream = device
         .build_output_stream(
             &config.into(),
@@ -482,9 +492,11 @@ fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>) -> Result<(cp
                     s.render(&mut scratch, rate as f32);
                 }
                 let g = f32::from_bits(gain.load(Ordering::Relaxed));
+                filter.set_cutoff(f32::from_bits(cutoff.load(Ordering::Relaxed)));
                 for (f, o) in scratch.as_chunks::<2>().0.iter().zip(out.chunks_exact_mut(ch)) {
+                    let f = filter.process(*f);
                     for (c, v) in o.iter_mut().enumerate() {
-                        *v = f[c.min(1)] * g;
+                        *v = (f[c.min(1)] * g).clamp(-1.0, 1.0);
                     }
                 }
             },

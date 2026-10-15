@@ -8,6 +8,7 @@
 
 pub mod animator;
 pub mod audio;
+mod audio_filter;
 pub mod effects;
 pub mod tev;
 pub mod view;

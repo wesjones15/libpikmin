@@ -265,6 +265,16 @@ pub unsafe extern "C" fn pik_view_set_trumpet_gain(view: *mut PikView, gain: f32
 ///
 /// # Safety
 /// `view` null or from [`pik_view_new`], not aliased for the call.
+/// Host playback tone; zero cutoff keeps the unfiltered disc mix.
+/// # Safety
+/// `view` must be null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_audio_lowpass(view: *mut PikView, cutoff: f32) {
+    unsafe { with_view(view, (), |v| {
+        if let Some(a) = &v.audio { a.set_lowpass(cutoff); }
+    }) }
+}
+
 unsafe fn with_view<R>(view: *mut PikView, fallback: R, f: impl FnOnce(&mut PikView) -> R) -> R {
     // SAFETY: as documented.
     let Some(v) = (unsafe { view.as_mut() }) else {
