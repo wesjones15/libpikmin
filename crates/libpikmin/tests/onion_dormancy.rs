@@ -86,3 +86,16 @@ fn interrupted_suction_preserves_the_pellet_and_has_no_seed_reward() {
     assert_eq!(s.pellet(p).scale, 1.0);
     assert_eq!(s.onions()[0].stored_total(), 0);
 }
+
+#[test]
+fn queued_seeds_resume_after_revival() {
+    let mut s = Sim::new(Params::default(), 8);
+    let o = s.add_onion(Vec3::ZERO, &[PikiColor::Red]);
+    s.give_onion_seeds(o, PikiColor::Red, 2);
+    s.make_onion_dormant(o, 0.0, Vec3::ZERO);
+    for _ in 0..90 { s.step(&mut FlatHost); }
+    assert_eq!(s.sprouts().count(), 0, "no emission while disabled");
+    for _ in 0..240 { s.step(&mut FlatHost); }
+    assert!(s.onions()[0].queue.is_empty());
+    assert_eq!(s.sprouts().count(), 2, "pending seed reward was not stranded");
+}

@@ -497,6 +497,9 @@ impl Sim {
                     d.progress = (d.progress + dt / 3.0).min(1.0);
                     if d.progress >= 1.0 {
                         o.dormancy = None;
+                        o.anim = if !o.queue.is_empty() || o.fireworks > 0 {
+                            OnionAnim::Emitting { frame: 0.0 }
+                        } else { OnionAnim::Idle };
                         self.events.push(Event::OnionLanded { onion: o.id });
                     }
                 } else {
