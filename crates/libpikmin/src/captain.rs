@@ -879,7 +879,7 @@ impl Sim {
         let mut have_want = false;
         for &id in &c.plate.members {
             let p = &self.pikis[id.0 as usize];
-            if !matches!(p.state, PikiState::Squad { .. }) {
+            if !matches!(p.state, PikiState::Squad { .. }) || p.frozen > 0.0 {
                 continue;
             }
             have_want |= want.is_some_and(|w| p.color == w);

@@ -72,6 +72,9 @@ pub mod kinds {
 pub mod flags {
     /// Flashing from a hit: draw brighter.
     pub const FLASH: u8 = 1;
+    /// Frozen ([`libpikmin::Sim::freeze_pikis_in_sphere`]): hosts may add an icy sheen. Its
+    /// colour is already paled and its animation held.
+    pub const FROZEN: u8 = 2;
 }
 
 /// How a host draws a batch.
@@ -213,6 +216,13 @@ pub struct Draw {
     pub first_color: u32,
     /// 1 opaque .. 0 gone.
     pub alpha: f32,
+}
+
+/// A frozen Pikmin's body colour: its own, two thirds of the way to pale ice blue.
+fn icy(c: [u8; 4]) -> [u8; 4] {
+    const ICE: [f32; 3] = [190.0, 228.0, 255.0];
+    let mix = |k: usize| (c[k] as f32 + (ICE[k] - c[k] as f32) * 0.67).round() as u8;
+    [mix(0), mix(1), mix(2), c[3]]
 }
 
 fn key(kind: u8, id: u64) -> u64 {
@@ -916,13 +926,16 @@ impl View {
             live.insert(crate::animator::piki_key(p.id));
             let k = key(kinds::PIKI, p.id.0 as u64);
             let (pos, rot) = self.place_rot(k, p.pos, Quat::from_rotation_y(p.face), tick, alpha);
-            let anim = self.animator.piki(&self.piki_anims, p, &look, dt);
+            // Frozen: the pose held where it was, the body paled toward ice.
+            let frozen = p.frozen > 0.0;
+            let anim = self.animator.piki(&self.piki_anims, p, &look, if frozen { 0.0 } else { dt });
             let model = models::PIKMIN[p.color.index()];
             let pose = self.models[model as usize].skel.pose(srt_matrix(look.scale, Vec3::ZERO, Vec3::ZERO), anim);
             let head = pose.joints.get(6).copied();
-            let tint = piki_rgb(p.color);
+            let tint = if frozen { icy(piki_rgb(p.color)) } else { piki_rgb(p.color) };
             let inputs = move |m: usize| Inputs { material: (m == 0).then_some(tint), ..Default::default() };
-            self.push(k, kinds::PIKI, model, pos, rot, pose, &inputs, look.fade, 0);
+            let f = if frozen { flags::FROZEN } else { 0 };
+            self.push(k, kinds::PIKI, model, pos, rot, pose, &inputs, look.fade, f);
             if let Some(j) = head
                 && !matches!(p.state, PikiState::Pressed { .. })
             {

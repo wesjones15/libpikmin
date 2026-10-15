@@ -142,6 +142,7 @@ impl Sim {
             hit_log: [None; crate::growth::HIT_LOG],
             hit_next: 0,
             kill_credit: 0,
+            frozen: 0.0,
         });
         Some(id)
     }

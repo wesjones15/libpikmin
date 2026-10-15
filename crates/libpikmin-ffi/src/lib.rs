@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 25;
+pub const PIK_ABI_VERSION: u32 = 26;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -288,7 +288,9 @@ pub struct PikPiki {
     pub alive: u8,
     pub has_creature: u8,
     pub on_ground: u8,
-    pub _pad: [u8; 2],
+    /// 1 while frozen ([`pik_sim_freeze_pikis_in_sphere`]).
+    pub frozen: u8,
+    pub _pad: u8,
 }
 
 #[repr(C)]
@@ -1368,6 +1370,26 @@ pub unsafe extern "C" fn pik_sim_attack_pikis_in_sphere(
     unsafe { with(sim, 0, |s| s.sim.attack_pikis_in_sphere(c.into(), radius, damage)) }
 }
 
+/// A freezing blast: every Pikmin inside the sphere stands frozen for `seconds`, letting go of
+/// what it held ([`Sim::freeze_pikis_in_sphere`]). Returns how many froze.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`]; `centre` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_freeze_pikis_in_sphere(
+    sim: *mut PikSim,
+    centre: *const PikVec3,
+    radius: f32,
+    seconds: f32,
+) -> u32 {
+    // SAFETY: as documented.
+    let Some(c) = (unsafe { centre.as_ref() }).copied() else {
+        return 0;
+    };
+    // SAFETY: as documented.
+    unsafe { with(sim, 0, |s| s.sim.freeze_pikis_in_sphere(c.into(), radius, seconds)) }
+}
+
 /// Kills a Pikmin outright (a pit, a hazard the host decides on).
 ///
 /// # Safety
@@ -1571,7 +1593,8 @@ pub unsafe extern "C" fn pik_sim_pikis(sim: *mut PikSim, out: *mut PikPiki, max:
                     alive: p.is_alive() as u8,
                     has_creature: creature.is_some() as u8,
                     on_ground: p.on_ground as u8,
-                    _pad: [0; 2],
+                    frozen: (p.frozen > 0.0) as u8,
+                    _pad: 0,
                 };
                 // SAFETY: `i < max`, which the caller promised is writable.
                 out.add(i).write(v);

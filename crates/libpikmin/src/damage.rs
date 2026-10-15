@@ -132,6 +132,48 @@ impl Sim {
         n
     }
 
+    /// Host extension, not Pikmin 1 (it has no ice): every Pikmin within `radius` of `centre`
+    /// is frozen for `seconds` (a host's freezing blast). It lets go of whatever it was
+    /// carrying, fighting or walking to, stands where it is and does nothing until it thaws;
+    /// squad members stay in the squad but can't be thrown. Pikmin in a captain's hand,
+    /// knocked or flattened, or out of reach of attacks are left alone. Returns how many froze.
+    pub fn freeze_pikis_in_sphere(&mut self, centre: Vec3, radius: f32, seconds: f32) -> u32 {
+        if !seconds.is_finite() || seconds <= 0.0 {
+            return 0;
+        }
+        let seconds = seconds.min(30.0);
+        let mut n = 0;
+        for id in self.ids_in_sphere(centre, radius) {
+            let pi = id.0 as usize;
+            if !self.hittable(pi)
+                || matches!(
+                    self.pikis[pi].state,
+                    PikiState::Held { .. } | PikiState::Knocked { .. } | PikiState::Pressed { .. }
+                )
+            {
+                continue;
+            }
+            match self.pikis[pi].state {
+                PikiState::Squad { .. } | PikiState::Idle => {}
+                // On its way to his hand: back to the squad, the throw called off.
+                PikiState::GoHang { captain } => {
+                    self.leave_current(id);
+                    self.join_squad(id, captain);
+                }
+                _ => self.leave_current(id),
+            }
+            let p = &mut self.pikis[pi];
+            p.frozen = p.frozen.max(seconds);
+            p.jump = None;
+            p.jump_queue.clear();
+            p.target_vel = Vec3::ZERO;
+            p.vel.x = 0.0;
+            p.vel.z = 0.0;
+            n += 1;
+        }
+        n
+    }
+
     /// `InteractSwallow::actPiki`: up to `max` Pikmin within `radius` of the mouth end up stuck in
     /// it (they ride along with the creature's part `mouth_part`). Follow with
     /// [`Sim::chew`] to kill them or [`Sim::spit_out`] to let them go. If the creature dies
@@ -439,5 +481,40 @@ impl Sim {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod freeze_tests {
+    use crate::captain::ThrowState;
+    use crate::host::FlatHost;
+    use crate::piki::PikiState;
+    use crate::{CaptainInput, Params, PikiColor, Sim, Vec3};
+
+    #[test]
+    fn frozen_squad_pikmin_stand_still_cant_be_thrown_and_thaw() {
+        let mut sim = Sim::new(Params::default(), 7);
+        let c = sim.add_captain(Vec3::ZERO);
+        let id = sim.spawn_piki_in_squad(PikiColor::Red, Vec3::new(-20.0, 0.0, 0.0), c).unwrap();
+        for _ in 0..10 {
+            sim.step(&mut FlatHost);
+        }
+        assert_eq!(sim.freeze_pikis_in_sphere(sim.piki(id).pos, 5.0, 1.0), 1);
+        // He walks off: the frozen one stays put and isn't picked for a throw.
+        let at = sim.piki(id).pos;
+        for _ in 0..15 {
+            sim.set_input(c, CaptainInput { stick: glam::Vec2::new(1.0, 0.0), throw: true, ..Default::default() });
+            sim.step(&mut FlatHost);
+        }
+        assert!(sim.piki(id).pos.distance(at) < 0.5, "moved while frozen");
+        assert!(matches!(sim.piki(id).state, PikiState::Squad { .. }));
+        assert!(matches!(sim.captain(c).throw, ThrowState::Idle));
+        // Thawed, it follows him again.
+        for _ in 0..30 {
+            sim.set_input(c, CaptainInput::default());
+            sim.step(&mut FlatHost);
+        }
+        assert_eq!(sim.piki(id).frozen, 0.0);
+        assert!(sim.piki(id).pos.distance(at) > 5.0, "didn't follow after thawing");
     }
 }

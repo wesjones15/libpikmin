@@ -243,6 +243,9 @@ pub struct Piki {
     pub(crate) hit_next: u8,
     /// Kills credited toward its next stage (see [`Sim::set_kill_growth`]).
     pub kill_credit: u8,
+    /// Host extension: seconds left frozen (see [`Sim::freeze_pikis_in_sphere`]). It stands
+    /// still and does nothing until it thaws.
+    pub frozen: f32,
 }
 
 impl Piki {
@@ -281,6 +284,18 @@ fn nearest_part(frame: &CreatureFrame, c: &CreatureView, from: Vec3) -> Option<(
 
 impl Sim {
     pub(crate) fn update_piki(&mut self, pi: usize, host: &mut dyn Host, dt: f32) {
+        // Host extension: frozen (`Sim::freeze_pikis_in_sphere`), it only falls and stands.
+        if self.pikis[pi].frozen > 0.0 {
+            let p = &mut self.pikis[pi];
+            p.frozen = (p.frozen - dt).max(0.0);
+            if p.is_alive() && !matches!(p.state, PikiState::Held { .. }) {
+                p.target_vel = Vec3::ZERO;
+                p.vel.x = 0.0;
+                p.vel.z = 0.0;
+                self.physics(pi, host, dt);
+                return;
+            }
+        }
         if self.update_piki_jump(pi, host, dt) { return; }
         if !matches!(self.pikis[pi].state, PikiState::Flying { .. }) { self.pikis[pi].guided_throw = None; }
         if !matches!(self.pikis[pi].state, PikiState::Idle) {

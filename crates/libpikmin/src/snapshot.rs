@@ -31,7 +31,7 @@ use crate::strike::Strike;
 use crate::{CaptainId, PikiId};
 
 /// Bumped when the encoding changes.
-pub const SNAPSHOT_VERSION: u8 = 1;
+pub const SNAPSHOT_VERSION: u8 = 2;
 
 // Far more than any real sim has; a corrupt length can't make decoding allocate wildly.
 const MAX_ENTITIES: usize = 4096;
@@ -719,6 +719,7 @@ fn w_piki(w: &mut Writer, p: &Piki) {
     }
     w.u8(p.hit_next);
     w.u8(p.kill_credit);
+    w.f32(p.frozen);
 }
 
 fn r_piki(r: &mut Reader) -> Option<Piki> {
@@ -771,6 +772,7 @@ fn r_piki(r: &mut Reader) -> Option<Piki> {
         hit_log,
         hit_next: r.u8()?,
         kill_credit: r.u8()?,
+        frozen: r.f32()?,
     })
 }
 
