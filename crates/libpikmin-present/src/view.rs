@@ -455,6 +455,18 @@ impl View {
             }
         }
         let ante = models[models::OLIMAR as usize].model.coll.iter().find(|c| c.id == "ante").cloned();
+        // Reserve bounded palette variants up front so repeated revivals cannot exhaust
+        // the shared texture cache and fall back to the default blue Onion.
+        let onion = &models[models::ONION as usize];
+        for colour in 0..3 {
+            for step in 0..=4 {
+                for b in &onion.batches {
+                    textures.get(models::ONION, onion, b.material, Inputs {
+                        frame: Some(colour as f32 * 2.0 + step as f32 * 0.25), ..Default::default()
+                    });
+                }
+            }
+        }
         let ship_contexts = models[models::SHIP as usize].skel.override_map(&libpikmin_assets::ship::CONTEXT_JOINTS);
         Ok(View {
             models,
@@ -905,7 +917,7 @@ impl View {
             }
             // GoalItem::refresh: even frames live, odd frames dormant, per colour.
             let frame = o.colors[0].index() as f32 * 2.0
-                + o.dormancy.map_or(0.0, |d| 1.0 - d.progress);
+                + o.dormancy.map_or(0.0, |d| ((1.0 - d.progress) * 4.0).round() * 0.25);
             let inputs = move |_: usize| Inputs { frame: Some(frame), ..Default::default() };
             let pos = self.place(k, o.pos, tick, alpha);
             self.push(k, kinds::ONION, models::ONION, pos, Quat::IDENTITY, pose, &inputs, 1.0, 0);

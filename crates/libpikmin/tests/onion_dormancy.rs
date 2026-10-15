@@ -45,3 +45,44 @@ fn dormancy_locks_stock_ignores_pellets_and_survives_snapshots() {
     assert!(s.onions()[0].grounded());
     assert_eq!(s.onions()[0].stored_total(), 5);
 }
+
+#[test]
+fn disabling_the_destination_releases_an_existing_carry_team() {
+    let mut s = Sim::new(Params::default(), 6);
+    let c = s.add_captain(Vec3::ZERO);
+    let o = s.add_onion(Vec3::X * 3000.0, &[PikiColor::Red]);
+    let p = s.spawn_pellet(PelletDesc::numbered(s.params(), 1, PikiColor::Red, Vec3::ZERO, 0.0));
+    s.spawn_squad(c, Vec3::ZERO, 3);
+    // Start from an authoritative in-flight delivery, without testing approach AI here.
+    let mut snap = libpikmin::Snapshot::of(&s, &[]);
+    let worker = snap.pikis[0].id;
+    snap.pellets[0].carriers.push(worker);
+    snap.pellets[0].slots[0] = Some(worker);
+    snap.pellets[0].state = PelletState::Carried {
+        onion: o, color: PikiColor::Red, path: vec![Vec3::X * 3000.0], next: 0,
+    };
+    snap.pikis[0].state = libpikmin::PikiState::Carry(libpikmin::carry::Carry {
+        pellet: p, slot: 0, phase: libpikmin::carry::CarryPhase::Move,
+    });
+    s.apply_snapshot(&snap);
+    s.make_onion_dormant(o, 30.0, Vec3::X * 3000.0);
+    for _ in 0..15 { s.step(&mut FlatHost); }
+    assert_eq!(s.pellet(p).state, PelletState::Idle);
+    assert!(s.pellet(p).carriers.is_empty());
+    assert!(!s.pikis().iter().any(|p| matches!(p.state, libpikmin::PikiState::Carry(_))));
+}
+
+#[test]
+fn interrupted_suction_preserves_the_pellet_and_has_no_seed_reward() {
+    let mut s = Sim::new(Params::default(), 3);
+    let o = s.add_onion(Vec3::ZERO, &[PikiColor::Red]);
+    let p = s.spawn_pellet(PelletDesc::numbered(s.params(), 1, PikiColor::Red, Vec3::ZERO, 0.0));
+    s.set_onion_pose(o, Vec3::Y * 40.0, true);
+    assert!(s.collect_ground_pellet(o, p));
+    for _ in 0..50 { s.step(&mut FlatHost); }
+    s.make_onion_dormant(o, 30.0, Vec3::ZERO);
+    for _ in 0..100 { s.step(&mut FlatHost); }
+    assert_eq!(s.pellet(p).state, PelletState::Idle);
+    assert_eq!(s.pellet(p).scale, 1.0);
+    assert_eq!(s.onions()[0].stored_total(), 0);
+}

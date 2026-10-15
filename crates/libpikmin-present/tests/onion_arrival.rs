@@ -44,6 +44,9 @@ fn every_dormant_colour_folds_and_replays_its_disc_effects_and_sound_track() {
         let o = s.add_onion(Vec3::ZERO, &[colour]);
         let mut v = View::load(&assets).unwrap();
         v.update(&s, 1.0, TICK_DT);
+        let textures_loaded = v.textures.list.len();
+        let live_textures = v.texture_ids.clone();
+        let live_colours = v.colors.clone();
         let (lo, hi) = bounds(&v, kinds::ONION);
         let live_height = hi.y - lo.y;
         s.make_onion_dormant(o, 2.0, Vec3::ZERO);
@@ -53,6 +56,7 @@ fn every_dormant_colour_folds_and_replays_its_disc_effects_and_sound_track() {
         // rests on the surface. Do not raise the buried leg vertices above ground.
         assert!(hi.y < live_height * 0.8, "{colour:?}: dormant pod near the ground, {lo:?}..{hi:?}");
         assert!(!v.draws.iter().any(|d| d.kind == kinds::BEAM), "dormant light is off");
+        assert!(v.texture_ids != live_textures || v.colors != live_colours, "{colour:?}: dormant palette differs from live");
         for _ in 0..120 { s.step(&mut FlatHost); v.update(&s, 1.0, TICK_DT); }
         assert!(s.onions()[0].dormancy.is_none());
         assert!(v.demo_sounds.iter().any(|s| *s == Some((demo, 0))), "starts the correct discovery sound");
@@ -61,5 +65,6 @@ fn every_dormant_colour_folds_and_replays_its_disc_effects_and_sound_track() {
         v.particles(Vec3::X, Vec3::Y);
         let (lo, hi) = bounds(&v, kinds::ONION);
         assert!(hi.y - lo.y > live_height * 0.9, "{colour:?}: live shape restored");
+        assert!(v.textures.list.len() <= textures_loaded + 2, "palette variants are reused");
     }
 }
