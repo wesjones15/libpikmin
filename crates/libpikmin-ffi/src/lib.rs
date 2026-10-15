@@ -323,7 +323,7 @@ pub struct PikOnion {
     pub colors: u32,
     /// Pikmin inside, by colour index (all leaf stages).
     pub stored: [u32; 3],
-    /// 0 idle, 1 suction, 2 emitting seeds, 3 taking off, 4 away, 5 landing.
+    /// 0 idle, 1 suction, 2 seeds, 3 takeoff, 4 away, 5 landing, 6 hover, 7 dormant, 8 reviving.
     pub anim: u8,
     pub is_ship: u8,
     pub _pad: [u8; 2],
@@ -1025,7 +1025,7 @@ pub unsafe extern "C" fn pik_sim_make_onion_dormant(sim: *mut PikSim, onion: u32
 /// `sim` from pik_sim_new.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_collect_ground_pellet(sim: *mut PikSim, onion: u32, pellet: u32) -> u8 {
-    unsafe { with(sim, 0, |s| s.sim.collect_ground_pellet(OnionId(onion), PelletId(pellet)) as u8) }
+    unsafe { with(sim, 0, |s| s.sim.collect_ground_pellet(OnionId(onion), libpikmin::PelletId(pellet)) as u8) }
 }
 
 /// Selects a host-timed disc flight transition without changing gameplay availability.

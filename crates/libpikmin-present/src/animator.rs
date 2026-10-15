@@ -340,6 +340,10 @@ pub fn captain_root(params: &Params, c: &Captain) -> glam::Mat4 {
 /// motions.
 pub fn onion_motion(o: &Onion) -> Option<(usize, Clock)> {
     let colour = o.colors[0].index();
+    if let Some(d) = o.dormancy {
+        // GoalAI::BootInit selects colour + 3; frame zero is the folded Onion.
+        return Some((3 + colour, Clock::Progress(d.progress)));
+    }
     if let Some((landing, progress)) = o.flight_motion {
         return Some(((if landing { libpikmin::anim::ANIM_GOAL_LAND } else { libpikmin::anim::ANIM_GOAL_TAKEOFF }) + colour,
             Clock::Progress(progress)));

@@ -305,6 +305,8 @@ pub struct View {
     pub models: Vec<ViewModel>,
     piki_anims: AnimSet,
     onion_anims: AnimSet,
+    boot_sounds: [(Vec<(f32, u16)>, f32); 3],
+    boot_progress: HashMap<u32, f32>,
     ship_anims: AnimSet,
     ship_mgr: libpikmin_assets::AnimMgr,
     ship_contexts: Vec<usize>,
@@ -458,6 +460,12 @@ impl View {
             models,
             piki_anims: AnimSet::load(assets, paths::PIKI_ANIM_MGR, paths::PIKI_BUNDLE)?,
             onion_anims: AnimSet::load(assets, paths::ONION_ANIM_MGR, paths::ONION_BUNDLE)?,
+            boot_sounds: [
+                libpikmin_assets::sound::tables::onion_boot_commands(assets, false)?,
+                libpikmin_assets::sound::tables::onion_boot_commands(assets, true)?,
+                libpikmin_assets::sound::tables::onion_boot_commands(assets, false)?,
+            ],
+            boot_progress: HashMap::new(),
             ship_anims: AnimSet::load(assets, libpikmin_assets::ship::SHIP_ANIM_MGR, libpikmin_assets::ship::SHIP_BUNDLE)?,
             ship_mgr: libpikmin_assets::AnimMgr::parse(&assets.read(libpikmin_assets::ship::SHIP_ANIM_MGR)?)?,
             ship_contexts,
@@ -835,7 +843,7 @@ impl View {
                 continue;
             }
             self.onion_light(sim, i, o, dt);
-            let Some((_, anim, _)) = self.animator.onion(&self.onion_anims, i, o, dt) else {
+            let Some((motion, anim, before)) = self.animator.onion(&self.onion_anims, i, o, dt) else {
                 continue;
             };
             let k = key(kinds::ONION, i as u64);
@@ -851,7 +859,53 @@ impl View {
                 let offset = rest.joints[1].w_axis.truncate() - pose.joints[1].w_axis.truncate();
                 rebase_pose(&mut pose, offset);
             }
-            let frame = o.colors[0].index() as f32 * 2.0;
+            if let Some(d) = o.dormancy {
+                let colour = o.colors[0].index();
+                if d.reviving {
+                    // pikidemo.c FindOnyon's timed commands, extracted from main.dol;
+                    // compressed to the host's three-second startup, alongside its clip.
+                    let (commands, end) = &self.boot_sounds[colour];
+                    let now = d.progress * end;
+                    let prev = self.boot_progress.insert(o.id.0, now).unwrap_or(-0.001);
+                    for &(at, cmd) in commands {
+                        if at > prev && at <= now { self.demo_sounds.push(Some(([6, 4, 5][colour], cmd))); }
+                    }
+                }
+                // AICreature::animationKeyUpdated -> GoalItem::playEffect. Use actual
+                // event keys and the current collision spheres of the disc model.
+                let now = anim.map_or(0.0, |(_, f)| f);
+                let prev = before.unwrap_or(now);
+                let keys: Vec<_> = self.onion_anims.get(motion).into_iter()
+                    .flat_map(|(info, _)| &info.event_keys)
+                    .filter(|e| e.event == 1 && (e.frame as f32) > now.min(prev) && (e.frame as f32) <= now.max(prev))
+                    .map(|e| e.value).collect();
+                let vm = &self.models[models::ONION as usize];
+                let sphere = |id: &str| vm.model.coll.iter().find(|c| c.id == id)
+                    .and_then(|c| pose.joints.get(c.joint).map(|m| o.pos + m.transform_point3(c.centre)))
+                    .unwrap_or(o.pos);
+                let flower = sphere("piki");
+                let bases = [sphere("bas1"), sphere("bas2"), sphere("bas3")];
+                if let Some(fx) = self.effects.as_mut() {
+                    for value in keys {
+                        match value {
+                            0 => { for def in fx_defs::ONYON_BOOT_FLOW { fx.spawn(def, flower); } }
+                            1 => { for def in if colour == 0 { &fx_defs::ONYON_BOOT_WATER[..] } else { &fx_defs::ONYON_BOOT_DUST[..] } { fx.spawn(*def, o.pos); } }
+                            2 | 3 => {
+                                for at in bases.into_iter().take(if value == 2 { 1 } else { 3 }) {
+                                    fx.spawn(if colour == 0 { fx_defs::ONYON_BOOT_BUBBLES } else { fx_defs::SMOKE_RING_M }, at);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            } else if self.boot_progress.remove(&o.id.0).is_some()
+                && !sim.onions().iter().any(|on| on.dormancy.is_some_and(|d| d.reviving)) {
+                self.demo_sounds.push(None);
+            }
+            // GoalItem::refresh: even frames live, odd frames dormant, per colour.
+            let frame = o.colors[0].index() as f32 * 2.0
+                + o.dormancy.map_or(0.0, |d| 1.0 - d.progress);
             let inputs = move |_: usize| Inputs { frame: Some(frame), ..Default::default() };
             let pos = self.place(k, o.pos, tick, alpha);
             self.push(k, kinds::ONION, models::ONION, pos, Quat::IDENTITY, pose, &inputs, 1.0, 0);
