@@ -245,6 +245,7 @@ impl Sim {
         self.update_sprouts(host, dt);
         self.update_auto_pluck(dt);
         self.update_recovery(dt);
+        self.rescue_fallen(host);
         self.separate();
         self.tick += 1;
     }

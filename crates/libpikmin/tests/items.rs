@@ -219,3 +219,37 @@ fn faster_attack_rate_plucks_sooner() {
     };
     assert!(pull(2.0) < pull(1.0));
 }
+
+/// Floor for x < 1000 and nothing beyond: a pit.
+struct PitHost;
+
+impl libpikmin::Host for PitHost {
+    fn ground_height(&self, pos: Vec3) -> Option<f32> {
+        (pos.x < 1000.0).then_some(0.0)
+    }
+}
+
+#[test]
+fn a_pikmin_that_falls_into_a_pit_comes_back_to_its_captain() {
+    let mut sim = sim();
+    let c = sim.add_captain(Vec3::ZERO);
+    let p = sim.spawn_piki_in_squad(PikiColor::Red, Vec3::new(1100.0, -500.0, 0.0), c).unwrap();
+    let health = sim.piki(p).health;
+    for _ in 0..3 {
+        sim.step(&mut PitHost);
+    }
+    let at = sim.piki(p).pos;
+    assert!(at.x < 100.0 && at.y > -50.0, "still in the pit: {at:?}");
+    assert_eq!(sim.piki(p).health, health, "no damage");
+    assert!(sim.piki(p).is_alive());
+
+    // Over solid ground, a Pikmin far below a captain is left alone (it is on a lower floor).
+    let mut sim = sim();
+    sim.add_captain(Vec3::new(0.0, 600.0, 0.0));
+    let p = sim.spawn_piki(PikiColor::Red, Vec3::new(50.0, 0.0, 0.0)).unwrap();
+    for _ in 0..3 {
+        sim.step(&mut PitHost);
+    }
+    assert!(sim.piki(p).pos.y < 100.0, "taken off a floor it stands on");
+}
+

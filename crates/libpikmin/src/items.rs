@@ -19,10 +19,14 @@ use glam::Vec3;
 use crate::event::Event;
 use crate::onion::{OnionAnim, OnionId};
 use crate::piki::{PikiColor, PikiState};
-use crate::{CaptainId, PikiId, Sim};
+use crate::{CaptainId, Host, PikiId, Sim};
 
 /// Colours of emergency Pikmin, in turn (four Red, three Yellow, three Blue of ten).
 const RECOVERY_COLOURS: [PikiColor; 3] = [PikiColor::Red, PikiColor::Yellow, PikiColor::Blue];
+
+/// How far below every captain, over a void, a Pikmin has to be before it is brought back
+/// (see `Sim::rescue_fallen`): 200 units, about 8 m at the RoR2 host's scale.
+pub const VOID_RESCUE_DROP: f32 = 200.0;
 
 impl Sim {
     /// How fast `captain`'s punches and plucks and his Pikmin's attacks play, as a multiple
@@ -141,6 +145,8 @@ impl Sim {
         c.pos = pos;
         c.vel = Vec3::ZERO;
         c.jump = None;
+        // A fresh fall: the old airborne peak would land as a drop from where he left.
+        c.air_peak = pos.y;
         let members = c.plate.members.clone();
         let n = members.len().max(1) as f32;
         for (k, id) in members.into_iter().enumerate() {
@@ -151,6 +157,53 @@ impl Sim {
             let a = k as f32 / n * TAU;
             let ring = 12.0 + 4.0 * (k / 8) as f32;
             p.pos = pos + Vec3::new(a.sin() * ring, 2.0, a.cos() * ring);
+            p.vel = Vec3::ZERO;
+            p.target_vel = Vec3::ZERO;
+            p.jump = None;
+            p.jump_queue.clear();
+            p.on_ground = false;
+        }
+    }
+
+    /// Host extension: a Pikmin that has dropped more than [`VOID_RESCUE_DROP`] below every
+    /// captain with no floor under it (a pit the map has nothing in, which the original's
+    /// maps never had) comes back to the nearest captain, set down beside him, unharmed. Only
+    /// those standing about, following, flying or knocked about: carriers, latched and
+    /// Onion-bound Pikmin keep to their jobs. Run every tick; most Pikmin fail the first test.
+    pub(crate) fn rescue_fallen(&mut self, host: &mut dyn Host) {
+        if self.captains.is_empty() {
+            return;
+        }
+        for pi in 0..self.pikis.len() {
+            let p = &self.pikis[pi];
+            if !matches!(
+                p.state,
+                PikiState::Idle
+                    | PikiState::Squad { .. }
+                    | PikiState::GoHang { .. }
+                    | PikiState::Flying { .. }
+                    | PikiState::Knocked { .. }
+            ) {
+                continue;
+            }
+            let lowest = self.captains.iter().map(|c| c.pos.y).fold(f32::INFINITY, f32::min);
+            if !(p.pos.y < lowest - VOID_RESCUE_DROP) || host.ground_height(p.pos + Vec3::Y * 20.0).is_some() {
+                continue;
+            }
+            // The captain it follows, else the nearest.
+            let own = p.captain.filter(|c| (c.0 as usize) < self.captains.len());
+            let at = own
+                .map(|c| self.captains[c.0 as usize].pos)
+                .unwrap_or_else(|| {
+                    self.captains
+                        .iter()
+                        .map(|c| c.pos)
+                        .min_by(|a, b| a.distance_squared(p.pos).total_cmp(&b.distance_squared(p.pos)))
+                        .unwrap_or(p.pos)
+                });
+            let a = (pi as f32) * 2.399_963; // the golden angle, so neighbours don't stack
+            let p = &mut self.pikis[pi];
+            p.pos = at + Vec3::new(a.sin() * 14.0, 2.0, a.cos() * 14.0);
             p.vel = Vec3::ZERO;
             p.target_vel = Vec3::ZERO;
             p.jump = None;
