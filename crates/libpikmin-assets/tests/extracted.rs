@@ -360,3 +360,14 @@ fn ship_takes_off_with_its_level_s_motion_and_flames() {
     assert!(cues.contains(&ShipCue::EndDemoSound));
     assert!(cues.contains(&ShipCue::Sound("SE_UFO_IDLING")));
 }
+#[test]
+fn onion_startup_sound_commands_are_extracted_for_both_timelines() {
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
+    for red in [true, false] {
+        let (commands, end) = libpikmin_assets::sound::tables::onion_boot_commands(&assets, red).unwrap();
+        assert_eq!(end, 280.0);
+        assert_eq!(commands.first(), Some(&(0.0, 0)));
+        assert_eq!(commands.last().unwrap().1, 7);
+        assert!(commands.windows(2).all(|w| w[0].0 <= w[1].0));
+    }
+}

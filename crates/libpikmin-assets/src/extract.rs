@@ -55,7 +55,7 @@ pub const FOLDERS: [&str; 21] = [
 ];
 
 /// Files that must exist for the sim and viewer to work.
-pub const REQUIRED: [&str; 31] = [
+pub const REQUIRED: [&str; 32] = [
     "parms/naviMgr.bin",
     "parms/pikiMgr.bin",
     "parms/aiconst.bin",
@@ -87,6 +87,7 @@ pub const REQUIRED: [&str; 31] = [
     SEQ_HEADER,
     crate::sound::tables::TABLES,
     crate::sound::tables::SOUND_TABLE,
+    crate::sound::tables::ONION_BOOT,
 ];
 
 /// The sequence archive index copied out of `main.dol`.
@@ -195,12 +196,14 @@ pub fn extract_assets(iso: &Path, out: &Path, log: &mut dyn FnMut(&str)) -> Resu
     let (tables, names) = crate::sound::tables::extract(&dol, &disc.game_id, disc.version)?;
     std::fs::write(out.join(crate::sound::tables::TABLES), tables)?;
     std::fs::write(out.join(crate::sound::tables::SOUND_TABLE), names)?;
+    std::fs::write(out.join(crate::sound::tables::ONION_BOOT),
+        crate::sound::tables::extract_onion_boot(&dol, &disc.game_id, disc.version)?)?;
     log(&format!(
         "{} and {} from main.dol",
         crate::sound::tables::TABLES,
         crate::sound::tables::SOUND_TABLE
     ));
-    total += 3;
+    total += 4;
 
     if let Some(missing) = REQUIRED.iter().find(|r| !out.join(r).is_file()) {
         return Err(Error::NotFound(out.join(missing)));

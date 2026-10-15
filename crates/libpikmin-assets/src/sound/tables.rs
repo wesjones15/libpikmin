@@ -14,6 +14,30 @@ use crate::{Assets, Error};
 
 pub const TABLES: &str = "SndData/jaudio_tables.bin";
 pub const SOUND_TABLE: &str = "SndData/sound_table.txt";
+pub const ONION_BOOT: &str = "SndData/onion_boot.bin";
+
+/// pikidemo.c's demo4/demo5 timed commands, copied from the user's executable.
+/// Their relative addresses are shared by the supported retail releases (symbol maps).
+pub fn extract_onion_boot(dol: &[u8], game_id: &str, version: u8) -> Result<Vec<u8>, Error> {
+    let &(_, _, base, _) = RELEASES.iter().find(|r| r.0 == game_id && r.1 == version)
+        .ok_or_else(|| Error::Bad("unsupported Onion sound-table release".into()))?;
+    Ok(Dol(dol).bytes(base + 0xA68, 0x54)?.to_vec())
+}
+
+/// Timed commands and terminal frame for FindRedOnyon (4), or Yellow/Blue (5/6).
+pub fn onion_boot_commands(assets: &Assets, red: bool) -> Result<(Vec<(f32, u16)>, f32), Error> {
+    let bytes = assets.read(ONION_BOOT)?;
+    let data = bytes.get(if red { 0..0x2C } else { 0x2C..0x54 }).ok_or(Error::Truncated(0))?;
+    let mut commands = Vec::new();
+    for pair in data.chunks_exact(4) {
+        let frame = i16::from_be_bytes([pair[0], pair[1]]);
+        let cmd = i16::from_be_bytes([pair[2], pair[3]]);
+        if frame < 0 { return Err(Error::Bad("negative Onion sound frame".into())); }
+        if cmd == -1 { return Ok((commands, frame as f32)); }
+        if cmd >= 0 { commands.push((frame as f32, cmd as u16)); }
+    }
+    Err(Error::Bad("unterminated Onion sound timeline".into()))
+}
 
 /// (game id, disc version) -> (`EVENT_OFFSET`, `soundTable`) virtual addresses.
 const RELEASES: [(&str, u8, u32, u32); 5] = [

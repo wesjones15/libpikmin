@@ -150,6 +150,22 @@ pub mod effects {
     /// `EFF_Onyon_Suck`: light drawn up into an Onion as a pellet arrives (`GoalEffect`,
     /// cast by `PelletGoalState::init`).
     pub const ONYON_SUCK: EffectDef = one("effects/pcr/goal_sui.pcr", "effects/tex/ps_glow.bti");
+    /// GoalItem::playEffect, startup motions 3..5.
+    pub const ONYON_BOOT_FLOW: [EffectDef; 2] = [
+        one("effects/pcr/kafun_b.pcr", "effects/tex/star4_i.bti"),
+        one("effects/pcr/kafun_bs.pcr", "effects/tex/hokori4.bti"),
+    ];
+    pub const ONYON_BOOT_DUST: [EffectDef; 2] = [
+        one("effects/pcr/ony_st1.pcr", "effects/tex/hokori4.bti"),
+        one("effects/pcr/ony_st2.pcr", "effects/tex/hokori4.bti"),
+    ];
+    pub const ONYON_BOOT_WATER: [EffectDef; 3] = [
+        one("effects/pcr/ony_shib.pcr", "effects/tex/mizutama.bti"),
+        one("effects/pcr/ony_ham1.pcr", "effects/tex/hamon.bti"),
+        one("effects/pcr/ony_ham2.pcr", "effects/tex/hamon.bti"),
+    ];
+    pub const ONYON_BOOT_BUBBLES: EffectDef = one("effects/pcr/ony_shbs.pcr", "effects/tex/mizutama.bti");
+    pub const SMOKE_RING_M: EffectDef = one("effects/pcr/kemuri_m.pcr", "effects/tex/kaen_ok.bti");
     /// `EFF_Onyon_BeaconRing{Blue,Red,Yellow}`, by `PikiColor`: rings under an Onion while a
     /// captain stands at it (`GoalItem::setSpotActive`).
     pub const ONYON_BEACON_RING: [EffectDef; 3] = [
