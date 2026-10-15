@@ -18,6 +18,8 @@ const LOCK_EYE_HEIGHT: f32 = 24.0;
 const LOCK_MIN_DISTANCE: f32 = 20.0;
 /// Clear space between a locked-on target's surface and its cursor.
 const LOCK_MARGIN: f32 = 4.0;
+/// A Pikmin called to his hand runs at least this many times his top speed (host extension).
+pub(crate) const GO_HANG_CATCH_UP: f32 = 1.5;
 
 /// Per-frame controls for one captain. Buttons are levels (held = true); the sim detects edges.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -917,10 +919,14 @@ impl Sim {
             self.pikis[id.0 as usize].state = PikiState::GoHang { captain };
             (None, Some(id))
         };
+        // Host extension: the wait grows with the distance, so one called from the far end of a
+        // lock-on's reach while he runs (it sprints, `piki_go_hang`) still gets there.
+        let top = self.params.navi.run_speed * self.captains[ci].speed_scale;
+        let pending_timeout = 3.0 + dist / ((GO_HANG_CATCH_UP - 1.0) * top).max(1.0);
         self.captains[ci].throw = ThrowState::Wait {
             held,
             pending,
-            pending_timeout: 3.0,
+            pending_timeout,
             hold_time: 0.0,
         };
         true

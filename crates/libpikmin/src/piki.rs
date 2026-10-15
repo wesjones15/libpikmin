@@ -577,8 +577,12 @@ impl Sim {
     }
 
     fn piki_go_hang(&mut self, pi: usize, captain: CaptainId, host: &mut dyn Host, dt: f32) {
-        let cpos = self.captains[captain.0 as usize].pos;
-        let full = self.piki_speed(pi, 1.0);
+        let c = &self.captains[captain.0 as usize];
+        let cpos = c.pos;
+        // Host extension: called to his hand, it sprints to catch him even at full tilt (a leaf
+        // is slower than him), so he can throw on the run.
+        let top = self.params.navi.run_speed * c.speed_scale;
+        let full = self.piki_speed(pi, 1.0).max(crate::captain::GO_HANG_CATCH_UP * top);
         let p = &mut self.pikis[pi];
         let to = cpos - p.pos;
         p.target_vel = Vec3::new(to.x, 0.0, to.z).normalize_or_zero() * full;
