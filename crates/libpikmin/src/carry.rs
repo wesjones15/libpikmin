@@ -317,7 +317,7 @@ impl Sim {
     }
 
     /// `ActTransport::decideGoal`: the carriers' majority colour (ties at random) picks the Onion.
-    fn decide_goal(&mut self, pi: usize) -> Option<(OnionId, PikiColor)> {
+    fn decide_goal(&mut self, pi: usize, host: &mut dyn Host) -> Option<(OnionId, PikiColor)> {
         let pellet = &self.pellets[pi];
         if pellet.desc.ship_part.is_some() {
             let pos = pellet.pos;
@@ -325,11 +325,15 @@ impl Sim {
                 .carriers
                 .first()
                 .map_or(PikiColor::Red, |id| self.pikis[id.0 as usize].color);
-            return self
+            let mut candidates: Vec<_> = self
                 .onions
                 .iter()
                 .filter(|o| o.ship.is_some() != self.parts_to_onions && o.grounded() && o.takes_deliveries())
-                .min_by(|a, b| dist_xz(a.pos, pos).total_cmp(&dist_xz(b.pos, pos)))
+                .collect();
+            candidates.sort_by(|a, b| dist_xz(a.pos, pos).total_cmp(&dist_xz(b.pos, pos)));
+            let mut route = Vec::new();
+            return candidates.into_iter()
+                .find(|o| !self.parts_to_onions || (host.carry_path(pos, o.goal_pos(), &mut route) && !route.is_empty()))
                 .map(|o| (o.id, color));
         }
         let mut counts = [0u32; 3];
@@ -389,7 +393,7 @@ impl Sim {
                     self.ground_pellet(i, host, 0.0);
                     let min = self.pellets[i].desc.min_carriers.max(1);
                     if self.lifted_carriers(&self.pellets[i]) >= min
-                        && let Some((onion, color)) = self.decide_goal(i)
+                        && let Some((onion, color)) = self.decide_goal(i, host)
                     {
                         trying_to_move = true;
                         let mut path = Vec::new();
@@ -425,7 +429,7 @@ impl Sim {
                         && self.onions[onion.0 as usize].takes_deliveries();
                     if !self.goal_still_majority(i, onion)
                         && !(self.parts_to_onions && self.pellets[i].desc.ship_part.is_some())
-                        && let Some((o, c)) = self.decide_goal(i)
+                        && let Some((o, c)) = self.decide_goal(i, host)
                     {
                         let mut route = Vec::new();
                         let to = self.onions[o.0 as usize].goal_pos();
@@ -1025,6 +1029,29 @@ mod tests {
         assert_eq!(receipts, 1);
         assert!(sim.onions()[ship.0 as usize].ship.as_ref().unwrap().parts.is_empty());
         assert!(sim.sprouts().next().is_none());
+    }
+
+    #[test]
+    fn objective_hauls_choose_the_nearest_reachable_landed_onion() {
+        struct Disconnected;
+        impl Host for Disconnected {
+            fn ground_height(&self, _: Vec3) -> Option<f32> { Some(0.0) }
+            fn carry_path(&mut self, _: Vec3, to: Vec3, out: &mut Vec<Vec3>) -> bool {
+                out.clear();
+                if to.x < 200.0 { return false; }
+                out.push(to); true
+            }
+        }
+        let mut sim = Sim::default();
+        sim.set_ship_part_onion_delivery(true);
+        sim.add_onion(Vec3::X * 100.0, &[PikiColor::Red]);
+        let reachable = sim.add_onion(Vec3::X * 300.0, &[PikiColor::Red]);
+        let mut desc = PelletDesc::numbered(sim.params(), 1, PikiColor::Red, Vec3::ZERO, 0.0);
+        desc.ship_part = Some(0);
+        let part = sim.spawn_pellet(desc);
+        attach(&mut sim, PikiColor::Red, part);
+        sim.step(&mut Disconnected);
+        assert!(matches!(sim.pellet(part).state, PelletState::Carried { onion, .. } if onion == reachable));
     }
 
     #[test]
