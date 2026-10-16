@@ -65,8 +65,8 @@ pub enum Event {
         damage: f32,
     },
     /// A part reached its receiver (`UfoItem::suckMe`). Normally `ship` is the ship
-    /// and `total` its fitted count. With host Onion delivery, `ship` is the receiving
-    /// Onion and `total` is zero: the host must accept the receipt and fit its ships.
+    /// and `total` its fitted count. With either host receipt policy, `ship` is the
+    /// receiver and `total` is zero: the host must accept the receipt and fit its ships.
     ShipPartCollected {
         pellet: PelletId,
         ship: OnionId,

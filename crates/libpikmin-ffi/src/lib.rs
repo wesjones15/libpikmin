@@ -782,6 +782,14 @@ pub unsafe extern "C" fn pik_sim_set_ship_part_onion_delivery(sim: *mut PikSim, 
     unsafe { with(sim, (), |s| s.sim.set_ship_part_onion_delivery(enabled != 0)) }
 }
 
+/// Ship delivery with an authoritative host receipt before fitting.
+/// # Safety
+/// `sim` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_ship_part_host_delivery(sim: *mut PikSim, enabled: u8) {
+    unsafe { with(sim, (), |s| s.sim.set_ship_part_host_delivery(enabled != 0)) }
+}
+
 /// The part's disc carry requirement, or zero when its assets/config are invalid.
 /// # Safety
 /// `sim` is a live handle.

@@ -238,6 +238,13 @@ pub unsafe extern "C" fn pik_view_set_celebrating(view: *mut PikView, on: u8) {
 }
 
 /// # Safety
+/// `view` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_ship_repair_mode(view: *mut PikView, on: u8) {
+    if let Some(v) = unsafe { view.as_mut() } { v.view.repair_mode = on != 0; }
+}
+
+/// # Safety
 /// `view` is a live view handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_repairs_pending(view: *const PikView) -> u32 {

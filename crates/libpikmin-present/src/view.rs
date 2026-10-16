@@ -287,6 +287,7 @@ struct PartView {
 }
 
 struct ShipFlight {
+    sucking: bool,
     seen: Vec<u32>,
     pending: VecDeque<u32>,
     repair: Option<(u32, f32)>,
@@ -305,6 +306,8 @@ fn rebase_pose(pose: &mut libpikmin_assets::pose::Pose, offset: Vec3) {
 }
 
 pub struct View {
+    /// Opt in to the original wreck and progressively repaired root poses.
+    pub repair_mode: bool,
     /// Host-owned victory presentation; never changes simulation or objective state.
     pub celebrating: bool,
     pub models: Vec<ViewModel>,
@@ -477,6 +480,7 @@ impl View {
         }
         let ship_contexts = models[models::SHIP as usize].skel.override_map(&libpikmin_assets::ship::CONTEXT_JOINTS);
         Ok(View {
+            repair_mode: false,
             celebrating: false,
             models,
             piki_anims: AnimSet::load(assets, paths::PIKI_ANIM_MGR, paths::PIKI_BUNDLE)?,
@@ -743,9 +747,14 @@ impl View {
                     let mut animator = libpikmin_assets::ship::ShipAnimator::new(&self.ship_mgr, part_mgrs);
                     animator.start(&on_board, level, &mut Vec::new());
                     ShipFlight { animator, progress: None, flames: Vec::new(), ground_anchor: None,
+                        sucking: false,
                         seen: on_board.clone(), pending: VecDeque::new(), repair: None }
                 });
                 let mut cues = Vec::new();
+                let sucking = sim.pellets().iter().any(|p| p.desc.ship_part.is_some()
+                    && matches!(p.state, PelletState::Sucking { onion, .. } if onion == o.id));
+                let was_sucking = flight.sucking;
+                if sucking && !was_sucking && flight.repair.is_none() { flight.animator.suck_start(); }
                 for &part in &on_board {
                     if !flight.seen.contains(&part) {
                         flight.seen.push(part);
@@ -754,8 +763,14 @@ impl View {
                 }
                 if o.flight_motion.is_none() {
                     if flight.repair.is_none() && let Some(part) = flight.pending.pop_front() {
-                        flight.animator.suck_start();
-                        flight.repair = Some((part, 0.0));
+                        if was_sucking || sucking {
+                            let fitted = on_board.iter().position(|&p| p == part).map_or(1, |i| i + 1);
+                            flight.animator.suck_finish(part as usize, params.ai.ship_level(fitted as u32), &mut cues);
+                            flight.repair = Some((part, 0.5));
+                        } else {
+                            flight.animator.suck_start();
+                            flight.repair = Some((part, 0.0));
+                        }
                     }
                     if let Some((part, age)) = flight.repair {
                         let next = age + dt;
@@ -786,6 +801,7 @@ impl View {
                     flight.animator.update(dt, &mut cues);
                 }
                 flight.progress = landing;
+                flight.sucking = sucking;
                 let animator = &flight.animator;
                 let vm = &self.models[models::SHIP as usize];
                 // The host's origin is the terrain contact point. Use the upright
@@ -802,13 +818,21 @@ impl View {
                 });
                 let mut pose = vm.skel.pose_by(Mat4::IDENTITY, |j| {
                     let ctx = self.ship_contexts.get(j).copied().unwrap_or(0);
-                    let (motion, frame) = if ctx == 0 && !animator.landing() && !animator.taking_off() && flight.repair.is_none() {
+                    let (motion, frame) = if ctx == 0 && (!self.repair_mode || on_board.len() == 30) && !animator.landing() && !animator.taking_off() && flight.repair.is_none() && !sucking {
                         (11, 0.0)
                     } else { animator.context(ctx) };
                     let (_, anim) = self.ship_anims.get(motion)?;
                     Some((anim, frame.clamp(0.0, anim.frames.saturating_sub(1) as f32)))
                 });
-                let offset = ground_anchor - pose.joints[2].w_axis.truncate();
+                let mut offset = ground_anchor - pose.joints[2].w_axis.truncate();
+                if self.repair_mode && on_board.len() < 30 && !animator.landing() && !animator.taking_off() {
+                    // The original bare wreck lies on its side. Keep that original pose,
+                    // and place its actual hull on the host's ground instead of forcing
+                    // the fully repaired upright rocket pose onto every repair state.
+                    let bottom = vm.batches.iter().flat_map(|b| &b.vertices)
+                        .map(|v| pose.skin(v).0.y).fold(f32::INFINITY, f32::min);
+                    offset.y = -bottom;
+                }
                 rebase_pose(&mut pose, offset);
                 // The level lights' frames per material, and each part on board posed on its joint
                 // of the ship (`PlayerState::renderParts`).

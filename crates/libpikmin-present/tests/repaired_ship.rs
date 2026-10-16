@@ -11,6 +11,7 @@ fn world_parts_use_disc_models_and_live_repairs_drain_without_replaying_restores
     let Some(assets) = Assets::discover(None) else { return };
     set_repaired_ship(true);
     let mut view = View::load(&assets).unwrap();
+    view.repair_mode = true;
     let mut sim = Sim::default();
     let ship = sim.add_ship(Vec3::ZERO, Vec3::X * 100.0, Vec3::Y * 60.0);
     let mut desc = libpikmin::PelletDesc::numbered(sim.params(), 1, libpikmin::PikiColor::Red, Vec3::X * 200.0, 0.0);
