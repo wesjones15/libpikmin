@@ -244,7 +244,7 @@ fn a_pikmin_that_falls_into_a_pit_comes_back_to_its_captain() {
     assert!(sim.piki(p).is_alive());
 
     // Over solid ground, a Pikmin far below a captain is left alone (it is on a lower floor).
-    let mut sim = sim();
+    let mut sim = crate::sim();
     sim.add_captain(Vec3::new(0.0, 600.0, 0.0));
     let p = sim.spawn_piki(PikiColor::Red, Vec3::new(50.0, 0.0, 0.0)).unwrap();
     for _ in 0..3 {
