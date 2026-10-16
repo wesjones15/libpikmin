@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 31;
+pub const PIK_ABI_VERSION: u32 = 32;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
@@ -321,7 +321,9 @@ pub struct PikPellet {
     /// 0 on the ground, 1 carried, 2 being sucked in, 3 gone.
     pub state: u8,
     pub has_creature: u8,
-    pub _pad: [u8; 6],
+    /// Ship parts never participate in a host's automatic Onion ground pickup.
+    pub has_ship_part: u8,
+    pub _pad: [u8; 5],
 }
 
 #[repr(C)]
@@ -1744,7 +1746,8 @@ pub unsafe extern "C" fn pik_sim_pellets(sim: *mut PikSim, out: *mut PikPellet, 
                     max_carriers: p.desc.max_carriers,
                     state,
                     has_creature: p.desc.creature.is_some() as u8,
-                    _pad: [0; 6],
+                    has_ship_part: p.desc.ship_part.is_some() as u8,
+                    _pad: [0; 5],
                 };
                 // SAFETY: `i < max`, which the caller promised is writable.
                 out.add(i).write(v);

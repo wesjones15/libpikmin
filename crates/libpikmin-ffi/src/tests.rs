@@ -18,6 +18,9 @@ fn all_disc_parts_cross_the_spawn_abi_with_valid_weights_and_ids() {
             assert_eq!(pik_sim_spawn_ship_part(sim, part, &pos, 0.0), part as i32);
             assert_eq!((*sim).sim.pellets()[part as usize].desc.ship_part, Some(part));
         }
+        let mut frames = [PikPellet::default(); 30];
+        assert_eq!(pik_sim_pellets(sim, frames.as_mut_ptr(), 30), 30);
+        assert!(frames.iter().all(|frame| frame.has_ship_part == 1));
         assert_eq!(pik_sim_spawn_ship_part(sim, 30, &PikVec3::default(), 0.0), -1);
         assert_eq!(pik_sim_ship_part_weight(sim, u32::MAX), 0);
         pik_sim_free(sim);
@@ -385,6 +388,7 @@ fn pellets_onions_and_bad_arguments() {
         let mut pel = [PikPellet::default(); 3];
         assert_eq!(pik_sim_pellets(sim, pel.as_mut_ptr(), 3), 2);
         assert_eq!((pel[0].state, pel[0].creature, pel[0].min_carriers), (0, 5, 2));
+        assert_eq!((pel[0].has_ship_part, pel[1].has_ship_part), (0, 0));
         assert_eq!((pel[1].min_carriers, pel[1].max_carriers, pel[1].radius), (5, 10, 20.0));
         let mut on = [PikOnion::default(); 2];
         assert_eq!(pik_sim_onions(sim, on.as_mut_ptr(), 2), 1);

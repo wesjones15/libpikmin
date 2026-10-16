@@ -1117,6 +1117,38 @@ mod tests {
     }
 
     #[test]
+    fn onion_auto_pickup_never_takes_ship_parts_loose_or_carried_even_if_already_fitted() {
+        for policy in 0..=3 {
+            let mut sim = Sim::default();
+            sim.ship_part_delivery = policy;
+            let captain = sim.add_captain(Vec3::ZERO);
+            let onion = sim.add_onion(Vec3::ZERO, &[PikiColor::Red]);
+            let ship = sim.add_ship(Vec3::X * 300.0, Vec3::X * 280.0, Vec3::new(300.0, 60.0, 0.0));
+            sim.set_ship_part_owner(ship, captain); sim.set_ship_part_owner(onion, captain);
+            let mut desc = PelletDesc::numbered(sim.params(), 1, PikiColor::Red, Vec3::ZERO, 0.0);
+            desc.ship_part = Some(4);
+            let part = sim.spawn_pellet(desc);
+            sim.set_onion_pose(onion, Vec3::Y * 40.0, true);
+            assert!(!sim.collect_ground_pellet(onion, part), "policy {policy}: loose new part");
+            sim.give_ship_part(ship, 4);
+            assert!(!sim.collect_ground_pellet(onion, part), "policy {policy}: loose duplicate");
+            attach(&mut sim, PikiColor::Red, part);
+            sim.pikis.last_mut().unwrap().captain = Some(captain);
+            for destination in [ship, onion] {
+                sim.pellets[part.0 as usize].state = PelletState::Carried {
+                    onion: destination, color: PikiColor::Red, path: vec![Vec3::X * 280.0], next: 0,
+                };
+                let before = sim.pellet(part).state.clone();
+                assert!(!sim.collect_ground_pellet(onion, part), "policy {policy}: must not intercept a carry team");
+                assert_eq!(sim.pellet(part).state, before);
+                assert_eq!(sim.pellet(part).carriers.len(), 1);
+            }
+            assert!(sim.sprouts().next().is_none());
+            assert_eq!(sim.onions()[onion.0 as usize].stored_total(), 0);
+        }
+    }
+
+    #[test]
     fn onion_part_receipts_are_opt_in_and_never_make_seeds_or_fit_a_ship() {
         let mut sim = Sim::default();
         sim.set_ship_part_onion_delivery(true);
