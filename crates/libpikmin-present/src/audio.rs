@@ -74,6 +74,7 @@ pub struct Audio {
     /// Output gain, as f32 bits.
     gain: Arc<AtomicU32>,
     stop: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
     whistling: bool,
     onion_spot: bool,
@@ -110,12 +111,13 @@ impl Audio {
         let sys = Arc::new(Mutex::new(sys));
         let gain = Arc::new(AtomicU32::new(1f32.to_bits()));
         let stop = Arc::new(AtomicBool::new(false));
+        let paused = Arc::new(AtomicBool::new(false));
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(u32, u16), String>>();
-        let (shared, g, st) = (sys.clone(), gain.clone(), stop.clone());
+        let (shared, g, st, p) = (sys.clone(), gain.clone(), stop.clone(), paused.clone());
         let thread = std::thread::Builder::new()
             .name("pikmin-audio".into())
             .spawn(move || {
-                let stream = open_stream(shared, g);
+                let stream = open_stream(shared, g, p);
                 match stream {
                     Ok((stream, rate, channels)) => {
                         let _ = ready_tx.send(Ok((rate, channels)));
@@ -139,6 +141,7 @@ impl Audio {
             sys,
             gain,
             stop,
+            paused,
             thread: Some(thread),
             whistling: false,
             onion_spot: false,
@@ -173,9 +176,22 @@ impl Audio {
         self.bgm
     }
 
+    pub fn has_bgm(&self, id: usize) -> bool {
+        self.with(|s| s.engine.data.seqs.seq(id).is_some()).unwrap_or(false)
+    }
+
     pub fn stop_bgm(&mut self) {
         self.bgm = 0;
         self.with(|s| s.stop_bgm(0));
+    }
+
+    /// Independent host music stream: original enemy-proximity mix, not SE volume.
+    /// `Jac_UpdateCamera` (pikiinter.c) drives mode flag 1 for nearby enemy events.
+    pub fn music_frame(&self, nearby_enemy: bool, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
+        if !paused {
+            self.with(|s| { s.frame(); s.set_bgm_mode_flag(0, 1, nearby_enemy as u8); });
+        }
     }
 
     /// A system (menu) sound by name.
@@ -475,7 +491,7 @@ impl Audio {
 }
 
 /// Opens the default output device and starts rendering `sys` into it.
-fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>) -> Result<(cpal::Stream, u32, u16), String> {
+fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>, paused: Arc<AtomicBool>) -> Result<(cpal::Stream, u32, u16), String> {
     let device = cpal::default_host()
         .default_output_device()
         .ok_or("no output device")?;
@@ -491,6 +507,7 @@ fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>) -> Result<(cp
         .build_output_stream(
             &config.into(),
             move |out: &mut [f32], _| {
+                if paused.load(Ordering::Relaxed) { out.fill(0.0); return; }
                 let frames = out.len() / ch;
                 scratch.clear();
                 scratch.resize(frames * 2, 0.0);
