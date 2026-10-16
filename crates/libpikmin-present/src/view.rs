@@ -6,7 +6,7 @@
 //! Instances are in sim units and axes. Each one has a position and rotation; its vertices are
 //! in that local frame (scale already applied), so a host places one object per instance.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use glam::{Mat3, Mat4, Quat, Vec3};
 use libpikmin::{Event, PelletState, PikiState, Sim, SproutState};
@@ -287,6 +287,9 @@ struct PartView {
 }
 
 struct ShipFlight {
+    seen: Vec<u32>,
+    pending: VecDeque<u32>,
+    repair: Option<(u32, f32)>,
     ground_anchor: Option<Vec3>,
     animator: libpikmin_assets::ship::ShipAnimator,
     progress: Option<f32>,
@@ -302,6 +305,8 @@ fn rebase_pose(pose: &mut libpikmin_assets::pose::Pose, offset: Vec3) {
 }
 
 pub struct View {
+    /// Host-owned victory presentation; never changes simulation or objective state.
+    pub celebrating: bool,
     pub models: Vec<ViewModel>,
     piki_anims: AnimSet,
     onion_anims: AnimSet,
@@ -382,6 +387,9 @@ const CONE_SCALE: f32 = 0.1;
 const SUCK_GRAVITY_FRAMES: f32 = 50.0;
 
 impl View {
+    pub fn pending_repairs(&self) -> usize {
+        self.ships.values().map(|s| s.pending.len() + usize::from(s.repair.is_some())).sum()
+    }
     pub fn load(assets: &Assets) -> Result<Self, libpikmin_assets::Error> {
         let mut paths_in_order: Vec<&str> = vec![paths::OLIMAR];
         paths_in_order.extend(paths::PIKMIN);
@@ -469,6 +477,7 @@ impl View {
         }
         let ship_contexts = models[models::SHIP as usize].skel.override_map(&libpikmin_assets::ship::CONTEXT_JOINTS);
         Ok(View {
+            celebrating: false,
             models,
             piki_anims: AnimSet::load(assets, paths::PIKI_ANIM_MGR, paths::PIKI_BUNDLE)?,
             onion_anims: AnimSet::load(assets, paths::ONION_ANIM_MGR, paths::ONION_BUNDLE)?,
@@ -733,9 +742,32 @@ impl View {
                     }).collect();
                     let mut animator = libpikmin_assets::ship::ShipAnimator::new(&self.ship_mgr, part_mgrs);
                     animator.start(&on_board, level, &mut Vec::new());
-                    ShipFlight { animator, progress: None, flames: Vec::new(), ground_anchor: None }
+                    ShipFlight { animator, progress: None, flames: Vec::new(), ground_anchor: None,
+                        seen: on_board.clone(), pending: VecDeque::new(), repair: None }
                 });
                 let mut cues = Vec::new();
+                for &part in &on_board {
+                    if !flight.seen.contains(&part) {
+                        flight.seen.push(part);
+                        flight.pending.push_back(part);
+                    }
+                }
+                if o.flight_motion.is_none() {
+                    if flight.repair.is_none() && let Some(part) = flight.pending.pop_front() {
+                        flight.animator.suck_start();
+                        flight.repair = Some((part, 0.0));
+                    }
+                    if let Some((part, age)) = flight.repair {
+                        let next = age + dt;
+                        if age < 0.5 && next >= 0.5 {
+                            let fitted = on_board.iter().position(|&p| p == part).map_or(1, |i| i + 1);
+                            flight.animator.suck_finish(part as usize, params.ai.ship_level(fitted as u32), &mut cues);
+                        }
+                        flight.repair = if next > 6.0 || (next > 0.6 && flight.animator.repair_finished()) {
+                            None
+                        } else { Some((part, next)) };
+                    }
+                }
                 let landing = o.flight_motion.filter(|m| m.0).map(|m| m.1);
                 if let Some(progress) = landing {
                     if flight.progress.is_none_or(|last| progress < last) {
@@ -766,7 +798,7 @@ impl View {
                 });
                 let mut pose = vm.skel.pose_by(Mat4::IDENTITY, |j| {
                     let ctx = self.ship_contexts.get(j).copied().unwrap_or(0);
-                    let (motion, frame) = if ctx == 0 && !animator.landing() {
+                    let (motion, frame) = if ctx == 0 && !animator.landing() && flight.repair.is_none() {
                         (11, 0.0)
                     } else { animator.context(ctx) };
                     let (_, anim) = self.ship_anims.get(motion)?;
@@ -931,6 +963,25 @@ impl View {
             if pel.state == PelletState::Gone {
                 continue;
             }
+            if let Some(part) = pel.desc.ship_part
+                && let Some(Some(pv)) = self.parts.get(part as usize)
+            {
+                let model = pv.model;
+                let cfg = params.pellets.iter().find(|c| c.kind == 3 &&
+                    (c.model_id == libpikmin_assets::ship::PART_IDS[part as usize] || c.pellet_id == libpikmin_assets::ship::PART_IDS[part as usize]));
+                let scale = cfg.map_or(1.0, |c| c.scale) * pel.scale;
+                let anim = pv.anims.as_ref().and_then(|a| a.get(0)).map(|(info, a)| {
+                    let end = info.keys.last().copied().unwrap_or(1).max(1) as f32;
+                    (a, (self.time * 30.0) % end)
+                });
+                let vm = &self.models[model as usize];
+                let pose = vm.skel.pose(Mat4::from_scale(Vec3::splat(scale)), anim);
+                let at = pel.pos + Vec3::Y * (-vm.lo.y * scale);
+                let k = key(kinds::PELLET, pel.id.0 as u64);
+                let (pos, rot) = self.place_rot(k, at, Quat::from_rotation_y(pel.yaw), tick, alpha);
+                self.push(k, kinds::PELLET, model, pos, rot, pose, &no_inputs, 1.0, 0);
+                continue;
+            }
             let idx = match pel.desc.min_carriers {
                 20.. => 3,
                 10.. => 2,
@@ -994,7 +1045,10 @@ impl View {
             let (pos, rot) = self.place_rot(k, p.pos, Quat::from_rotation_y(p.face), tick, alpha);
             // Frozen: the pose held where it was, the body paled toward ice.
             let frozen = p.frozen > 0.0;
-            let anim = self.animator.piki(&self.piki_anims, p, &look, if frozen { 0.0 } else { dt });
+            let anim = if self.celebrating {
+                libpikmin_assets::motion::Motion::RotJump.anim_index().and_then(|i| self.piki_anims.get(i))
+                    .map(|(info, a)| (a, (self.time * 30.0 + p.id.0 as f32 * 7.0) % info.keys.last().copied().unwrap_or(1).max(1) as f32))
+            } else { self.animator.piki(&self.piki_anims, p, &look, if frozen { 0.0 } else { dt }) };
             let model = models::PIKMIN[p.color.index()];
             let pose = self.models[model as usize].skel.pose(srt_matrix(look.scale, Vec3::ZERO, Vec3::ZERO), anim);
             let head = pose.joints.get(6).copied();
@@ -1017,7 +1071,10 @@ impl View {
             live.insert(crate::animator::captain_key(c.id));
             let k = key(kinds::CAPTAIN, c.id.0 as u64);
             let (mut pos, rot) = self.place_rot(k, c.pos, Quat::from_rotation_y(c.face), tick, alpha);
-            let anim = self.animator.captain(&self.piki_anims, &params, c, dt);
+            let anim = if self.celebrating {
+                libpikmin_assets::motion::Motion::WaveJmp.anim_index().and_then(|i| self.piki_anims.get(i))
+                    .map(|(info, a)| (a, (self.time * 30.0) % info.keys.last().copied().unwrap_or(1).max(1) as f32))
+            } else { self.animator.captain(&self.piki_anims, &params, c, dt) };
             let mut root = crate::animator::captain_root(&params, c);
             let fx_key = (8u64 << 48) | ((c.id.0 as u64) << 8);
             if let Some(&p) = self.materialize.get(&c.id.0) {

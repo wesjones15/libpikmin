@@ -7,6 +7,31 @@ use libpikmin_present::View;
 use libpikmin_present::view::{kinds, models, set_repaired_ship};
 
 #[test]
+fn world_parts_use_disc_models_and_live_repairs_drain_without_replaying_restores() {
+    let Some(assets) = Assets::discover(None) else { return };
+    set_repaired_ship(true);
+    let mut view = View::load(&assets).unwrap();
+    let mut sim = Sim::default();
+    let ship = sim.add_ship(Vec3::ZERO, Vec3::X * 100.0, Vec3::Y * 60.0);
+    let mut desc = libpikmin::PelletDesc::numbered(sim.params(), 1, libpikmin::PikiColor::Red, Vec3::X * 200.0, 0.0);
+    desc.ship_part = Some(0);
+    sim.spawn_pellet(desc);
+    view.update(&sim, 1.0, TICK_DT);
+    assert_eq!(view.pending_repairs(), 0);
+    assert!(view.draws.iter().any(|d| d.kind == kinds::PELLET && d.model >= models::COUNT as u32));
+    sim.give_ship_part(ship, 0);
+    sim.give_ship_part(ship, 5);
+    view.update(&sim, 1.0, TICK_DT);
+    assert_eq!(view.pending_repairs(), 2);
+    for _ in 0..30 * 14 { view.update(&sim, 1.0, TICK_DT); }
+    assert_eq!(view.pending_repairs(), 0);
+    assert!(view.positions.iter().all(|p| p.is_finite()));
+    let mut restored = View::load(&assets).unwrap();
+    restored.update(&sim, 1.0, TICK_DT);
+    assert_eq!(restored.pending_repairs(), 0);
+}
+
+#[test]
 fn the_repaired_dolphin_is_drawn_with_its_parts_and_the_wreck_without() {
     let Some(assets) = Assets::discover(None) else { return };
     set_repaired_ship(true);

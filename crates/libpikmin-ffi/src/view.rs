@@ -229,6 +229,21 @@ pub extern "C" fn pik_view_set_repaired_ship(on: u8) {
     libpikmin_present::view::set_repaired_ship(on != 0);
 }
 
+/// Victory posing is host-owned and leaves the simulation unchanged.
+/// # Safety
+/// `view` is a live view handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_celebrating(view: *mut PikView, on: u8) {
+    if let Some(v) = unsafe { view.as_mut() } { v.view.celebrating = on != 0; }
+}
+
+/// # Safety
+/// `view` is a live view handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_repairs_pending(view: *const PikView) -> u32 {
+    unsafe { view.as_ref() }.map_or(0, |v| v.view.pending_repairs() as u32)
+}
+
 /// Captain `captain` appears in a beam: `progress` 0 (a thin column) to 1 (himself, which ends it).
 ///
 /// # Safety

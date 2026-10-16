@@ -34,6 +34,7 @@ pub enum Motion {
     JHit = 31,
     GetUp = 32,
     RollJmp = 34,
+    WaveJmp = 35,
     ThrowWait = 36,
     Akubi = 39,
     PickLoop = 46,
@@ -44,6 +45,8 @@ pub enum Motion {
     SPress = 55,
     HNoboru = 62,
     Noboru = 63,
+    /// PikiEmotionState Happy and NaviClearState, from PaniPikiAnimator.h.
+    RotJump = 75,
     NukuFast = 82,
     NukareFast = 83,
     ODead = 89,

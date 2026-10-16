@@ -271,6 +271,10 @@ const TAKEOFF_DEMO: u16 = 32;
 const TAKEOFF_DEMO_SOUNDS: [(f32, u16); 2] = [(0.0, 0), (160.0, 1)];
 
 impl ShipAnimator {
+    /// Repair queue completion, including the fitting motion's finish key.
+    pub fn repair_finished(&self) -> bool {
+        self.repairing.is_none() && self.ctx[0].is_finished()
+    }
     /// `ship` is `ufo0705.bin`; `parts[i]` is part `i`'s AnimMgr and whether it has an
     /// override joint (`PelletAnimInfo::mOverrideJoint != -1`).
     pub fn new(ship: &AnimMgr, parts: Vec<Option<(AnimMgr, bool)>>) -> Self {
