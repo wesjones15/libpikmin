@@ -19,6 +19,8 @@ pub struct Sim {
     pub(crate) pikis: Vec<Piki>,
     pub(crate) creatures: CreatureFrame,
     pub(crate) pellets: Vec<crate::carry::Pellet>,
+    /// Opt-in host delivery policy; replicas do not run carry AI.
+    pub(crate) parts_to_onions: bool,
     pub(crate) onions: Vec<crate::onion::Onion>,
     pub(crate) sprouts: Vec<Option<crate::onion::Sprout>>,
     pub(crate) nectar_drops: Vec<crate::nectar::NectarDrop>,
@@ -70,6 +72,7 @@ impl Sim {
             pikis: Vec::new(),
             creatures: CreatureFrame::default(),
             pellets: Vec::new(),
+            parts_to_onions: false,
             onions: Vec::new(),
             sprouts: Vec::new(),
             nectar_drops: Vec::new(),

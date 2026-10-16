@@ -3,6 +3,28 @@
 use super::*;
 
 #[test]
+fn all_disc_parts_cross_the_spawn_abi_with_valid_weights_and_ids() {
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let sim = pik_sim_new(dir.as_ptr(), 1);
+        assert!(!sim.is_null());
+        for part in 0..30 {
+            let weight = pik_sim_ship_part_weight(sim, part);
+            assert!(weight > 0 && weight <= 100, "part {part} weight {weight}");
+            let mut name = [0; 128];
+            assert!(pik_sim_ship_part_name(sim, part, name.as_mut_ptr(), 128) > 0);
+            let pos = PikVec3 { x: part as f32 * 100.0, y: 0.0, z: 0.0 };
+            assert_eq!(pik_sim_spawn_ship_part(sim, part, &pos, 0.0), part as i32);
+            assert_eq!((*sim).sim.pellets()[part as usize].desc.ship_part, Some(part));
+        }
+        assert_eq!(pik_sim_spawn_ship_part(sim, 30, &PikVec3::default(), 0.0), -1);
+        assert_eq!(pik_sim_ship_part_weight(sim, u32::MAX), 0);
+        pik_sim_free(sim);
+    }
+}
+
+#[test]
 fn hud_digits_cross_the_abi_and_short_buffers_are_rejected() {
     let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
     let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();

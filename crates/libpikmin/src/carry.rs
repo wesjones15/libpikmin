@@ -197,6 +197,26 @@ pub struct Carry {
 }
 
 impl Sim {
+    /// Host extension to `ActTransport::decideGoal`: receive parts at grounded Onions.
+    /// The host owns the recovered set and fits ships after accepting the receipt.
+    pub fn set_ship_part_onion_delivery(&mut self, enabled: bool) {
+        self.parts_to_onions = enabled;
+    }
+
+    /// Put down an undelivered objective safely, releasing its carry team.
+    pub fn recover_pellet(&mut self, id: PelletId, pos: Vec3) -> bool {
+        if !pos.is_finite() || self.pellets.get(id.0 as usize).is_none_or(|p| p.state == PelletState::Gone) {
+            return false;
+        }
+        let carriers = self.pellets[id.0 as usize].carriers.clone();
+        for carrier in carriers { self.leave_current(carrier); self.pikis[carrier.0 as usize].state = PikiState::Idle; }
+        let p = &mut self.pellets[id.0 as usize];
+        p.pos = pos;
+        p.state = PelletState::Idle;
+        p.scale = 1.0;
+        p.stalled = 0.0;
+        true
+    }
     /// Spawns something carryable, e.g. a corpse when a host creature dies.
     pub fn spawn_pellet(&mut self, desc: PelletDesc) -> PelletId {
         let id = PelletId(self.pellets.len() as u32);
@@ -308,7 +328,7 @@ impl Sim {
             return self
                 .onions
                 .iter()
-                .filter(|o| o.ship.is_some() && o.grounded())
+                .filter(|o| o.ship.is_some() != self.parts_to_onions && o.grounded() && o.takes_deliveries())
                 .min_by(|a, b| dist_xz(a.pos, pos).total_cmp(&dist_xz(b.pos, pos)))
                 .map(|o| (o.id, color));
         }
@@ -346,7 +366,7 @@ impl Sim {
             return false;
         }
         if self.pellets[pi].desc.ship_part.is_some() {
-            return true;
+            return self.onions[onion.0 as usize].grounded();
         }
         let mut counts = [0u32; 3];
         for id in &self.pellets[pi].carriers {
@@ -404,6 +424,7 @@ impl Sim {
                     trying_to_move = self.lifted_carriers(&self.pellets[i]) >= self.pellets[i].desc.min_carriers.max(1)
                         && self.onions[onion.0 as usize].takes_deliveries();
                     if !self.goal_still_majority(i, onion)
+                        && !(self.parts_to_onions && self.pellets[i].desc.ship_part.is_some())
                         && let Some((o, c)) = self.decide_goal(i)
                     {
                         let mut route = Vec::new();
@@ -511,7 +532,8 @@ impl Sim {
         let min = self.pellets[i].desc.min_carriers.max(1);
         // Its Onion took off and none other is down to reroute to: put it down too, and lift
         // again once one lands.
-        let gone = !self.onions[onion.0 as usize].takes_deliveries();
+        let gone = !self.onions[onion.0 as usize].takes_deliveries()
+            || (self.pellets[i].desc.ship_part.is_some() && !self.onions[onion.0 as usize].grounded());
         if (self.pellets[i].carriers.len() as u32) < min || gone {
             // "小人数!!!": too few, put it down. The rest keep hold and struggle (Lift).
             let p = &mut self.pellets[i];
@@ -526,6 +548,10 @@ impl Sim {
                 }
             }
             self.ground_pellet(i, host, 0.0);
+            if gone && self.parts_to_onions && self.pellets[i].desc.ship_part.is_some() {
+                let carriers = self.pellets[i].carriers.clone();
+                for id in carriers { self.leave_current(id); self.pikis[id.0 as usize].state = PikiState::Idle; }
+            }
             return;
         }
 
@@ -602,6 +628,13 @@ impl Sim {
         progress: f32,
         speed: f32,
     ) {
+        if self.parts_to_onions && self.pellets[i].desc.ship_part.is_some()
+            && !self.onions[onion.0 as usize].grounded()
+        {
+            let pos = self.pellets[i].desc.pos;
+            self.recover_pellet(self.pellets[i].id, pos);
+            return;
+        }
         let suck_pos = self.onions[onion.0 as usize].suck_pos();
         let p = &mut self.pellets[i];
         if wait > 0.0 {
@@ -623,6 +656,12 @@ impl Sim {
         if progress >= 1.0 {
             p.state = PelletState::Gone;
             if let Some(part) = p.desc.ship_part {
+                if self.parts_to_onions {
+                    self.events.push(Event::ShipPartCollected {
+                        pellet: p.id, ship: onion, part, total: 0,
+                    });
+                    return;
+                }
                 // `UfoItem::suckMe`: the part goes on the ship (`PlayerState::getUfoParts`).
                 let id = p.id;
                 let ship = self.onions[onion.0 as usize].ship.as_mut().expect("ship parts go to ships");
@@ -807,7 +846,9 @@ impl Sim {
 
     pub(crate) fn pellet_has_destination(&self, p: &Pellet) -> bool {
         self.onions.iter().any(|o| o.takes_deliveries()
-            && o.ship.is_some() == p.desc.ship_part.is_some())
+            && if p.desc.ship_part.is_some() {
+                o.ship.is_some() != self.parts_to_onions && o.grounded()
+            } else { o.ship.is_none() })
     }
 }
 
@@ -960,6 +1001,50 @@ mod tests {
         sim.step(&mut host);
         assert_eq!(goal(&sim), Some(red), "two reds to one blue: red Onion");
         assert!(sim.drain_events().any(|e| matches!(e, Event::PelletRerouted { onion, .. } if onion == red)));
+    }
+
+    #[test]
+    fn onion_part_receipts_are_opt_in_and_never_make_seeds_or_fit_a_ship() {
+        let mut sim = Sim::default();
+        sim.set_ship_part_onion_delivery(true);
+        let onion = sim.add_onion(Vec3::new(40.0, 0.0, 0.0), &[PikiColor::Red]);
+        let ship = sim.add_ship(Vec3::ZERO, Vec3::ZERO, Vec3::Y * 60.0);
+        let mut desc = PelletDesc::numbered(sim.params(), 1, PikiColor::Red, Vec3::ZERO, 0.0);
+        desc.ship_part = Some(4);
+        let part = sim.spawn_pellet(desc);
+        attach(&mut sim, PikiColor::Red, part);
+        let mut receipts = 0;
+        for _ in 0..900 {
+            sim.step(&mut FlatHost);
+            for event in sim.drain_events() {
+                if let Event::ShipPartCollected { pellet, ship: receiver, part: id, total } = event {
+                    assert_eq!((pellet, receiver, id, total), (part, onion, 4, 0));
+                    receipts += 1;
+                }
+            }
+        }
+        assert_eq!(receipts, 1);
+        assert!(sim.onions()[ship.0 as usize].ship.as_ref().unwrap().parts.is_empty());
+        assert!(sim.sprouts().next().is_none());
+    }
+
+    #[test]
+    fn objective_goal_takeoff_releases_team_without_rerouting_or_collecting() {
+        let mut sim = Sim::default();
+        sim.set_ship_part_onion_delivery(true);
+        let onion = sim.add_onion(Vec3::X * 500.0, &[PikiColor::Red]);
+        let _other = sim.add_onion(Vec3::X * 1000.0, &[PikiColor::Red]);
+        let mut desc = PelletDesc::numbered(sim.params(), 1, PikiColor::Red, Vec3::ZERO, 0.0);
+        desc.ship_part = Some(0);
+        let part = sim.spawn_pellet(desc);
+        attach(&mut sim, PikiColor::Red, part);
+        sim.step(&mut FlatHost);
+        assert!(matches!(sim.pellet(part).state, PelletState::Carried { onion: o, .. } if o == onion));
+        sim.onion_take_off(onion);
+        sim.step(&mut FlatHost);
+        assert_eq!(sim.pellet(part).state, PelletState::Idle);
+        assert!(sim.pellet(part).carriers.is_empty());
+        assert!(!sim.drain_events().any(|e| matches!(e, Event::ShipPartCollected { .. } | Event::PelletRerouted { .. })));
     }
 
     #[test]

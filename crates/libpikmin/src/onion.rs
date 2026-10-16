@@ -393,6 +393,7 @@ impl Sim {
 
     /// Puts ship part `part` on `ship` directly (hosts restoring a save, tests).
     pub fn give_ship_part(&mut self, ship: OnionId, part: u32) {
+        if part >= 30 { return; }
         if let Some(s) = self.onions.get_mut(ship.0 as usize).and_then(|o| o.ship.as_mut())
             && !s.parts.contains(&part)
         {

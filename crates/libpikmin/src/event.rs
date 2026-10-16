@@ -64,7 +64,9 @@ pub enum Event {
         piki: PikiId,
         damage: f32,
     },
-    /// A ship part reached the ship (`UfoItem::suckMe`); `total` parts are on board now.
+    /// A part reached its receiver (`UfoItem::suckMe`). Normally `ship` is the ship
+    /// and `total` its fitted count. With host Onion delivery, `ship` is the receiving
+    /// Onion and `total` is zero: the host must accept the receipt and fit its ships.
     ShipPartCollected {
         pellet: PelletId,
         ship: OnionId,

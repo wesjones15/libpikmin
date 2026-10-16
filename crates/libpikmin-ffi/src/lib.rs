@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 29;
+pub const PIK_ABI_VERSION: u32 = 30;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -622,6 +622,7 @@ const EVENT_BACKLOG: usize = 16384;
 /// An opaque sim handle.
 pub struct PikSim {
     sim: Sim,
+    part_specs: Vec<Option<PelletDesc>>,
     /// The creatures the host gave last, copied into the sim each tick.
     frame: CreatureFrame,
     /// Events for [`pik_sim_events`].
@@ -725,7 +726,7 @@ pub unsafe extern "C" fn pik_sim_new(assets_dir: *const c_char, seed: u64) -> *m
     let dir = unsafe { path_arg(assets_dir) };
     let made = catch_unwind(|| {
         let mut params = Params::default();
-        let source = match dir {
+        let source = match dir.as_ref() {
             None => "code defaults".to_string(),
             Some(dir) => match params.load_extracted(Path::new(&dir)) {
                 Ok(applied) if !applied.is_empty() => format!("disc ({} files)", applied.len()),
@@ -736,11 +737,13 @@ pub unsafe extern "C" fn pik_sim_new(assets_dir: *const c_char, seed: u64) -> *m
                 }
             },
         };
-        (Sim::new(params, seed), source)
+        let part_specs = load_part_specs(&params, dir.as_deref());
+        (Sim::new(params, seed), source, part_specs)
     });
     match made {
-        Ok((sim, source)) => Box::into_raw(Box::new(PikSim {
+        Ok((sim, source, part_specs)) => Box::into_raw(Box::new(PikSim {
             sim,
+            part_specs,
             frame: CreatureFrame::default(),
             pending: VecDeque::new(),
             view_log: Vec::new(),
@@ -751,6 +754,78 @@ pub unsafe extern "C" fn pik_sim_new(assets_dir: *const c_char, seed: u64) -> *m
         })),
         Err(_) => std::ptr::null_mut(),
     }
+}
+
+// PelletConfig/PelletShapeObject (pelletMgr.cpp): dimensions and weights come from
+// the user's disc; absent or invalid required assets disable spawning that part.
+fn load_part_specs(params: &Params, dir: Option<&Path>) -> Vec<Option<PelletDesc>> {
+    let Some(assets) = libpikmin_assets::Assets::discover(dir) else { return Vec::new() };
+    let infos = assets.read(libpikmin_assets::ship::PEL_ANIM).ok()
+        .and_then(|b| libpikmin_assets::ship::parse_pel_anim(&b).ok()).unwrap_or_default();
+    libpikmin_assets::ship::PART_IDS.iter().enumerate().map(|(part, id)| {
+        let cfg = params.pellets.iter().find(|c| c.kind == 3 && (c.model_id == *id || c.pellet_id == *id))?;
+        let info = infos.iter().find(|i| i.id == *id)?;
+        let model = assets.model(&info.model()).ok()?;
+        let radius = model.coll.iter().find(|c| c.id == "cent").map(|c| c.radius * cfg.scale)?;
+        if !radius.is_finite() || radius <= 0.0 || cfg.min_carriers <= 0 || cfg.max_carriers < cfg.min_carriers { return None; }
+        Some(PelletDesc { pos: Vec3::ZERO, yaw: 0.0, radius, height: cfg.carry_info_height.max(1.0),
+            min_carriers: cfg.min_carriers as u32, max_carriers: cfg.max_carriers as u32,
+            seeds_matching: 0, seeds_other: 0, color: None, creature: None, ship_part: Some(part as u32) })
+    }).collect()
+}
+
+/// Host-selected receipt policy; the default continues to deliver to ships.
+/// # Safety
+/// `sim` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_ship_part_onion_delivery(sim: *mut PikSim, enabled: u8) {
+    unsafe { with(sim, (), |s| s.sim.set_ship_part_onion_delivery(enabled != 0)) }
+}
+
+/// The part's disc carry requirement, or zero when its assets/config are invalid.
+/// # Safety
+/// `sim` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_ship_part_weight(sim: *mut PikSim, part: u32) -> u32 {
+    unsafe { with(sim, 0, |s| s.part_specs.get(part as usize).and_then(|d| *d).map_or(0, |d| d.min_carriers)) }
+}
+
+/// Copies a UTF-8 part name, NUL terminated. Returns bytes written excluding NUL.
+/// # Safety
+/// `out` is writable for `cap` bytes; `sim` is live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_ship_part_name(sim: *mut PikSim, part: u32, out: *mut u8, cap: u32) -> u32 {
+    if out.is_null() || cap == 0 { return 0; }
+    unsafe { with(sim, 0, |s| {
+        let Some(id) = libpikmin_assets::ship::PART_IDS.get(part as usize) else { return 0 };
+        let Some(c) = s.sim.params().pellets.iter().find(|c| c.kind == 3 && (c.model_id == *id || c.pellet_id == *id)) else { return 0 };
+        let n = c.name.len().min(cap as usize - 1);
+        std::ptr::copy_nonoverlapping(c.name.as_ptr(), out, n);
+        *out.add(n) = 0;
+        n as u32
+    }) }
+}
+
+/// Spawns an actual ship-part pellet using its extracted dimensions and weight.
+/// # Safety
+/// `sim` is live; `pos` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_spawn_ship_part(sim: *mut PikSim, part: u32, pos: *const PikVec3, yaw: f32) -> i32 {
+    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return -1 };
+    if !Vec3::from(pos).is_finite() || !yaw.is_finite() { return -1; }
+    unsafe { with(sim, -1, |s| {
+        let Some(mut d) = s.part_specs.get(part as usize).and_then(|d| *d) else { return -1 };
+        d.pos = pos.into(); d.yaw = yaw;
+        s.sim.spawn_pellet(d).0 as i32
+    }) }
+}
+
+/// # Safety
+/// `sim` is live; `pos` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_recover_pellet(sim: *mut PikSim, pellet: u32, pos: *const PikVec3) -> u8 {
+    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return 0 };
+    unsafe { with(sim, 0, |s| s.sim.recover_pellet(libpikmin::PelletId(pellet), pos.into()) as u8) }
 }
 
 /// # Safety
