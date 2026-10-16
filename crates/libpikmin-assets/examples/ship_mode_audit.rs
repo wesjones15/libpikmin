@@ -10,8 +10,16 @@ fn main() {
         let model = assets.model(&info.model()).expect("part model");
         let anims = AnimSet::load(&assets, &info.anim_mgr(), &info.bundle()).expect("part animations");
         assert!(anims.get(0).is_some(), "missing carry motion {index}");
-        println!("part {index:02} {id}: {} joints, carry animation ready", model.joints.len());
+        if index < 16 {
+            assert!(anims.get(ship::part_motion::APPEAR).is_some(), "missing fitting motion {index}");
+            assert!(anims.get(ship::part_motion::AFTER).is_some(), "missing fitted idle {index}");
+        }
+        println!("part {index:02} {id}: {} joints, carry ready, {}", model.joints.len(),
+            if index < 16 { "exterior fitting/idle ready" } else { "internal part (no exterior fitting joint)" });
     }
+    let dolphin = AnimSet::load(&assets, ship::SHIP_ANIM_MGR, ship::SHIP_BUNDLE).unwrap();
+    for motion in 0..=16 { assert!(dolphin.get(motion).is_some(), "missing Dolphin motion {motion}"); }
+    println!("Dolphin: wreck, intake, repair levels, takeoff and hatch motion bundles ready");
     let pikis = AnimSet::load(&assets, "pikis/animMgr.bin", "pikis/bluModel.anm").unwrap();
     for motion in [Motion::RotJump, Motion::WaveJmp] {
         let (_, clip) = pikis.get(motion.anim_index().unwrap()).expect("celebration clip");

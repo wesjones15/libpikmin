@@ -1780,6 +1780,19 @@ pub unsafe extern "C" fn pik_sim_onions(sim: *mut PikSim, out: *mut PikOnion, ma
     }
 }
 
+/// Returns a receiver's actual carry destination, including the Dolphin's offset.
+/// # Safety
+/// `sim` is live and `out` is writable for one vector.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_onion_goal(sim: *mut PikSim, id: u32, out: *mut PikVec3) -> u32 {
+    if out.is_null() { return 0; }
+    unsafe { with(sim, 0, |s| {
+        let Some(o) = s.sim.onions().iter().find(|o| o.id.0 == id) else { return 0; };
+        out.write(o.goal_pos().into());
+        1
+    }) }
+}
+
 /// Copies up to `max` sprouts in the ground or in the air into `out`. Returns how many there
 /// are in all.
 ///
