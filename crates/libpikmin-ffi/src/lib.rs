@@ -38,7 +38,17 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 30;
+pub const PIK_ABI_VERSION: u32 = 31;
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
+    unsafe { with(sim, (), |s| s.sim.set_ship_part_competitive_delivery(enabled != 0)) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_ship_part_owner(sim: *mut PikSim, ship: u32, captain: u32) {
+    unsafe { with(sim, (), |s| s.sim.set_ship_part_owner(OnionId(ship), CaptainId(captain))) }
+}
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {

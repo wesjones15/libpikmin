@@ -415,7 +415,8 @@ impl Audio {
             // `UfoItem::suckMe` (ufoItem.cpp).
             Event::ShipPartCollected { ship, .. } => {
                 let pos = sim.onions()[ship.0 as usize].pos;
-                s.play_from(onion_owner(ship), "SE_UFO_PARTSIN", pos);
+                let sound = if sim.onions()[ship.0 as usize].ship.is_some() { "SE_UFO_PARTSIN" } else { "SE_CONTAINER_PELLETIN2" };
+                s.play_from(onion_owner(ship), sound, pos);
             }
             // `GoalAI::EmitPiki` (itemAI.cpp): each seed shot.
             Event::SeedLaunched { onion, .. } => {

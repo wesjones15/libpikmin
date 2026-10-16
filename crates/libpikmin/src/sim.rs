@@ -21,6 +21,7 @@ pub struct Sim {
     pub(crate) pellets: Vec<crate::carry::Pellet>,
     /// Opt-in host delivery policy; replicas do not run carry AI.
     pub(crate) ship_part_delivery: u8,
+    pub(crate) ship_part_owners: std::collections::HashMap<crate::onion::OnionId, CaptainId>,
     pub(crate) onions: Vec<crate::onion::Onion>,
     pub(crate) sprouts: Vec<Option<crate::onion::Sprout>>,
     pub(crate) nectar_drops: Vec<crate::nectar::NectarDrop>,
@@ -73,6 +74,7 @@ impl Sim {
             creatures: CreatureFrame::default(),
             pellets: Vec::new(),
             ship_part_delivery: 0,
+            ship_part_owners: Default::default(),
             onions: Vec::new(),
             sprouts: Vec::new(),
             nectar_drops: Vec::new(),
