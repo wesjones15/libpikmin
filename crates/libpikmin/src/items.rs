@@ -54,6 +54,17 @@ impl Sim {
         self.pace = (ok(leaf) && ok(bud) && ok(flower)).then_some([leaf.min(10.0), bud.min(10.0), flower.min(10.0)]);
     }
 
+    /// How `captain`'s jumps and footing follow the host's stats: `jump` multiplies his
+    /// jumps' takeoff speed, `accel` how quickly he reaches walking speed (below 1 he slides).
+    /// Both clamped to 0.1..10; 1 is Pikmin. His Pikmin keep their own jumps.
+    pub fn set_captain_motion(&mut self, captain: CaptainId, jump: f32, accel: f32) {
+        let ok = |v: f32| if v.is_finite() { v.clamp(0.1, 10.0) } else { 1.0 };
+        if let Some(c) = self.captains.get_mut(captain.0 as usize) {
+            c.jump_scale = ok(jump);
+            c.accel_scale = ok(accel);
+        }
+    }
+
     /// Mid-air jumps `captain` may make before landing (Hopoo Feather). His squad repeats
     /// each one where it jumped with him.
     pub fn set_captain_air_jumps(&mut self, captain: CaptainId, jumps: u32) {
@@ -379,5 +390,46 @@ mod pace_tests {
         sim.set_squad_pace(0.0, 1.0, 1.0);
         assert!(speed(&sim, 2) > speed(&sim, 0));
         assert!(speed(&sim, 2) < top * 1.2);
+    }
+}
+
+#[cfg(test)]
+mod motion_tests {
+    use crate::host::FlatHost;
+    use crate::{CaptainInput, Params, Sim, Vec2, Vec3};
+
+    /// Peak height of one jump from rest, and how far he got after 6 ticks of full stick.
+    fn jump_and_run(jump: f32, accel: f32) -> (f32, f32) {
+        let mut sim = Sim::new(Params::default(), 1);
+        let c = sim.add_captain(Vec3::ZERO);
+        sim.set_captain_motion(c, jump, accel);
+        for _ in 0..5 {
+            sim.step(&mut FlatHost);
+        }
+        sim.set_input(c, CaptainInput { jump: true, ..Default::default() });
+        sim.step(&mut FlatHost);
+        let mut peak: f32 = 0.0;
+        for _ in 0..60 {
+            sim.set_input(c, CaptainInput::default());
+            sim.step(&mut FlatHost);
+            peak = peak.max(sim.captain(c).pos.y);
+        }
+        let start = sim.captain(c).pos;
+        for _ in 0..6 {
+            sim.set_input(c, CaptainInput { stick: Vec2::new(1.0, 0.0), ..Default::default() });
+            sim.step(&mut FlatHost);
+        }
+        (peak, sim.captain(c).pos.distance(start))
+    }
+
+    #[test]
+    fn jump_power_and_acceleration_follow_the_host() {
+        let (peak, ran) = jump_and_run(1.0, 1.0);
+        let (high, _) = jump_and_run(1.5, 1.0);
+        let (_, slid) = jump_and_run(1.0, 0.2);
+        assert!(peak > 1.0, "he jumped");
+        // Height goes with the square of takeoff speed.
+        assert!((high / peak - 2.25).abs() < 0.2, "{high} vs {peak}");
+        assert!(slid < ran * 0.8, "low acceleration gets him going slower: {slid} vs {ran}");
     }
 }

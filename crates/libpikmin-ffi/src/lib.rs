@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 28;
+pub const PIK_ABI_VERSION: u32 = 29;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -1952,6 +1952,17 @@ pub unsafe extern "C" fn pik_sim_set_captain_attack_rate(sim: *mut PikSim, capta
 pub unsafe extern "C" fn pik_sim_set_squad_speed(sim: *mut PikSim, captain: u32, scale: f32) {
     // SAFETY: as documented.
     unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.set_squad_speed(CaptainId(captain), scale) }) }
+}
+
+/// [`Sim::set_captain_motion`]: his jumps' takeoff speed and his acceleration as multiples of
+/// Pikmin's (the host's jump power and acceleration over their bases).
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_captain_motion(sim: *mut PikSim, captain: u32, jump: f32, accel: f32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.set_captain_motion(CaptainId(captain), jump, accel) }) }
 }
 
 /// [`Sim::set_captain_air_jumps`] and [`Sim::set_captain_stomp`].

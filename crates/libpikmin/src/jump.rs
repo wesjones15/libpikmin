@@ -48,7 +48,7 @@ impl Sim {
     }
 
     pub(crate) fn start_captain_jump(&mut self, ci: usize) {
-        let speed = self.jump_speed();
+        let speed = self.jump_speed() * self.captains[ci].jump_scale;
         let c = &mut self.captains[ci];
         c.vel.y = speed;
         c.on_ground = false;
@@ -99,7 +99,7 @@ impl Sim {
     pub(crate) fn start_air_jump(&mut self, ci: usize) {
         let speed = self.jump_speed();
         let c = &mut self.captains[ci];
-        c.vel.y = speed;
+        c.vel.y = speed * c.jump_scale;
         c.air_jumps_used += 1;
         let at = c.jump.map_or(0.0, |j| j.elapsed);
         let tick = c.jump_tick;

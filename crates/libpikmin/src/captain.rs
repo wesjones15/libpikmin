@@ -143,6 +143,12 @@ pub struct Captain {
     /// Host extension: multiplies his Pikmin's walk and run speeds (the host's inherited move
     /// speed). 1 in Pikmin.
     pub squad_speed: f32,
+    /// Host extension: multiplies his jumps' takeoff speed (the host's jump power over its
+    /// base: items that raise or weaken jumps). 1 in Pikmin.
+    pub jump_scale: f32,
+    /// Host extension: multiplies how quickly he reaches his walking speed (the host's
+    /// acceleration over its base; below 1 he slides about). 1 in Pikmin.
+    pub accel_scale: f32,
     /// Host extension: jumps he may make in mid-air (Hopoo Feather), and how many he's made
     /// since leaving the ground.
     pub air_jumps: u32,
@@ -225,6 +231,8 @@ impl Captain {
             reach_scale: 1.0,
             attack_rate: 1.0,
             squad_speed: 1.0,
+            jump_scale: 1.0,
+            accel_scale: 1.0,
             air_jumps: 0,
             air_jumps_used: 0,
             can_stomp: false,
@@ -432,7 +440,8 @@ impl Sim {
         locked: bool,
     ) {
         let navi = &self.params.navi;
-        let accel = self.params.navi_creature.acceleration;
+        // A time constant: higher acceleration eases in sooner.
+        let accel = self.params.navi_creature.acceleration / self.captains[ci].accel_scale;
         let face_adjust = self.params.navi_creature.face_dir_adjust;
         let gravity = self.captains[ci].jump.and_then(|j| j.gravity).unwrap_or(self.params.ai.gravity);
         let c = &mut self.captains[ci];
