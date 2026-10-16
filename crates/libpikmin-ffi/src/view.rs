@@ -244,6 +244,35 @@ pub unsafe extern "C" fn pik_view_repairs_pending(view: *const PikView) -> u32 {
     unsafe { view.as_ref() }.map_or(0, |v| v.view.pending_repairs() as u32)
 }
 
+/// The complete-ending farewell music: pikidemo.c DEMOID_GoodEndingWave's
+/// stream 11, piki_scene.c filelist[11] = compend0.stx. Assets remain local.
+/// Returns required/written stereo float samples, zero if unavailable.
+/// # Safety
+/// `assets_dir` is NUL terminated; `rate` writable; non-null `out` writable for `cap` floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_victory_pcm(assets_dir: *const c_char, out: *mut f32, cap: u32, rate: *mut u32) -> u32 {
+    let result = std::panic::catch_unwind(|| {
+        let dir = unsafe { crate::path_arg(assets_dir) }?;
+        let assets = libpikmin_assets::Assets::discover(Some(&dir))?;
+        let data = assets.read("SndData/compend0.stx").ok()?;
+        let header = libpikmin_assets::sound::stream::StreamHeader::parse(&data).ok()?;
+        let hz = header.sample_rate as u32;
+        if !(8000..=96000).contains(&hz) || header.samples == 0 || header.samples > hz * 120 { return None; }
+        let decoded = libpikmin_assets::sound::Stream::decode(&data).ok()?;
+        Some((hz, decoded.stereo))
+    });
+    let Ok(Some((hz, samples))) = result else { return 0 };
+    if let Some(rate) = unsafe { rate.as_mut() } { *rate = hz; } else { return 0; }
+    if out.is_null() { return samples.len() as u32; }
+    if cap < samples.len() as u32 { return 0; }
+    let output = unsafe { std::slice::from_raw_parts_mut(out, samples.len()) };
+    for (i, (&sample, value)) in samples.iter().zip(output).enumerate() {
+        let fade = ((samples.len() - i) as f32 / (hz as f32 * 0.4)).min(1.0);
+        *value = sample as f32 / 32768.0 * fade;
+    }
+    samples.len() as u32
+}
+
 /// Captain `captain` appears in a beam: `progress` 0 (a thin column) to 1 (himself, which ends it).
 ///
 /// # Safety

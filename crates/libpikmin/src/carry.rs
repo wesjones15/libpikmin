@@ -629,10 +629,9 @@ impl Sim {
         speed: f32,
     ) {
         if self.parts_to_onions && self.pellets[i].desc.ship_part.is_some()
-            && !self.onions[onion.0 as usize].grounded()
+            && (!self.onions[onion.0 as usize].grounded() || !self.onions[onion.0 as usize].takes_deliveries())
         {
-            let pos = self.pellets[i].desc.pos;
-            self.recover_pellet(self.pellets[i].id, pos);
+            self.recover_pellet(self.pellets[i].id, start);
             return;
         }
         let suck_pos = self.onions[onion.0 as usize].suck_pos();

@@ -779,6 +779,10 @@ impl View {
                     flight.animator.land_progress(1.0, &mut cues);
                     cues.push(ShipCue::Effect { fx: fx_defs::ROCKET_LAND, lift: 0.0, normal: None });
                 } else {
+                    if o.flight_motion.is_some_and(|m| !m.0) && !flight.animator.taking_off() {
+                        flight.pending.clear(); flight.repair = None;
+                        flight.animator.take_off(&on_board, &mut cues);
+                    }
                     flight.animator.update(dt, &mut cues);
                 }
                 flight.progress = landing;
@@ -798,7 +802,7 @@ impl View {
                 });
                 let mut pose = vm.skel.pose_by(Mat4::IDENTITY, |j| {
                     let ctx = self.ship_contexts.get(j).copied().unwrap_or(0);
-                    let (motion, frame) = if ctx == 0 && !animator.landing() && flight.repair.is_none() {
+                    let (motion, frame) = if ctx == 0 && !animator.landing() && !animator.taking_off() && flight.repair.is_none() {
                         (11, 0.0)
                     } else { animator.context(ctx) };
                     let (_, anim) = self.ship_anims.get(motion)?;

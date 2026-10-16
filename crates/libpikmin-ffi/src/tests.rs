@@ -25,6 +25,25 @@ fn all_disc_parts_cross_the_spawn_abi_with_valid_weights_and_ids() {
 }
 
 #[test]
+fn the_complete_ending_music_decodes_across_the_abi_with_bounded_buffers() {
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let mut rate = 0;
+        let n = pik_victory_pcm(dir.as_ptr(), std::ptr::null_mut(), 0, &mut rate);
+        assert!(rate >= 8000 && n > 0 && n <= rate * 120 * 2);
+        let mut short = [123.0; 4];
+        assert_eq!(pik_victory_pcm(dir.as_ptr(), short.as_mut_ptr(), 4, &mut rate), 0);
+        assert_eq!(short, [123.0; 4]);
+        let mut pcm = vec![0.0; n as usize];
+        assert_eq!(pik_victory_pcm(dir.as_ptr(), pcm.as_mut_ptr(), n, &mut rate), n);
+        assert!(pcm.iter().all(|v| v.is_finite() && v.abs() <= 1.0));
+        assert!(pcm.iter().any(|v| v.abs() > 0.01), "victory music is not silent");
+        assert_eq!(pik_victory_pcm(std::ptr::null(), std::ptr::null_mut(), 0, &mut rate), 0);
+    }
+}
+
+#[test]
 fn hud_digits_cross_the_abi_and_short_buffers_are_rejected() {
     let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
     let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
