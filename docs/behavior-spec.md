@@ -461,6 +461,10 @@ from `objects/fl_water/anims.bin` and `objects/water/anims.bin` (retail values i
   - Each appears at the top of a random leg and slides down it at 70 units/s, growing back
     from 72%.
   - At the bottom it joins its captain's squad (`mActionState` 0 → `joinParty`).
+  - Host extension: a host-controlled hovering Onion can also call Pikmin out. Each plays
+    the first half of the same leg slide, detaches at ratio 0.5, and falls under the normal
+    Pikmin flight physics from that position. Grounded call-outs still use the whole leg;
+    putting Pikmin away still requires landing. Stock and pending exits retain the field cap.
 - **Safety.** The whistle and enemy attacks leave Pikmin in either mode alone.
 - **Geometry.** Legs are measured on `goal.mod`: feet about 115 out at 180° and ±60°, tops at
   height 88. The `cont` reach is 70 from the Onion's centre. The real sphere is in the
