@@ -147,6 +147,11 @@ the frame delta to 1/30 s. We tick exactly 1/30 s and accumulate host time (max 
   of the captain count as 10 farther.
   - Within `mPluckGrabRange` it's taken into the hand.
   - Otherwise it walks over (`GoHang`), with a 3 s timeout.
+    Host lock-on extension: while an enemy lock has a live stickable target, the called
+    Pikmin approaches the hand at four times its normal pickup speed, with immediate
+    acceleration and no overshoot. This gives the fast hand supply of C-stick-up throwing;
+    press/release controls and thrown flight time stay the same. Losing the lock restores
+    normal pickup speed.
   - If nobody is in range, the original punches (not implemented).
 - Releasing throws the held Pikmin **at the cursor**. Distance parameters p10/p11 are computed
   but never used.
