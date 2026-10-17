@@ -25,7 +25,8 @@ pub struct SproutId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OnionAnim {
     Idle,
-    /// Host-controlled airborne following. Storage waits until grounded; deliveries are taken (seeds become stored Pikmin).
+    /// Host-controlled airborne following. Call-outs slide halfway down a leg and fall;
+    /// putting away waits until grounded. Delivered seeds become stored Pikmin.
     Hover,
     /// `GOAL_Effect`: "suction" plays after something is sucked in.
     Suction {

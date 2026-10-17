@@ -443,7 +443,7 @@ fn calling_pikmin_out_of_an_onion_and_putting_them_back() {
 }
 
 #[test]
-fn unified_onion_flight_preserves_every_colour_and_blocks_transfers() {
+fn unified_onion_flight_allows_call_out_but_blocks_put_away() {
     unsafe {
         let sim = pik_sim_new(std::ptr::null(), 17);
         let ground = PikVec3::default();
@@ -458,13 +458,12 @@ fn unified_onion_flight_preserves_every_colour_and_blocks_transfers() {
             assert_eq!(pik_sim_onions(sim, &mut onion, 1), 1);
             assert_eq!((onion.colors, onion.anim, onion.stored), (7, 6, [4; 3]));
             assert_eq!(pik_sim_onion_in_reach(sim, c), -1);
-            assert_eq!(pik_sim_onion_call_out(sim, c, o, color, 1), 0);
+            assert_eq!(pik_sim_onion_call_out(sim, c, o, color, 1), 1);
         }
         pik_sim_set_onion_pose(sim, 999, &ground, 0);
         pik_sim_set_onion_color(sim, o, 99);
         pik_sim_set_onion_pose(sim, o, &ground, 0);
         assert_eq!(pik_sim_onion_in_reach(sim, c), o as i32);
-        for color in 0..3 { assert_eq!(pik_sim_onion_call_out(sim, c, o, color, 1), 1); }
         let mut world = World::default();
         let h = host(&mut world);
         for _ in 0..300 { pik_sim_advance(sim, &h, 1.0 / 30.0); }
