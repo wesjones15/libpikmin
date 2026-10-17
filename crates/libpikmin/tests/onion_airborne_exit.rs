@@ -70,3 +70,21 @@ fn airborne_pending_exits_keep_the_field_limit_and_storage_requires_landing() {
     assert_eq!(sim.pikis().len(), 2);
     assert_eq!(sim.onions()[0].stored_total(), 3);
 }
+
+#[test]
+fn returning_the_squad_also_returns_held_and_approaching_pikmin() {
+    for distance in [1.0, 100.0] {
+        let mut sim = Sim::new(Params::default(), 23);
+        let captain = sim.add_captain(Vec3::ZERO);
+        let onion = sim.add_onion(Vec3::ZERO, &[PikiColor::Red]);
+        let piki = sim.spawn_piki_in_squad(PikiColor::Red, -Vec3::Z * distance, captain).unwrap();
+        sim.set_input(captain, libpikmin::CaptainInput { throw: true, ..Default::default() });
+        sim.step(&mut FlatHost);
+        assert!(matches!(sim.piki(piki).state, PikiState::Held { .. } | PikiState::GoHang { .. }));
+        assert_eq!(sim.onion_counts(onion, captain, PikiColor::Red).in_squad, 1);
+        assert_eq!(sim.onion_put_away(captain, onion, PikiColor::Red, 100), 1);
+        assert!(matches!(sim.piki(piki).state, PikiState::Enter { .. }));
+        assert!(matches!(sim.captain(captain).throw, libpikmin::captain::ThrowState::Idle));
+        assert!(sim.captain(captain).plate.members.is_empty());
+    }
+}

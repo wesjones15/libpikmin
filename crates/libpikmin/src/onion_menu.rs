@@ -103,7 +103,7 @@ impl Sim {
         self.pikis
             .iter()
             .filter(|p| {
-                p.color == color && p.captain == Some(captain) && matches!(p.state, PikiState::Squad { .. })
+                p.color == color && p.captain == Some(captain) && p.state.in_squad()
             })
             .map(|p| p.id)
             .collect()
