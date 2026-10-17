@@ -583,15 +583,14 @@ impl Sim {
         // is slower than him), so he can throw on the run.
         let top = self.params.navi.run_speed * c.speed_scale;
         let mut full = self.piki_speed(pi, 1.0).max(crate::captain::GO_HANG_CATCH_UP * top);
-        // Host lock-on: feed the hand four times faster, like keeping the squad pushed
+        // Host lock-on: feed the hand in one sim tick, like keeping the squad pushed
         // up with Navi::makeCStick while tapping throw. This changes pickup cadence,
         // not Navi::throwPiki's flight time or the press/release control.
         let rapid = c.lock_view.is_some();
-        if rapid { full *= 4.0; }
         let p = &mut self.pikis[pi];
         let to = cpos - p.pos;
         let flat = Vec3::new(to.x, 0.0, to.z);
-        if rapid { full = full.min(flat.length() / dt.max(0.0001)); }
+        if rapid { full = flat.length() / dt.max(0.0001); }
         p.target_vel = flat.normalize_or_zero() * full;
         if rapid {
             // Immediate acceleration and a bounded step prevent fast pickups from
