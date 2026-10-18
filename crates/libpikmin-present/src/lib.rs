@@ -9,6 +9,7 @@
 pub mod animator;
 pub mod audio;
 pub mod effects;
+pub mod stings;
 pub mod tev;
 pub mod view;
 

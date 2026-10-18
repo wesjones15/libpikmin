@@ -221,13 +221,24 @@ impl Effects {
                 effects::ROCKET_LAND,
                 effects::KAFUN_NG,
                 effects::ROCKET_TAKE_S,
+                effects::ROCKET_TROUBLE[0],
+                effects::ROCKET_TROUBLE[1],
+                effects::ROCKET_TROUBLE[2],
+                effects::ROCKET_TROUBLE[3],
                 effects::ROCKET_LAND_S,
                 effects::ROCKET_SMOKE_D,
                 effects::ONYON_SUCK,
+                effects::ONYON_SPARKLES,
+                effects::ONYON_PUFF,
+                effects::ONYON_BOOT_BUBBLES,
+                effects::SMOKE_RING_M,
             ]
             .into_iter()
             .chain(effects::ONYON_BEACON_RING)
             .chain(effects::ONYON_HALO_RING)
+            .chain(effects::ONYON_BOOT_FLOW)
+            .chain(effects::ONYON_BOOT_DUST)
+            .chain(effects::ONYON_BOOT_WATER)
             .chain(effects::ROCKET_JETS.into_iter().flatten())
             .chain(effects::ROCKET_JET_G)
             .chain(effects::ROCKET_BOOST_GROUND)
@@ -277,6 +288,12 @@ impl Effects {
     pub fn move_attached(&mut self, key: u64, pos: Vec3) {
         for (_, g) in self.attached.iter_mut().filter(|(k, _)| *k == key) {
             g.emit_pos = pos;
+        }
+    }
+
+    pub fn attached_emission_scale(&mut self, key: u64, scale: f32) {
+        for (_, g) in self.attached.iter_mut().filter(|(k, _)| *k == key) {
+            g.emission_scale = scale;
         }
     }
 

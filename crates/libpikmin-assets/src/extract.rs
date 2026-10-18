@@ -24,13 +24,14 @@
 //!   which model each part uses
 //! - `screen/eng_blo/`, `screen/eng_tex/`, `bigFont.bti`: the English 2D screens (messages,
 //!   ship part descriptions), their textures and the font
+//! - `intro/item_0_9.bti`: the carry gauge's 0-9 and dash glyph strip
 
 use std::path::{Component, Path, PathBuf};
 
 use crate::{Disc, Error};
 
 /// Folders under `files/dataDir/` copied whole.
-pub const FOLDERS: [&str; 21] = [
+pub const FOLDERS: [&str; 22] = [
     "parms/",
     "pikis/",
     "objects/goal/",
@@ -52,10 +53,11 @@ pub const FOLDERS: [&str; 21] = [
     "screen/eng_blo/",
     "screen/eng_tex/",
     "bigFont.bti",
+    "intro/item_0_9.bti",
 ];
 
 /// Files that must exist for the sim and viewer to work.
-pub const REQUIRED: [&str; 32] = [
+pub const REQUIRED: [&str; 33] = [
     "parms/naviMgr.bin",
     "parms/pikiMgr.bin",
     "parms/aiconst.bin",
@@ -83,6 +85,7 @@ pub const REQUIRED: [&str; 32] = [
     crate::ship::SHIP_MODEL,
     crate::ship::MESSAGE_BASE_SCREEN,
     "bigFont.bti",
+    "intro/item_0_9.bti",
     "SndData/Seqs/pikiseq.arc",
     SEQ_HEADER,
     crate::sound::tables::TABLES,

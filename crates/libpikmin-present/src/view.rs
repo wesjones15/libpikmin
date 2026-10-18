@@ -6,7 +6,7 @@
 //! Instances are in sim units and axes. Each one has a position and rotation; its vertices are
 //! in that local frame (scale already applied), so a host places one object per instance.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use glam::{Mat3, Mat4, Quat, Vec3};
 use libpikmin::{Event, PelletState, PikiState, Sim, SproutState};
@@ -287,10 +287,16 @@ struct PartView {
 }
 
 struct ShipFlight {
+    sucking: bool,
+    seen: Vec<u32>,
+    pending: VecDeque<u32>,
+    repair: Option<(u32, f32)>,
     ground_anchor: Option<Vec3>,
     animator: libpikmin_assets::ship::ShipAnimator,
     progress: Option<f32>,
     flames: Vec<(u8, &'static str)>,
+    trouble: bool,
+    trouble_spark_time: f32,
 }
 
 // Strip only cinematic travel; the clip still supplies every articulated pose. Hosts
@@ -302,6 +308,10 @@ fn rebase_pose(pose: &mut libpikmin_assets::pose::Pose, offset: Vec3) {
 }
 
 pub struct View {
+    /// Opt in to the original wreck and progressively repaired root poses.
+    pub repair_mode: bool,
+    /// Host-owned victory presentation; never changes simulation or objective state.
+    pub celebrating: bool,
     pub models: Vec<ViewModel>,
     piki_anims: AnimSet,
     onion_anims: AnimSet,
@@ -315,6 +325,8 @@ pub struct View {
     /// Each of the 30 ship parts' model, animations and the joints its upper animator drives, when loaded.
     parts: Vec<Option<PartView>>,
     ships: HashMap<u32, ShipFlight>,
+    pub onion_ground: HashMap<u32, f32>,
+    onion_lift_smoke: HashSet<u32>,
     pub ship_sounds: Vec<(libpikmin::onion::OnionId, &'static str, bool)>,
     pub demo_sounds: Vec<Option<(u16, u16)>>,
     pikihead_anims: AnimSet,
@@ -351,6 +363,9 @@ pub struct View {
     materialize: HashMap<u32, f32>,
     /// Captains whose arrival effects are running.
     materializing: HashSet<u32>,
+    /// Host healing at the captain, independent of Dolphin arrival/transport.
+    healing: HashMap<u32, (f32, u32)>,
+    healing_active: HashSet<u32>,
     /// Onions whose beacon rings are on (`GoalItem::setSpotActive`).
     spots: HashSet<u32>,
     /// Onions a pellet just reached, for their `GoalEffect`.
@@ -382,6 +397,9 @@ const CONE_SCALE: f32 = 0.1;
 const SUCK_GRAVITY_FRAMES: f32 = 50.0;
 
 impl View {
+    pub fn pending_repairs(&self) -> usize {
+        self.ships.values().map(|s| s.pending.len() + usize::from(s.repair.is_some())).sum()
+    }
     pub fn load(assets: &Assets) -> Result<Self, libpikmin_assets::Error> {
         let mut paths_in_order: Vec<&str> = vec![paths::OLIMAR];
         paths_in_order.extend(paths::PIKMIN);
@@ -469,6 +487,8 @@ impl View {
         }
         let ship_contexts = models[models::SHIP as usize].skel.override_map(&libpikmin_assets::ship::CONTEXT_JOINTS);
         Ok(View {
+            repair_mode: false,
+            celebrating: false,
             models,
             piki_anims: AnimSet::load(assets, paths::PIKI_ANIM_MGR, paths::PIKI_BUNDLE)?,
             onion_anims: AnimSet::load(assets, paths::ONION_ANIM_MGR, paths::ONION_BUNDLE)?,
@@ -484,6 +504,8 @@ impl View {
             ship_lights,
             parts,
             ships: HashMap::new(),
+            onion_ground: HashMap::new(),
+            onion_lift_smoke: HashSet::new(),
             ship_sounds: Vec::new(),
             demo_sounds: Vec::new(),
             pikihead_anims: AnimSet::load(assets, paths::PIKIHEAD_ANIM_MGR, paths::PIKIHEAD_BUNDLE)?,
@@ -506,6 +528,8 @@ impl View {
             cones: HashMap::new(),
             materialize: HashMap::new(),
             materializing: HashSet::new(),
+            healing: HashMap::new(),
+            healing_active: HashSet::new(),
             spots: HashSet::new(),
             arrivals: Vec::new(),
             grown: Vec::new(),
@@ -582,9 +606,13 @@ impl View {
         // Grounded it stands lit; flying, landing or away it closes (`startLand` sets it to 0,
         // the takeoff motion's key starts `startConeShrink`) and opens again once down.
         let grounded = o.grounded();
-        let cone = self.cones.entry(o.id.0).or_insert(if grounded { 1.0 } else { 0.0 });
+        // PelletGoalState::init uses the Onion beam while an airborne Onion ingests a pellet.
+        let ingesting = sim.pellets().iter().any(|p| matches!(p.state,
+            libpikmin::PelletState::Sucking { onion, .. } if onion == o.id));
+        let beam_active = grounded || ingesting;
+        let cone = self.cones.entry(o.id.0).or_insert(if beam_active { 1.0 } else { 0.0 });
         let step = dt / CONE_TIME;
-        *cone = if grounded { (*cone + step).min(1.0) } else { (*cone - step).max(0.0) };
+        *cone = if beam_active { (*cone + step).min(1.0) } else { (*cone - step).max(0.0) };
         let width = *cone;
         if width > 0.0 && o.anim != OnionAnim::Away {
             let model = models::BEAMS[colour];
@@ -696,6 +724,17 @@ impl View {
         }
     }
 
+    /// Dolphin recovery particles at Olimar's current position, with one soul per stored
+    /// Pikmin sacrificed. Progress outside 0..1 ends the attached healing sparkles.
+    pub fn set_healing(&mut self, captain: u32, progress: f32, ghosts: u32) {
+        if progress.is_finite() && (0.0..1.0).contains(&progress) {
+            if self.healing.get(&captain).is_some_and(|&(previous, _)| progress < previous) {
+                self.healing_active.remove(&captain);
+            }
+            self.healing.insert(captain, (progress, ghosts.min(100)));
+        } else { self.healing.remove(&captain); }
+    }
+
     /// Poses everything in `sim` for this frame. `alpha` is how far into the next tick the
     /// clock is ([`Sim::alpha`]), `dt` the frame time.
     pub fn update(&mut self, sim: &Sim, alpha: f32, dt: f32) {
@@ -733,9 +772,44 @@ impl View {
                     }).collect();
                     let mut animator = libpikmin_assets::ship::ShipAnimator::new(&self.ship_mgr, part_mgrs);
                     animator.start(&on_board, level, &mut Vec::new());
-                    ShipFlight { animator, progress: None, flames: Vec::new(), ground_anchor: None }
+                    ShipFlight { animator, progress: None, flames: Vec::new(), ground_anchor: None,
+                        trouble: false, trouble_spark_time: 0.0,
+                        sucking: false,
+                        seen: on_board.clone(), pending: VecDeque::new(), repair: None }
                 });
                 let mut cues = Vec::new();
+                let sucking = sim.pellets().iter().any(|p| p.desc.ship_part.is_some()
+                    && matches!(p.state, PelletState::Sucking { onion, .. } if onion == o.id));
+                let was_sucking = flight.sucking;
+                if sucking && !was_sucking && flight.repair.is_none() { flight.animator.suck_start(); }
+                for &part in &on_board {
+                    if !flight.seen.contains(&part) {
+                        flight.seen.push(part);
+                        flight.pending.push_back(part);
+                    }
+                }
+                if o.flight_motion.is_none() {
+                    if flight.repair.is_none() && let Some(part) = flight.pending.pop_front() {
+                        if was_sucking || sucking {
+                            let fitted = on_board.iter().position(|&p| p == part).map_or(1, |i| i + 1);
+                            flight.animator.suck_finish(part as usize, params.ai.ship_level(fitted as u32), &mut cues);
+                            flight.repair = Some((part, 0.5));
+                        } else {
+                            flight.animator.suck_start();
+                            flight.repair = Some((part, 0.0));
+                        }
+                    }
+                    if let Some((part, age)) = flight.repair {
+                        let next = age + dt;
+                        if age < 0.5 && next >= 0.5 {
+                            let fitted = on_board.iter().position(|&p| p == part).map_or(1, |i| i + 1);
+                            flight.animator.suck_finish(part as usize, params.ai.ship_level(fitted as u32), &mut cues);
+                        }
+                        flight.repair = if next > 6.0 || (next > 0.6 && flight.animator.repair_finished()) {
+                            None
+                        } else { Some((part, next)) };
+                    }
+                }
                 let landing = o.flight_motion.filter(|m| m.0).map(|m| m.1);
                 if let Some(progress) = landing {
                     if flight.progress.is_none_or(|last| progress < last) {
@@ -747,9 +821,14 @@ impl View {
                     flight.animator.land_progress(1.0, &mut cues);
                     cues.push(ShipCue::Effect { fx: fx_defs::ROCKET_LAND, lift: 0.0, normal: None });
                 } else {
+                    if o.flight_motion.is_some_and(|m| !m.0) && !flight.animator.taking_off() {
+                        flight.pending.clear(); flight.repair = None;
+                        flight.animator.take_off(&on_board, &mut cues);
+                    }
                     flight.animator.update(dt, &mut cues);
                 }
                 flight.progress = landing;
+                flight.sucking = sucking;
                 let animator = &flight.animator;
                 let vm = &self.models[models::SHIP as usize];
                 // The host's origin is the terrain contact point. Use the upright
@@ -766,13 +845,21 @@ impl View {
                 });
                 let mut pose = vm.skel.pose_by(Mat4::IDENTITY, |j| {
                     let ctx = self.ship_contexts.get(j).copied().unwrap_or(0);
-                    let (motion, frame) = if ctx == 0 && !animator.landing() {
+                    let (motion, frame) = if ctx == 0 && (!self.repair_mode || on_board.len() == 30) && !animator.landing() && !animator.taking_off() && flight.repair.is_none() && !sucking {
                         (11, 0.0)
                     } else { animator.context(ctx) };
                     let (_, anim) = self.ship_anims.get(motion)?;
                     Some((anim, frame.clamp(0.0, anim.frames.saturating_sub(1) as f32)))
                 });
-                let offset = ground_anchor - pose.joints[2].w_axis.truncate();
+                let mut offset = ground_anchor - pose.joints[2].w_axis.truncate();
+                if self.repair_mode && on_board.len() < 30 && !animator.landing() && !animator.taking_off() {
+                    // The original bare wreck lies on its side. Keep that original pose,
+                    // and place its actual hull on the host's ground instead of forcing
+                    // the fully repaired upright rocket pose onto every repair state.
+                    let bottom = vm.batches.iter().flat_map(|b| &b.vertices)
+                        .map(|v| pose.skin(v).0.y).fold(f32::INFINITY, f32::min);
+                    offset.y = -bottom;
+                }
                 rebase_pose(&mut pose, offset);
                 // The level lights' frames per material, and each part on board posed on its joint
                 // of the ship (`PlayerState::renderParts`).
@@ -803,6 +890,48 @@ impl View {
                     Some(o.pos + rot * pose.joints.get(c.joint)?.transform_point3(c.centre))
                 };
                 let fx_key = (6u64 << 48) | ((o.id.0 as u64) << 8);
+                // The damaged ship smokes from its authored hull joints while it is
+                // grounded. Keep the emitters attached as repairs change its pose.
+                let wrecked = self.repair_mode && on_board.len() < 30
+                    && o.flight_motion.is_none() && !animator.taking_off() && !animator.landing();
+                let trouble_key = (7u64 << 48) | ((o.id.0 as u64) << 8);
+                let trouble_points = [
+                    ("joint2", Vec3::new(13.1, -98.4, -2.0)),
+                    ("joint2", Vec3::new(-9.2, -68.1, 28.6)),
+                    ("joint41", Vec3::new(-22.2, 4.9, -25.0)),
+                    ("joint2", Vec3::new(0.0, -93.0, 0.0)),
+                ];
+                if let Some(e) = self.effects.as_mut() {
+                    if wrecked && !flight.trouble {
+                        for slot in [0usize, 1, 3] {
+                            if let Some(j) = vm.model.joint_index(trouble_points[slot].0) {
+                                let at = o.pos + rot * pose.joints[j].transform_point3(trouble_points[slot].1);
+                                e.attach(trouble_key | slot as u64, fx_defs::ROCKET_TROUBLE[slot], at);
+                            }
+                        }
+                    }
+                    if wrecked {
+                        for slot in [0usize, 1, 3] {
+                            if let Some(j) = vm.model.joint_index(trouble_points[slot].0) {
+                                e.move_attached(trouble_key | slot as u64,
+                                    o.pos + rot * pose.joints[j].transform_point3(trouble_points[slot].1));
+                            }
+                        }
+                        flight.trouble_spark_time += dt;
+                        if flight.trouble_spark_time >= 2.7 {
+                            flight.trouble_spark_time = 0.0;
+                            for slot in [2usize] {
+                                if let Some(j) = vm.model.joint_index(trouble_points[slot].0) {
+                                    e.spawn(fx_defs::ROCKET_TROUBLE[slot],
+                                        o.pos + rot * pose.joints[j].transform_point3(trouble_points[slot].1));
+                                }
+                            }
+                        }
+                    } else if flight.trouble {
+                        e.detach_where(|k| k & !255 == trouble_key);
+                    }
+                }
+                flight.trouble = wrecked;
                 for cue in cues {
                     match cue {
                         ShipCue::Sound(name) => self.ship_sounds.push((o.id, name, true)),
@@ -855,6 +984,26 @@ impl View {
                 continue;
             }
             self.onion_light(sim, i, o, dt);
+            let smoke_key = (8u64 << 48) | ((o.id.0 as u64) << 8);
+            let lifting = matches!(o.anim, libpikmin::onion::OnionAnim::TakeOff { .. } | libpikmin::onion::OnionAnim::Hover);
+            if lifting {
+                let ground = self.onion_ground.get(&o.id.0).copied().unwrap_or(o.pos.y);
+                let at = Vec3::new(o.pos.x, ground, o.pos.z);
+                if let Some(fx) = self.effects.as_mut() {
+                    if self.onion_lift_smoke.insert(o.id.0) {
+                        if let Some(g) = fx.attach(smoke_key, fx_defs::ROCKET_TAKE_S, at) {
+                            // take_s.pcr is a one-pass burst. Recycle its authored
+                            // 100-frame curve while the Onion is aloft.
+                            std::sync::Arc::make_mut(&mut g.pcr).max_passes = 0;
+                        }
+                    }
+                    fx.move_attached(smoke_key, at);
+                    fx.attached_emission_scale(smoke_key,
+                        (1.0 - (o.pos.y - ground).max(0.0) / 180.0).clamp(0.0, 1.0));
+                }
+            } else if self.onion_lift_smoke.remove(&o.id.0) {
+                if let Some(fx) = self.effects.as_mut() { fx.detach(smoke_key); }
+            }
             let Some((motion, anim, before)) = self.animator.onion(&self.onion_anims, i, o, dt) else {
                 continue;
             };
@@ -915,6 +1064,43 @@ impl View {
                 && !sim.onions().iter().any(|on| on.dormancy.is_some_and(|d| d.reviving)) {
                 self.demo_sounds.push(None);
             }
+            if o.dormancy.is_none() && (6..=12).contains(&motion) {
+                // GoalItem::playEffect: the disc animation keys drive takeoff dust,
+                // landing smoke, and the stocked Onion's idle sparkle/puff and wheeze.
+                let now = anim.map_or(0.0, |(_, f)| f);
+                let prev = before.unwrap_or(now);
+                let keys: Vec<_> = self.onion_anims.get(motion).into_iter()
+                    .flat_map(|(info, _)| &info.event_keys)
+                    .filter(|e| e.event == 1 && (if now >= prev {
+                        (e.frame as f32) > prev && (e.frame as f32) <= now
+                    } else {
+                        (e.frame as f32) > prev || (e.frame as f32) <= now
+                    }))
+                    .map(|e| e.value).collect();
+                let vm = &self.models[models::ONION as usize];
+                let sphere = |id: &str| vm.model.coll.iter().find(|c| c.id == id)
+                    .and_then(|c| pose.joints.get(c.joint).map(|m| o.pos + m.transform_point3(c.centre)))
+                    .unwrap_or(o.pos);
+                let bases = [sphere("bas1"), sphere("bas2"), sphere("bas3")];
+                let puffs = [sphere("eff1"), sphere("eff2"), sphere("eff3")];
+                let flower = sphere("piki");
+                if let Some(fx) = self.effects.as_mut() {
+                    for value in keys {
+                        match (motion, value) {
+                            (6..=8, 2) => { /* Attached ground smoke above handles the takeoff key. */ }
+                            (9..=11, 0) => { fx.spawn(fx_defs::ROCKET_LAND_S, o.pos); }
+                            (9..=11, 1) => { fx.spawn(fx_defs::ROCKET_SMOKE_D, bases[0]); }
+                            (9..=11, 2) => { for at in bases { fx.spawn(fx_defs::ROCKET_SMOKE_D, at); } }
+                            (12, value) => {
+                                if value == 0 { fx.spawn(fx_defs::ONYON_SPARKLES, flower); }
+                                fx.spawn(fx_defs::ONYON_PUFF, puffs[((o.id.0 as usize) + value as usize) % 3]);
+                                self.ship_sounds.push((o.id, "SE_CONTAINER_PIKI", true));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
             // GoalItem::refresh: even frames live, odd frames dormant, per colour.
             let frame = o.colors[0].index() as f32 * 2.0
                 + o.dormancy.map_or(0.0, |d| ((1.0 - d.progress) * 4.0).round() * 0.25);
@@ -929,6 +1115,25 @@ impl View {
         // which for a numbered pellet is its number.
         for pel in sim.pellets() {
             if pel.state == PelletState::Gone {
+                continue;
+            }
+            if let Some(part) = pel.desc.ship_part
+                && let Some(Some(pv)) = self.parts.get(part as usize)
+            {
+                let model = pv.model;
+                let cfg = params.pellets.iter().find(|c| c.kind == 3 &&
+                    (c.model_id == libpikmin_assets::ship::PART_IDS[part as usize] || c.pellet_id == libpikmin_assets::ship::PART_IDS[part as usize]));
+                let scale = cfg.map_or(1.0, |c| c.scale) * pel.scale;
+                let anim = pv.anims.as_ref().and_then(|a| a.get(0)).map(|(info, a)| {
+                    let end = info.keys.last().copied().unwrap_or(1).max(1) as f32;
+                    (a, (self.time * 30.0) % end)
+                });
+                let vm = &self.models[model as usize];
+                let pose = vm.skel.pose(Mat4::from_scale(Vec3::splat(scale)), anim);
+                let at = pel.pos + Vec3::Y * (-vm.lo.y * scale);
+                let k = key(kinds::PELLET, pel.id.0 as u64);
+                let (pos, rot) = self.place_rot(k, at, Quat::from_rotation_y(pel.yaw), tick, alpha);
+                self.push(k, kinds::PELLET, model, pos, rot, pose, &no_inputs, 1.0, 0);
                 continue;
             }
             let idx = match pel.desc.min_carriers {
@@ -994,7 +1199,10 @@ impl View {
             let (pos, rot) = self.place_rot(k, p.pos, Quat::from_rotation_y(p.face), tick, alpha);
             // Frozen: the pose held where it was, the body paled toward ice.
             let frozen = p.frozen > 0.0;
-            let anim = self.animator.piki(&self.piki_anims, p, &look, if frozen { 0.0 } else { dt });
+            let anim = if self.celebrating {
+                libpikmin_assets::motion::Motion::RotJump.anim_index().and_then(|i| self.piki_anims.get(i))
+                    .map(|(info, a)| (a, (self.time * 30.0 + p.id.0 as f32 * 7.0) % info.keys.last().copied().unwrap_or(1).max(1) as f32))
+            } else { self.animator.piki(&self.piki_anims, p, &look, if frozen { 0.0 } else { dt }) };
             let model = models::PIKMIN[p.color.index()];
             let pose = self.models[model as usize].skel.pose(srt_matrix(look.scale, Vec3::ZERO, Vec3::ZERO), anim);
             let head = pose.joints.get(6).copied();
@@ -1017,9 +1225,32 @@ impl View {
             live.insert(crate::animator::captain_key(c.id));
             let k = key(kinds::CAPTAIN, c.id.0 as u64);
             let (mut pos, rot) = self.place_rot(k, c.pos, Quat::from_rotation_y(c.face), tick, alpha);
-            let anim = self.animator.captain(&self.piki_anims, &params, c, dt);
+            let anim = if self.celebrating {
+                libpikmin_assets::motion::Motion::WaveJmp.anim_index().and_then(|i| self.piki_anims.get(i))
+                    .map(|(info, a)| (a, (self.time * 30.0) % info.keys.last().copied().unwrap_or(1).max(1) as f32))
+            } else { self.animator.captain(&self.piki_anims, &params, c, dt) };
             let mut root = crate::animator::captain_root(&params, c);
             let fx_key = (8u64 << 48) | ((c.id.0 as u64) << 8);
+            let heal_key = (9u64 << 48) | ((c.id.0 as u64) << 8);
+            if let Some(&(_, ghosts)) = self.healing.get(&c.id.0) {
+                if let Some(fx) = self.effects.as_mut() {
+                    if self.healing_active.insert(c.id.0) {
+                        fx.spawn(fx_defs::NAVI_RECOVER, pos);
+                        fx.attach(heal_key, fx_defs::NAVI_SPARKLE, pos);
+                        fx.attach(heal_key | 1, fx_defs::NAVI_RINGS, pos);
+                        for i in 0..ghosts {
+                            let angle = i as f32 * 2.399_963;
+                            let radius = 8.0 + (i % 3) as f32 * 4.0;
+                            let at = pos + Vec3::new(angle.cos() * radius, 4.0 + (i % 4) as f32 * 3.0, angle.sin() * radius);
+                            fx.spawn(fx_defs::PIKI_DEAD_SOUL, at);
+                        }
+                    }
+                    fx.move_attached(heal_key, pos);
+                    fx.move_attached(heal_key | 1, pos);
+                }
+            } else if self.healing_active.remove(&c.id.0) && let Some(fx) = self.effects.as_mut() {
+                fx.detach_where(|k| k & !255 == heal_key);
+            }
             if let Some(&p) = self.materialize.get(&c.id.0) {
                 // Host extension: transport from the Dolphin's hatch to the captain's
                 // held arrival pose, using NaviUfoState's own recovery effects.

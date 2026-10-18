@@ -143,6 +143,13 @@ pub mod effects {
     pub const KAFUN_NG: EffectDef = one("effects/pcr/kafun_ng.pcr", "effects/tex/star4_i.bti");
     /// `EFF_Rocket_TakeS`: dust as an Onion lifts off.
     pub const ROCKET_TAKE_S: EffectDef = one("effects/pcr/take_s.pcr", "effects/tex/hokori4.bti");
+    /// Wrecked Dolphin trouble emitters from `UfoItem::setTroubleEffect`.
+    pub const ROCKET_TROUBLE: [EffectDef; 4] = [
+        one("effects/pcr/rkt_mk_b.pcr", "effects/tex/hokori4.bti"),
+        one("effects/pcr/rkt_mk_s.pcr", "effects/tex/hokori4.bti"),
+        one("effects/pcr/rkt_hiba.pcr", "effects/tex/ps_ball.bti"),
+        one("effects/pcr/rkt_biri.pcr", "effects/tex/biriri.bti"),
+    ];
     /// `EFF_Rocket_LandS`: dust as an Onion touches down.
     pub const ROCKET_LAND_S: EffectDef = one("effects/pcr/land_s.pcr", "effects/tex/hokori4.bti");
     /// `EFF_Rocket_SmokeD`: smoke at an Onion's feet as it lands.
@@ -150,6 +157,9 @@ pub mod effects {
     /// `EFF_Onyon_Suck`: light drawn up into an Onion as a pellet arrives (`GoalEffect`,
     /// cast by `PelletGoalState::init`).
     pub const ONYON_SUCK: EffectDef = one("effects/pcr/goal_sui.pcr", "effects/tex/ps_glow.bti");
+    /// GoalItem::playEffect motion 12: sparkle at the top and a smoke puff by a leg.
+    pub const ONYON_SPARKLES: EffectDef = one("effects/pcr/ony_kira.pcr", "effects/tex/star4_i.bti");
+    pub const ONYON_PUFF: EffectDef = one("effects/pcr/ony_paf.pcr", "effects/tex/hokori4.bti");
     /// GoalItem::playEffect, startup motions 3..5.
     pub const ONYON_BOOT_FLOW: [EffectDef; 2] = [
         one("effects/pcr/kafun_b.pcr", "effects/tex/star4_i.bti"),
@@ -596,6 +606,8 @@ pub struct Generator {
     pub pcr: Arc<Pcr>,
     /// Where particles are born (`getGPos`); hosts move it to follow something.
     pub emit_pos: Vec3,
+    /// Host-controlled density for attached emitters (for example, ground dust as an Onion rises).
+    pub emission_scale: f32,
     /// Added to every new particle's velocity (`mEmitVelocity`).
     pub emit_vel: Vec3,
     /// New particles' orientation normal (`mOrientedNormal`).
@@ -625,6 +637,7 @@ impl Generator {
             emit_dir: pcr.emit_dir,
             pcr,
             emit_pos: pos,
+            emission_scale: 1.0,
             emit_vel: Vec3::ZERO,
             oriented_normal: Vec3::Y,
             fixed_normal: false,
@@ -703,7 +716,7 @@ impl Generator {
             return;
         }
         let a = pcr.rate.at(self.frame, pcr.max_frame as f32);
-        self.partial += a + self.rand_shift(a * pcr.rate_jitter);
+        self.partial += (a + self.rand_shift(a * pcr.rate_jitter)).max(0.0) * self.emission_scale;
         let n = self.partial.max(0.0) as usize;
         self.partial -= n as f32;
         for _ in 0..n {

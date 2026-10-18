@@ -3,6 +3,61 @@
 use super::*;
 
 #[test]
+fn all_disc_parts_cross_the_spawn_abi_with_valid_weights_and_ids() {
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let sim = pik_sim_new(dir.as_ptr(), 1);
+        assert!(!sim.is_null());
+        for part in 0..30 {
+            let weight = pik_sim_ship_part_weight(sim, part);
+            assert!(weight > 0 && weight <= 100, "part {part} weight {weight}");
+            let mut name = [0; 128];
+            assert!(pik_sim_ship_part_name(sim, part, name.as_mut_ptr(), 128) > 0);
+            let pos = PikVec3 { x: part as f32 * 100.0, y: 0.0, z: 0.0 };
+            assert_eq!(pik_sim_spawn_ship_part(sim, part, &pos, 0.0), part as i32);
+            assert_eq!((*sim).sim.pellets()[part as usize].desc.ship_part, Some(part));
+        }
+        let mut frames = [PikPellet::default(); 30];
+        assert_eq!(pik_sim_pellets(sim, frames.as_mut_ptr(), 30), 30);
+        assert!(frames.iter().all(|frame| frame.has_ship_part == 1));
+        assert_eq!(pik_sim_spawn_ship_part(sim, 30, &PikVec3::default(), 0.0), -1);
+        assert_eq!(pik_sim_ship_part_weight(sim, u32::MAX), 0);
+        pik_sim_free(sim);
+    }
+}
+
+#[test]
+fn the_complete_ending_music_decodes_across_the_abi_with_bounded_buffers() {
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let mut rate = 0;
+        let n = pik_victory_pcm(dir.as_ptr(), std::ptr::null_mut(), 0, &mut rate);
+        assert!(rate >= 8000 && n > 0 && n <= rate * 120 * 2);
+        let mut short = [123.0; 4];
+        assert_eq!(pik_victory_pcm(dir.as_ptr(), short.as_mut_ptr(), 4, &mut rate), 0);
+        assert_eq!(short, [123.0; 4]);
+        let mut pcm = vec![0.0; n as usize];
+        assert_eq!(pik_victory_pcm(dir.as_ptr(), pcm.as_mut_ptr(), n, &mut rate), n);
+        assert!(pcm.iter().all(|v| v.is_finite() && v.abs() <= 1.0));
+        assert!(pcm.iter().any(|v| v.abs() > 0.01), "victory music is not silent");
+        assert_eq!(pik_victory_pcm(std::ptr::null(), std::ptr::null_mut(), 0, &mut rate), 0);
+    }
+}
+
+#[test]
+fn intro_cache_errors_cross_abi_without_panics_or_buffer_overruns() {
+    let mut msg = [0xAB; 64];
+    unsafe {
+        assert_eq!(pik_render_stings(std::ptr::null(), msg.as_mut_ptr(), 4), 0);
+        assert_eq!(&msg[..4], b"mis\0");
+        assert!(msg[4..].iter().all(|b| *b == 0xAB));
+        assert_eq!(pik_render_stings(std::ptr::null(), std::ptr::null_mut(), 0), 0);
+    }
+}
+
+#[test]
 fn hud_digits_cross_the_abi_and_short_buffers_are_rejected() {
     let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
     let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
@@ -19,6 +74,41 @@ fn hud_digits_cross_the_abi_and_short_buffers_are_rejected() {
             let mut rgba = vec![0; (info.width * info.height * 4) as usize];
             assert_eq!(pik_number_texture(dir.as_ptr(), digit, 0, &mut info, rgba.as_mut_ptr(), rgba.len() as u32), 1);
             assert!(rgba.chunks_exact(4).any(|p| p[3] != 0));
+        }
+        for glyph in 0..4 {
+            assert_eq!(pik_damage_suffix_texture(dir.as_ptr(), glyph, &mut info, std::ptr::null_mut(), 0), 1);
+            assert_eq!((info.width, info.height), (64, 64));
+            let mut rgba = vec![0; 64 * 64 * 4];
+            assert_eq!(pik_damage_suffix_texture(dir.as_ptr(), glyph, &mut info, rgba.as_mut_ptr(), rgba.len() as u32), 1);
+            assert!(rgba.chunks_exact(4).any(|p| p[3] != 0));
+        }
+    }
+}
+
+#[test]
+fn carry_strip_and_bottom_icons_cross_the_abi() {
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    let mut info = PikTexture::default();
+    unsafe {
+        assert_eq!(pik_carry_digit_texture(dir.as_ptr(), &mut info, std::ptr::null_mut(), 0), 1);
+        assert_eq!((info.width, info.height), (176, 16));
+        let mut short = [0xAB; 4];
+        assert_eq!(pik_carry_digit_texture(dir.as_ptr(), &mut info, short.as_mut_ptr(), 4), 0);
+        assert_eq!(short, [0xAB; 4]);
+        let mut rgba = vec![0; (info.width * info.height * 4) as usize];
+        assert_eq!(pik_carry_digit_texture(dir.as_ptr(), &mut info, rgba.as_mut_ptr(), rgba.len() as u32), 1);
+        assert!(rgba.chunks_exact(4).any(|p| p[3] != 0));
+        for icon in 0..22 {
+            assert_eq!(pik_hud_icon_texture(dir.as_ptr(), icon, &mut info, std::ptr::null_mut(), 0), 1);
+            assert!(info.width > 0 && info.height > 0);
+        }
+        assert_eq!(pik_hud_icon_texture(dir.as_ptr(), 22, &mut info, std::ptr::null_mut(), 0), 0);
+        for glyph in b"SHIP REPAIR 0123456789" {
+            if *glyph != b' ' {
+                assert_eq!(pik_font_glyph_texture(dir.as_ptr(), *glyph as u32, &mut info, std::ptr::null_mut(), 0), 1);
+                assert_eq!((info.width, info.height), (64, 64));
+            }
         }
     }
 }
@@ -256,6 +346,22 @@ fn the_view_poses_a_sim_through_the_abi() {
 }
 
 #[test]
+fn host_can_remove_the_original_field_limit() {
+    // SAFETY: the sim and positions remain live for every ABI call.
+    unsafe {
+        let sim = pik_sim_new(std::ptr::null(), 5);
+        assert!(!sim.is_null());
+        let pos = PikVec3::default();
+        let captain = pik_sim_add_captain(sim, &pos);
+        pik_sim_set_field_limit(sim, i32::MAX as u32);
+        for _ in 0..150 {
+            assert!(pik_sim_spawn_piki(sim, 0, &pos, captain) >= 0);
+        }
+        pik_sim_free(sim);
+    }
+}
+
+#[test]
 fn a_thrown_pikmin_hits_a_host_creature_through_the_abi() {
     // SAFETY: every pointer below is live for its call.
     unsafe {
@@ -344,6 +450,7 @@ fn pellets_onions_and_bad_arguments() {
         let mut pel = [PikPellet::default(); 3];
         assert_eq!(pik_sim_pellets(sim, pel.as_mut_ptr(), 3), 2);
         assert_eq!((pel[0].state, pel[0].creature, pel[0].min_carriers), (0, 5, 2));
+        assert_eq!((pel[0].has_ship_part, pel[1].has_ship_part), (0, 0));
         assert_eq!((pel[1].min_carriers, pel[1].max_carriers, pel[1].radius), (5, 10, 20.0));
         let mut on = [PikOnion::default(); 2];
         assert_eq!(pik_sim_onions(sim, on.as_mut_ptr(), 2), 1);
@@ -398,7 +505,7 @@ fn calling_pikmin_out_of_an_onion_and_putting_them_back() {
 }
 
 #[test]
-fn unified_onion_flight_preserves_every_colour_and_blocks_transfers() {
+fn unified_onion_flight_allows_call_out_but_blocks_put_away() {
     unsafe {
         let sim = pik_sim_new(std::ptr::null(), 17);
         let ground = PikVec3::default();
@@ -413,13 +520,12 @@ fn unified_onion_flight_preserves_every_colour_and_blocks_transfers() {
             assert_eq!(pik_sim_onions(sim, &mut onion, 1), 1);
             assert_eq!((onion.colors, onion.anim, onion.stored), (7, 6, [4; 3]));
             assert_eq!(pik_sim_onion_in_reach(sim, c), -1);
-            assert_eq!(pik_sim_onion_call_out(sim, c, o, color, 1), 0);
+            assert_eq!(pik_sim_onion_call_out(sim, c, o, color, 1), 1);
         }
         pik_sim_set_onion_pose(sim, 999, &ground, 0);
         pik_sim_set_onion_color(sim, o, 99);
         pik_sim_set_onion_pose(sim, o, &ground, 0);
         assert_eq!(pik_sim_onion_in_reach(sim, c), o as i32);
-        for color in 0..3 { assert_eq!(pik_sim_onion_call_out(sim, c, o, color, 1), 1); }
         let mut world = World::default();
         let h = host(&mut world);
         for _ in 0..300 { pik_sim_advance(sim, &h, 1.0 / 30.0); }

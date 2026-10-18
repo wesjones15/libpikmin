@@ -13,6 +13,9 @@
 //!   (0.2 + 0.1 rand) * 0.2 s, highest leaf stage first, appears at the top of a random leg and
 //!   slides down it at 70 units/s (`ActExit`, aiExit.cpp), growing back from 72%. On the
 //!   ground it joins the captain's squad (`TopAction::exec` with `mActionState` 0).
+//! - Host-controlled hovering Onions can also call Pikmin out: they slide to the midpoint
+//!   of a leg, then let go into the normal ballistic/falling state. Putting away still
+//!   requires a grounded Onion. This is a host extension, not the original game's exit.
 
 use glam::Vec3;
 
@@ -100,7 +103,7 @@ impl Sim {
         self.pikis
             .iter()
             .filter(|p| {
-                p.color == color && p.captain == Some(captain) && matches!(p.state, PikiState::Squad { .. })
+                p.color == color && p.captain == Some(captain) && p.state.in_squad()
             })
             .map(|p| p.id)
             .collect()
@@ -143,7 +146,7 @@ impl Sim {
     /// Asks the Onion to let up to `n` Pikmin of `color` out to join `captain`. Limited by the
     /// stock and the field limit. Returns how many will come out.
     pub fn onion_call_out(&mut self, captain: CaptainId, onion: OnionId, color: PikiColor, n: u32) -> u32 {
-        if !self.onions[onion.0 as usize].accepts(color) || !self.onions[onion.0 as usize].grounded() { return 0; }
+        if !self.onions[onion.0 as usize].accepts(color) || !self.onions[onion.0 as usize].takes_deliveries() { return 0; }
         let k = self.onion_counts(onion, captain, color).can_call_out().min(n);
         let o = &mut self.onions[onion.0 as usize];
         for _ in 0..k {
@@ -159,10 +162,43 @@ impl Sim {
         }
     }
 
+    /// Host extension: sacrifice stored Pikmin to heal a captain, leaves before buds before
+    /// flowers (5%, 10%, 20% max health). Preserve one available Pikmin and every queued exit.
+    /// Returns the number consumed and the health fraction restored, capped at the deficit.
+    pub fn sacrifice_onion_stock(&mut self, onion: OnionId, missing: f32) -> (u32, f32) {
+        if !missing.is_finite() || missing <= 0.0 { return (0, 0.0); }
+        let Some(o) = self.onions.get_mut(onion.0 as usize) else { return (0, 0.0) };
+        if o.ship.is_some() || !o.takes_deliveries() { return (0, 0.0); }
+        let mut available = o.stored;
+        for (colour, stock) in available.iter_mut().enumerate() {
+            // Exits take flowers first, then buds and leaves. These are already promised.
+            let mut pending = o.exits.iter().filter(|e| e.0.index() == colour).count() as u32;
+            for stage in (0..3).rev() {
+                let reserved = stock[stage].min(pending);
+                stock[stage] -= reserved;
+                pending -= reserved;
+            }
+        }
+        let budget = available.iter().flatten().sum::<u32>().saturating_sub(1);
+        let (mut killed, mut healing) = (0, 0.0f32);
+        let missing = missing.min(1.0);
+        for (stage, fraction) in [0.05, 0.1, 0.2].into_iter().enumerate() {
+            for (colour, stock) in available.iter().enumerate() {
+                for _ in 0..stock[stage] {
+                    if killed == budget || healing + 1e-6 >= missing { return (killed, healing.min(missing)); }
+                    o.stored[colour][stage] -= 1;
+                    killed += 1;
+                    healing += fraction;
+                }
+            }
+        }
+        (killed, healing.min(missing))
+    }
+
     /// `GoalItem` dispensing: one Pikmin out every 0.04-0.06 s.
     pub(crate) fn update_onion_exits(&mut self, dt: f32) {
         for oi in 0..self.onions.len() {
-            if self.onions[oi].exits.is_empty() || !self.onions[oi].grounded() {
+            if self.onions[oi].exits.is_empty() || !self.onions[oi].takes_deliveries() {
                 continue;
             }
             self.onions[oi].exit_timer -= dt;
@@ -192,6 +228,7 @@ impl Sim {
             let p = &mut self.pikis[id.0 as usize];
             p.happa = happa;
             p.captain = Some(captain);
+            p.on_ground = false;
             p.state = PikiState::Exit {
                 onion,
                 leg,
@@ -253,9 +290,21 @@ impl Sim {
                 }
             }
             PikiState::Exit { onion, leg, ratio } => {
-                let opos = self.onions[onion.0 as usize].pos;
+                let o = &self.onions[onion.0 as usize];
+                let opos = o.pos;
+                let hovering = o.anim == crate::onion::OnionAnim::Hover;
                 let r = ratio - SLIDE_SPEED * dt / leg_length(leg);
                 let p = &mut self.pikis[pi];
+                if hovering && r <= 0.5 {
+                    // Host flight: play the first half of ActExit, then fall from that
+                    // exact point rather than following the moving leg to its foot.
+                    p.pos = leg_point(opos, leg, 0.5);
+                    p.vel = Vec3::NEG_Y * SLIDE_SPEED;
+                    p.target_vel = p.vel;
+                    p.on_ground = false;
+                    p.state = PikiState::Flying { ground_frames: 0 };
+                    return;
+                }
                 p.pos = leg_point(opos, leg, r);
                 p.vel = Vec3::ZERO;
                 let d = p.pos - (opos + LEG_TOPS[leg as usize % 3]);

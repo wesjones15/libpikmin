@@ -147,6 +147,11 @@ the frame delta to 1/30 s. We tick exactly 1/30 s and accumulate host time (max 
   of the captain count as 10 farther.
   - Within `mPluckGrabRange` it's taken into the hand.
   - Otherwise it walks over (`GoHang`), with a 3 s timeout.
+    Host lock-on extension: while an enemy lock has a live stickable target, the called
+    Pikmin closes the distance to the hand in one simulation tick, with immediate
+    acceleration and normal wall collision. This gives the fast hand supply of C-stick-up throwing;
+    press/release controls and thrown flight time stay the same. Losing the lock restores
+    normal pickup speed.
   - If nobody is in range, the original punches (not implemented).
 - Releasing throws the held Pikmin **at the cursor**. Distance parameters p10/p11 are computed
   but never used.
@@ -444,6 +449,17 @@ from `objects/fl_water/anims.bin` and `objects/water/anims.bin` (retail values i
 `NaviWalkState::exec`, `NaviContainerState` (naviState.cpp); `ActEnter` (aiEnter.cpp),
 `ActExit` (aiExit.cpp); `GoalItem::exitPikis` / `exitPiki` (goalItem.cpp).
 
+RoR2 host extensions: its one-page menu combines all colours, with bulk release/return
+shortcuts. Stored Pikmin can be sacrificed for health: leaves first at 5% max health,
+buds at 10%, flowers at 20%, stopping at the health deficit or one remaining unreserved
+stored Pikmin. Exits reserve their highest stages before sacrifices are selected; squad
+Pikmin are never consumed. The host plays the Dolphin's recovery effects with one soul
+effect per sacrifice, without moving Olimar to the Dolphin.
+
+Hosts can request a world-space jump height after converting it to sim units. The
+fixed-step takeoff compensates gravity integration so the sampled apex meets that height;
+squad and navigation jumps inherit their captain's takeoff speed, including extra jumps.
+
 - **Opening.** A captain standing within reach of the Onion's `cont` sphere opens the window by
   pressing the action button. The walk state checks this before the button does anything
   else. The game pauses while the window is open.
@@ -461,10 +477,25 @@ from `objects/fl_water/anims.bin` and `objects/water/anims.bin` (retail values i
   - Each appears at the top of a random leg and slides down it at 70 units/s, growing back
     from 72%.
   - At the bottom it joins its captain's squad (`mActionState` 0 → `joinParty`).
+  - Host extension: a host-controlled hovering Onion can also call Pikmin out. Each plays
+    the first half of the same leg slide, detaches at ratio 0.5, and falls under the normal
+    Pikmin flight physics from that position. Grounded call-outs still use the whole leg;
+    putting Pikmin away still requires landing. Stock and pending exits retain the field cap.
 - **Safety.** The whistle and enemy attacks leave Pikmin in either mode alone.
 - **Geometry.** Legs are measured on `goal.mod`: feet about 115 out at 180° and ±60°, tops at
   height 88. The `cont` reach is 70 from the Onion's centre. The real sphere is in the
   Onion's collision data, which isn't loaded.
+
+## RoR2 intro audio cache
+
+Like the Sunshine host, Olimar prepares its intro on the first-run asset worker.
+`pik_render_stings` renders 3.5 seconds of Impact Site (`BGM_Tutorial`, sequence 4;
+piki_scene.c) from the user's extracted sound banks without opening a device.
+Completed stereo PCM16 files are published into `assets/ror2_audio/spawn.wav`,
+with `stings.version` for cache invalidation. Later starts reuse the cache without
+the original disc; missing clips or old versions regenerate. Deployment contains
+no intro WAV. The landed Onion menu is host-gated to Olimar standing in its beam;
+following, airborne, dormant and out-of-reach Onions provide no interact prompt.
 
 ## Planned
 

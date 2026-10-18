@@ -20,10 +20,11 @@
 //! [`pik_struct_sizes`] reports their sizes so a host can refuse a mismatched build. Nothing
 //! unwinds into the caller: a panic poisons that sim and later calls on it do nothing.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use libpikmin::carry::PelletState;
 use libpikmin::onion::{OnionAnim, SproutState};
@@ -35,10 +36,22 @@ use libpikmin::{
 use libpikmin::host::CreatureView;
 
 mod view;
+mod music;
+pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 29;
+pub const PIK_ABI_VERSION: u32 = 35;
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
+    unsafe { with(sim, (), |s| s.sim.set_ship_part_competitive_delivery(enabled != 0)) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_ship_part_owner(sim: *mut PikSim, ship: u32, captain: u32) {
+    unsafe { with(sim, (), |s| s.sim.set_ship_part_owner(OnionId(ship), CaptainId(captain))) }
+}
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -311,7 +324,9 @@ pub struct PikPellet {
     /// 0 on the ground, 1 carried, 2 being sucked in, 3 gone.
     pub state: u8,
     pub has_creature: u8,
-    pub _pad: [u8; 6],
+    /// Ship parts never participate in a host's automatic Onion ground pickup.
+    pub has_ship_part: u8,
+    pub _pad: [u8; 5],
 }
 
 #[repr(C)]
@@ -532,6 +547,166 @@ pub unsafe extern "C" fn pik_number_texture(
     }).unwrap_or(0)
 }
 
+/// A K, M, B or ! damage-number suffix from the disc's bigFont bitmap,
+/// also used by the day/location screens. The output is a 64x64 RGBA glyph.
+/// # Safety
+/// Same writable-buffer contract as [`pik_number_texture`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_damage_suffix_texture(
+    dir: *const c_char, glyph: u32, info: *mut PikTexture, rgba: *mut u8, len: u32,
+) -> u8 {
+    let Some(root) = (unsafe { path_arg(dir) }) else { return 0 };
+    let c = match glyph { 0 => b'K', 1 => b'M', 2 => b'B', 3 => b'!', _ => return 0 };
+    catch_unwind(|| {
+        let assets = libpikmin_assets::Assets { root };
+        let Ok(data) = assets.read(libpikmin_assets::screen::Font::PATH) else { return 0 };
+        let Ok((image, _, _)) = libpikmin_assets::texture::decode_bti(&data) else { return 0 };
+        let font = libpikmin_assets::screen::Font::new(image, 21, 42);
+        let Some(g) = font.glyph(c) else { return 0 };
+        if g.width <= 0 || g.height <= 0 { return 0; }
+        let mut pixels = vec![0u8; 64 * 64 * 4];
+        for y in 0..56usize {
+            for x in 0..56usize {
+                let sx = g.x as usize + x * g.width as usize / 56;
+                let sy = g.y as usize + y * g.height as usize / 56;
+                let from = (sy * font.image.width as usize + sx) * 4;
+                let to = ((y + 4) * 64 + x + 4) * 4;
+                pixels[to..to + 4].copy_from_slice(&font.image.rgba[from..from + 4]);
+            }
+        }
+        unsafe {
+            if let Some(info) = info.as_mut() {
+                *info = PikTexture { width: 64, height: 64, wrap_s: 1, wrap_t: 1, _pad: [0; 2] };
+            }
+            if !rgba.is_null() {
+                if (len as usize) < pixels.len() { return 0; }
+                std::ptr::copy_nonoverlapping(pixels.as_ptr(), rgba, pixels.len());
+            }
+        }
+        1
+    }).unwrap_or(0)
+}
+
+/// One printable ASCII glyph from Pikmin's bigFont.bti, used by the landing
+/// banner and Ship Repair score screens. RGBA8, rows top first.
+/// # Safety
+/// Same writable-buffer contract as [`pik_number_texture`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_font_glyph_texture(
+    dir: *const c_char, character: u32, info: *mut PikTexture, rgba: *mut u8, len: u32,
+) -> u8 {
+    let Some(root) = (unsafe { path_arg(dir) }) else { return 0 };
+    if !(0x21..=0x7e).contains(&character) { return 0; }
+    catch_unwind(|| {
+        static FONTS: OnceLock<Mutex<HashMap<PathBuf, libpikmin_assets::screen::Font>>> = OnceLock::new();
+        let Ok(mut fonts) = FONTS.get_or_init(|| Mutex::new(HashMap::new())).lock() else { return 0 };
+        if !fonts.contains_key(&root) {
+            let assets = libpikmin_assets::Assets { root: root.clone() };
+            let Ok(data) = assets.read(libpikmin_assets::screen::Font::PATH) else { return 0 };
+            let Ok((image, _, _)) = libpikmin_assets::texture::decode_bti(&data) else { return 0 };
+            fonts.insert(root.clone(), libpikmin_assets::screen::Font::new(image, 21, 42));
+        }
+        let font = &fonts[&root];
+        let Some(g) = font.glyph(character as u8) else { return 0 };
+        if g.width <= 0 || g.height <= 0 { return 0; }
+        let mut pixels = vec![0u8; 64 * 64 * 4];
+        for y in 0..56usize {
+            for x in 0..56usize {
+                let sx = g.x as usize + x * g.width as usize / 56;
+                let sy = g.y as usize + y * g.height as usize / 56;
+                let from = (sy * font.image.width as usize + sx) * 4;
+                let to = ((y + 4) * 64 + x + 4) * 4;
+                pixels[to..to + 4].copy_from_slice(&font.image.rgba[from..from + 4]);
+            }
+        }
+        unsafe {
+            if let Some(info) = info.as_mut() {
+                *info = PikTexture { width: 64, height: 64, wrap_s: 1, wrap_t: 1, _pad: [0; 2] };
+            }
+            if !rgba.is_null() {
+                if (len as usize) < pixels.len() { return 0; }
+                std::ptr::copy_nonoverlapping(pixels.as_ptr(), rgba, pixels.len());
+            }
+        }
+        1
+    }).unwrap_or(0)
+}
+
+/// The original carry gauge's horizontal 0-9, dash glyph strip
+/// (`LifeGaugeMgr::init`, `gauges.cpp`). RGBA8, rows top first. Null `rgba`
+/// queries dimensions. The host selects one of its eleven equal UV cells.
+///
+/// # Safety
+/// Same writable-buffer contract as [`pik_number_texture`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_carry_digit_texture(
+    dir: *const c_char, info: *mut PikTexture, rgba: *mut u8, len: u32,
+) -> u8 {
+    let Some(root) = (unsafe { path_arg(dir) }) else { return 0 };
+    catch_unwind(|| {
+        let assets = libpikmin_assets::Assets { root };
+        let Ok(data) = assets.read("intro/item_0_9.bti") else { return 0 };
+        let Ok((image, _, _)) = libpikmin_assets::texture::decode_bti(&data) else { return 0 };
+        if image.width == 0 || image.width % 11 != 0 { return 0; }
+        // SAFETY: caller promises writable outputs of the documented lengths.
+        unsafe {
+            if let Some(info) = info.as_mut() {
+                *info = PikTexture { width: image.width, height: image.height, wrap_s: 1, wrap_t: 1, _pad: [0; 2] };
+            }
+            if !rgba.is_null() {
+                if (len as usize) < image.rgba.len() { return 0; }
+                std::ptr::copy_nonoverlapping(image.rgba.as_ptr(), rgba, image.rgba.len());
+            }
+        }
+        1
+    }).unwrap_or(0)
+}
+
+/// One of the original lower-HUD icons from `screen/eng_tex/`: 0 Olimar,
+/// 1 health backing, 2 Pikmin backing, 3 no Pikmin, 4-6 Blue/Red/Yellow leaf,
+/// 7 Dolphin icon, 8 X button, 9 A button, 10 star, 11 menu backing,
+/// 12 Pikmin multiplication sign, 13-18 bud/flower throw portraits,
+/// 19 the circular backing, 20 the low-life pulse, and 21 the original
+/// w08_160.bti rounded number window (screen/eng_tex).
+/// RGBA8, rows top first. Null `rgba` queries dimensions.
+/// # Safety
+/// Same writable-buffer contract as [`pik_number_texture`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_hud_icon_texture(
+    dir: *const c_char, icon: u32, info: *mut PikTexture, rgba: *mut u8, len: u32,
+) -> u8 {
+    let Some(root) = (unsafe { path_arg(dir) }) else { return 0 };
+    let name = match icon {
+        0 => "navi01.bti", 1 => "n_64.bti", 2 => "i_base64.bti",
+        3 => "piki0.bti", 4 => "bp_l64.bti", 5 => "rp_l64.bti", 6 => "yp_l64.bti",
+        7 => "i_rocket.bti", 8 => "x_btn.bti", 9 => "a_btn.bti",
+        10 => "star2.bti", 11 => "p_bg.bti",
+        12 => "x_64.bti",
+        13 => "bp_b64.bti", 14 => "rp_b64.bti", 15 => "yp_b64.bti",
+        16 => "bp_f64.bti", 17 => "rp_f64.bti", 18 => "yp_f64.bti",
+        19 => "0p.bti", 20 => "pinch64.bti",
+        21 => "w08_160.bti",
+        _ => return 0,
+    };
+    catch_unwind(|| {
+        let assets = libpikmin_assets::Assets { root };
+        let path = format!("screen/eng_tex/{name}");
+        let Ok(data) = assets.read(&path) else { return 0 };
+        let Ok((image, _, _)) = libpikmin_assets::texture::decode_bti(&data) else { return 0 };
+        // SAFETY: caller promises writable outputs of the documented lengths.
+        unsafe {
+            if let Some(info) = info.as_mut() {
+                *info = PikTexture { width: image.width, height: image.height, wrap_s: 1, wrap_t: 1, _pad: [0; 2] };
+            }
+            if !rgba.is_null() {
+                if (len as usize) < image.rgba.len() { return 0; }
+                std::ptr::copy_nonoverlapping(image.rgba.as_ptr(), rgba, image.rgba.len());
+            }
+        }
+        1
+    }).unwrap_or(0)
+}
+
 /// Looks for a Pikmin disc image (.iso/.gcm/.ciso) in each of the `;`-separated folders in
 /// `dirs` and writes the first one's path (UTF-8, nul-terminated) to `out`. Returns 0 if none
 /// was found or it didn't fit in `out_len` bytes.
@@ -586,6 +761,26 @@ pub unsafe extern "C" fn pik_extract(
     ok
 }
 
+/// Cache the intro in `dir/ror2_audio` from extracted banks, without an audio device.
+/// Existing complete files are reused. Returns 1 on success, with a UTF-8 diagnostic.
+///
+/// # Safety
+/// `dir` null or nul-terminated UTF-8; `msg` null or writable for `msg_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_render_stings(dir: *const c_char, msg: *mut u8, msg_len: u32) -> u8 {
+    let result = catch_unwind(|| -> Result<(), String> {
+        let dir = unsafe { path_arg(dir) }.ok_or("missing asset directory")?;
+        libpikmin_present::stings::render_stings(&dir)
+    });
+    let (ok, text) = match result {
+        Ok(Ok(())) => (1, "Impact Site intro cached".into()),
+        Ok(Err(e)) => (0, e),
+        Err(_) => (0, "intro rendering panicked".into()),
+    };
+    unsafe { write_str(&text, msg, msg_len) };
+    ok
+}
+
 /// # Safety
 /// `p` null or a nul-terminated string.
 unsafe fn path_arg(p: *const c_char) -> Option<PathBuf> {
@@ -622,6 +817,7 @@ const EVENT_BACKLOG: usize = 16384;
 /// An opaque sim handle.
 pub struct PikSim {
     sim: Sim,
+    part_specs: Vec<Option<PelletDesc>>,
     /// The creatures the host gave last, copied into the sim each tick.
     frame: CreatureFrame,
     /// Events for [`pik_sim_events`].
@@ -725,7 +921,7 @@ pub unsafe extern "C" fn pik_sim_new(assets_dir: *const c_char, seed: u64) -> *m
     let dir = unsafe { path_arg(assets_dir) };
     let made = catch_unwind(|| {
         let mut params = Params::default();
-        let source = match dir {
+        let source = match dir.as_ref() {
             None => "code defaults".to_string(),
             Some(dir) => match params.load_extracted(Path::new(&dir)) {
                 Ok(applied) if !applied.is_empty() => format!("disc ({} files)", applied.len()),
@@ -736,11 +932,13 @@ pub unsafe extern "C" fn pik_sim_new(assets_dir: *const c_char, seed: u64) -> *m
                 }
             },
         };
-        (Sim::new(params, seed), source)
+        let part_specs = load_part_specs(&params, dir.as_deref());
+        (Sim::new(params, seed), source, part_specs)
     });
     match made {
-        Ok((sim, source)) => Box::into_raw(Box::new(PikSim {
+        Ok((sim, source, part_specs)) => Box::into_raw(Box::new(PikSim {
             sim,
+            part_specs,
             frame: CreatureFrame::default(),
             pending: VecDeque::new(),
             view_log: Vec::new(),
@@ -751,6 +949,96 @@ pub unsafe extern "C" fn pik_sim_new(assets_dir: *const c_char, seed: u64) -> *m
         })),
         Err(_) => std::ptr::null_mut(),
     }
+}
+
+/// Overrides the disc's field population limit for hosts with a larger swarm budget.
+/// `i32::MAX` removes the original game's 100-Pikmin gameplay cap.
+///
+/// # Safety
+/// `sim` is a live handle from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_field_limit(sim: *mut PikSim, limit: u32) {
+    unsafe { with(sim, (), |s| s.sim.params_mut().ai.max_pikis_on_field = limit.min(i32::MAX as u32) as i32) }
+}
+
+// PelletConfig/PelletShapeObject (pelletMgr.cpp): dimensions and weights come from
+// the user's disc; absent or invalid required assets disable spawning that part.
+fn load_part_specs(params: &Params, dir: Option<&Path>) -> Vec<Option<PelletDesc>> {
+    let Some(assets) = libpikmin_assets::Assets::discover(dir) else { return Vec::new() };
+    let infos = assets.read(libpikmin_assets::ship::PEL_ANIM).ok()
+        .and_then(|b| libpikmin_assets::ship::parse_pel_anim(&b).ok()).unwrap_or_default();
+    libpikmin_assets::ship::PART_IDS.iter().enumerate().map(|(part, id)| {
+        let cfg = params.pellets.iter().find(|c| c.kind == 3 && (c.model_id == *id || c.pellet_id == *id))?;
+        let info = infos.iter().find(|i| i.id == *id)?;
+        let model = assets.model(&info.model()).ok()?;
+        let radius = model.coll.iter().find(|c| c.id == "cent").map(|c| c.radius * cfg.scale)?;
+        if !radius.is_finite() || radius <= 0.0 || cfg.min_carriers <= 0 || cfg.max_carriers < cfg.min_carriers { return None; }
+        Some(PelletDesc { pos: Vec3::ZERO, yaw: 0.0, radius, height: cfg.carry_info_height.max(1.0),
+            min_carriers: cfg.min_carriers as u32, max_carriers: cfg.max_carriers as u32,
+            seeds_matching: 0, seeds_other: 0, color: None, creature: None, ship_part: Some(part as u32) })
+    }).collect()
+}
+
+/// Host-selected receipt policy; the default continues to deliver to ships.
+/// # Safety
+/// `sim` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_ship_part_onion_delivery(sim: *mut PikSim, enabled: u8) {
+    unsafe { with(sim, (), |s| s.sim.set_ship_part_onion_delivery(enabled != 0)) }
+}
+
+/// Ship delivery with an authoritative host receipt before fitting.
+/// # Safety
+/// `sim` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_ship_part_host_delivery(sim: *mut PikSim, enabled: u8) {
+    unsafe { with(sim, (), |s| s.sim.set_ship_part_host_delivery(enabled != 0)) }
+}
+
+/// The part's disc carry requirement, or zero when its assets/config are invalid.
+/// # Safety
+/// `sim` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_ship_part_weight(sim: *mut PikSim, part: u32) -> u32 {
+    unsafe { with(sim, 0, |s| s.part_specs.get(part as usize).and_then(|d| *d).map_or(0, |d| d.min_carriers)) }
+}
+
+/// Copies a UTF-8 part name, NUL terminated. Returns bytes written excluding NUL.
+/// # Safety
+/// `out` is writable for `cap` bytes; `sim` is live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_ship_part_name(sim: *mut PikSim, part: u32, out: *mut u8, cap: u32) -> u32 {
+    if out.is_null() || cap == 0 { return 0; }
+    unsafe { with(sim, 0, |s| {
+        let Some(id) = libpikmin_assets::ship::PART_IDS.get(part as usize) else { return 0 };
+        let Some(c) = s.sim.params().pellets.iter().find(|c| c.kind == 3 && (c.model_id == *id || c.pellet_id == *id)) else { return 0 };
+        let n = c.name.len().min(cap as usize - 1);
+        std::ptr::copy_nonoverlapping(c.name.as_ptr(), out, n);
+        *out.add(n) = 0;
+        n as u32
+    }) }
+}
+
+/// Spawns an actual ship-part pellet using its extracted dimensions and weight.
+/// # Safety
+/// `sim` is live; `pos` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_spawn_ship_part(sim: *mut PikSim, part: u32, pos: *const PikVec3, yaw: f32) -> i32 {
+    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return -1 };
+    if !Vec3::from(pos).is_finite() || !yaw.is_finite() { return -1; }
+    unsafe { with(sim, -1, |s| {
+        let Some(mut d) = s.part_specs.get(part as usize).and_then(|d| *d) else { return -1 };
+        d.pos = pos.into(); d.yaw = yaw;
+        s.sim.spawn_pellet(d).0 as i32
+    }) }
+}
+
+/// # Safety
+/// `sim` is live; `pos` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_recover_pellet(sim: *mut PikSim, pellet: u32, pos: *const PikVec3) -> u8 {
+    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return 0 };
+    unsafe { with(sim, 0, |s| s.sim.recover_pellet(libpikmin::PelletId(pellet), pos.into()) as u8) }
 }
 
 /// # Safety
@@ -1516,6 +1804,17 @@ pub unsafe extern "C" fn pik_sim_onion_call_out(sim: *mut PikSim, captain: u32, 
     }
 }
 
+/// Sacrifice unreserved Onion stock, keeping one inside. Leaf/bud/flower restore 5/10/20%.
+/// Returns the health fraction and writes the number consumed for presentation.
+/// # Safety
+/// `sim` from `pik_sim_new`; `killed` null or writable for one u32.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_sacrifice_onion(sim: *mut PikSim, onion: u32, missing: f32, killed: *mut u32) -> f32 {
+    let (count, fraction) = unsafe { with(sim, (0, 0.0), |s| s.sim.sacrifice_onion_stock(OnionId(onion), missing)) };
+    if !killed.is_null() { unsafe { *killed = count; } }
+    fraction
+}
+
 /// Puts `n` Pikmin of `color` at leaf stage `happa` (0 leaf, 1 bud, 2 flower) straight into an
 /// Onion's stock, for a host carrying Pikmin over from one level to the next.
 ///
@@ -1651,7 +1950,8 @@ pub unsafe extern "C" fn pik_sim_pellets(sim: *mut PikSim, out: *mut PikPellet, 
                     max_carriers: p.desc.max_carriers,
                     state,
                     has_creature: p.desc.creature.is_some() as u8,
-                    _pad: [0; 6],
+                    has_ship_part: p.desc.ship_part.is_some() as u8,
+                    _pad: [0; 5],
                 };
                 // SAFETY: `i < max`, which the caller promised is writable.
                 out.add(i).write(v);
@@ -1695,6 +1995,19 @@ pub unsafe extern "C" fn pik_sim_onions(sim: *mut PikSim, out: *mut PikOnion, ma
             all.len() as u32
         })
     }
+}
+
+/// Returns a receiver's actual carry destination, including the Dolphin's offset.
+/// # Safety
+/// `sim` is live and `out` is writable for one vector.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_onion_goal(sim: *mut PikSim, id: u32, out: *mut PikVec3) -> u32 {
+    if out.is_null() { return 0; }
+    unsafe { with(sim, 0, |s| {
+        let Some(o) = s.sim.onions().iter().find(|o| o.id.0 == id) else { return 0; };
+        out.write(o.goal_pos().into());
+        1
+    }) }
 }
 
 /// Copies up to `max` sprouts in the ground or in the air into `out`. Returns how many there
@@ -1965,6 +2278,14 @@ pub unsafe extern "C" fn pik_sim_set_captain_motion(sim: *mut PikSim, captain: u
     unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.set_captain_motion(CaptainId(captain), jump, accel) }) }
 }
 
+/// Match a host's jump height; squad jumps inherit the same takeoff speed.
+/// # Safety
+/// `sim` from `pik_sim_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_captain_jump_height(sim: *mut PikSim, captain: u32, height: f32) {
+    unsafe { with(sim, (), |s| s.sim.set_captain_jump_height(CaptainId(captain), height)) }
+}
+
 /// [`Sim::set_captain_air_jumps`] and [`Sim::set_captain_stomp`].
 ///
 /// # Safety
@@ -2091,7 +2412,7 @@ pub unsafe extern "C" fn pik_sim_give_onion_seeds(sim: *mut PikSim, onion: u32, 
     unsafe {
         with(sim, (), |s| {
             if onion_ok(&s.sim, onion) {
-                s.sim.give_onion_seeds(OnionId(onion), color, seeds.min(100));
+                s.sim.give_onion_seeds(OnionId(onion), color, seeds.min(i32::MAX as u32));
             }
         })
     }
@@ -2115,6 +2436,22 @@ pub unsafe extern "C" fn pik_sim_set_auto_carry(sim: *mut PikSim, range: f32) {
 pub unsafe extern "C" fn pik_sim_set_auto_pluck(sim: *mut PikSim, seconds: f32) {
     // SAFETY: as documented.
     unsafe { with(sim, (), |s| s.sim.set_auto_pluck((seconds >= 0.0).then_some(seconds))) }
+}
+
+/// Trigger the landed Onion's plucker for ready sprouts in reach.
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_trigger_plucker(sim: *mut PikSim, onion: u32) -> u8 {
+    unsafe { with(sim, 0, |s| s.sim.trigger_plucker(OnionId(onion)) as u8) }
+}
+
+/// Recall a captain's carriers from pellets whose team is below minimum.
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_recall_stuck_carriers(sim: *mut PikSim, captain: u32) -> u32 {
+    unsafe { with(sim, 0, |s| s.sim.recall_stuck_carriers(CaptainId(captain)) as u32) }
 }
 
 /// [`Sim::set_emergency_recovery`] (`count` 0 off).

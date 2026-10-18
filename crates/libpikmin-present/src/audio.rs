@@ -7,6 +7,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
+use std::collections::HashSet;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use glam::{Mat4, Vec3};
@@ -74,6 +75,7 @@ pub struct Audio {
     /// Output gain, as f32 bits.
     gain: Arc<AtomicU32>,
     stop: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
     whistling: bool,
     onion_spot: bool,
@@ -81,6 +83,8 @@ pub struct Audio {
     bgm: usize,
     /// Pellets whose `SE_LIFT_TRY` loop is on (`Pellet::mIsPlayTrySound`).
     trying: Vec<libpikmin::PelletId>,
+    /// Pikmin already heard entering their Onion leg this frame sequence.
+    climbing: HashSet<libpikmin::PikiId>,
     /// The output's rate and channels, for the log.
     pub rate: u32,
     pub channels: u16,
@@ -110,12 +114,13 @@ impl Audio {
         let sys = Arc::new(Mutex::new(sys));
         let gain = Arc::new(AtomicU32::new(1f32.to_bits()));
         let stop = Arc::new(AtomicBool::new(false));
+        let paused = Arc::new(AtomicBool::new(false));
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(u32, u16), String>>();
-        let (shared, g, st) = (sys.clone(), gain.clone(), stop.clone());
+        let (shared, g, st, p) = (sys.clone(), gain.clone(), stop.clone(), paused.clone());
         let thread = std::thread::Builder::new()
             .name("pikmin-audio".into())
             .spawn(move || {
-                let stream = open_stream(shared, g);
+                let stream = open_stream(shared, g, p);
                 match stream {
                     Ok((stream, rate, channels)) => {
                         let _ = ready_tx.send(Ok((rate, channels)));
@@ -139,12 +144,14 @@ impl Audio {
             sys,
             gain,
             stop,
+            paused,
             thread: Some(thread),
             whistling: false,
             onion_spot: false,
             external_death_sting: false,
             bgm: 0,
             trying: Vec::new(),
+            climbing: HashSet::new(),
             rate,
             channels,
         })
@@ -173,14 +180,36 @@ impl Audio {
         self.bgm
     }
 
+    pub fn has_bgm(&self, id: usize) -> bool {
+        self.with(|s| s.engine.data.seqs.seq(id).is_some()).unwrap_or(false)
+    }
+
     pub fn stop_bgm(&mut self) {
         self.bgm = 0;
         self.with(|s| s.stop_bgm(0));
     }
 
+    /// Independent host music stream: original enemy-proximity mix, not SE volume.
+    /// `Jac_UpdateCamera` (pikiinter.c) drives mode flag 1 for nearby enemy events.
+    pub fn music_frame(&self, nearby_enemy: bool, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
+        if !paused {
+            self.with(|s| { s.frame(); s.set_bgm_mode_flag(0, 1, nearby_enemy as u8); });
+        }
+    }
+
     /// A system (menu) sound by name.
     pub fn play(&self, name: &str) {
         self.with(|s| s.play(name, Vec3::ZERO));
+    }
+
+    /// A host-triggered sound at a world position (sim units).
+    pub fn play_at(&self, name: &str, pos: Vec3) {
+        self.with(|s| s.play(name, pos));
+    }
+
+    pub fn stop(&self, name: &str) {
+        self.with(|s| s.stop(name));
     }
 
     /// Give a host the full vanilla bell as stereo 32 kHz PCM, so its death player can
@@ -235,6 +264,18 @@ impl Audio {
             .map(|p| (pellet_owner(p.id), p.pos))
             .collect();
         let onions: Vec<Vec3> = sim.onions().iter().map(|o| o.pos).collect();
+        // ActEnter::gotoLeg plays SE_CONTAINER_CLIMB once as each Pikmin starts climbing.
+        let mut climbing_now = HashSet::new();
+        let mut climb_sounds = Vec::new();
+        for p in sim.pikis() {
+            if let libpikmin::PikiState::Enter { onion, climbing: true, .. } = p.state {
+                climbing_now.insert(p.id);
+                if !self.climbing.contains(&p.id) {
+                    climb_sounds.push((onion, p.pos));
+                }
+            }
+        }
+        self.climbing = climbing_now;
         self.with(|s| {
             s.set_listener(view, listener);
             s.set_piki_count(squad as u32);
@@ -255,6 +296,9 @@ impl Audio {
             }
             for p in stop {
                 s.stop_from(pellet_owner(p), "SE_LIFT_TRY");
+            }
+            for (onion, pos) in climb_sounds {
+                s.play_from(onion_owner(onion), "SE_CONTAINER_CLIMB", pos);
             }
             // `PikiHeadItem::playSound`: key value v is `SE` 0xCC + v on the parent Onion, else
             // `SEF` 0x108 + v (only for v > 0).
@@ -415,7 +459,8 @@ impl Audio {
             // `UfoItem::suckMe` (ufoItem.cpp).
             Event::ShipPartCollected { ship, .. } => {
                 let pos = sim.onions()[ship.0 as usize].pos;
-                s.play_from(onion_owner(ship), "SE_UFO_PARTSIN", pos);
+                let sound = if sim.onions()[ship.0 as usize].ship.is_some() { "SE_UFO_PARTSIN" } else { "SE_CONTAINER_PELLETIN2" };
+                s.play_from(onion_owner(ship), sound, pos);
             }
             // `GoalAI::EmitPiki` (itemAI.cpp): each seed shot.
             Event::SeedLaunched { onion, .. } => {
@@ -474,7 +519,7 @@ impl Audio {
 }
 
 /// Opens the default output device and starts rendering `sys` into it.
-fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>) -> Result<(cpal::Stream, u32, u16), String> {
+fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>, paused: Arc<AtomicBool>) -> Result<(cpal::Stream, u32, u16), String> {
     let device = cpal::default_host()
         .default_output_device()
         .ok_or("no output device")?;
@@ -490,6 +535,7 @@ fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>) -> Result<(cp
         .build_output_stream(
             &config.into(),
             move |out: &mut [f32], _| {
+                if paused.load(Ordering::Relaxed) { out.fill(0.0); return; }
                 let frames = out.len() / ch;
                 scratch.clear();
                 scratch.resize(frames * 2, 0.0);

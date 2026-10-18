@@ -25,7 +25,8 @@ pub struct SproutId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OnionAnim {
     Idle,
-    /// Host-controlled airborne following. Storage waits until grounded; deliveries are taken (seeds become stored Pikmin).
+    /// Host-controlled airborne following. Call-outs slide halfway down a leg and fall;
+    /// putting away waits until grounded. Delivered seeds become stored Pikmin.
     Hover,
     /// `GOAL_Effect`: "suction" plays after something is sucked in.
     Suction {
@@ -393,6 +394,7 @@ impl Sim {
 
     /// Puts ship part `part` on `ship` directly (hosts restoring a save, tests).
     pub fn give_ship_part(&mut self, ship: OnionId, part: u32) {
+        if part >= 30 { return; }
         if let Some(s) = self.onions.get_mut(ship.0 as usize).and_then(|o| o.ship.as_mut())
             && !s.parts.contains(&part)
         {

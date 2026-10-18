@@ -19,6 +19,9 @@ pub struct Sim {
     pub(crate) pikis: Vec<Piki>,
     pub(crate) creatures: CreatureFrame,
     pub(crate) pellets: Vec<crate::carry::Pellet>,
+    /// Opt-in host delivery policy; replicas do not run carry AI.
+    pub(crate) ship_part_delivery: u8,
+    pub(crate) ship_part_owners: std::collections::HashMap<crate::onion::OnionId, CaptainId>,
     pub(crate) onions: Vec<crate::onion::Onion>,
     pub(crate) sprouts: Vec<Option<crate::onion::Sprout>>,
     pub(crate) nectar_drops: Vec<crate::nectar::NectarDrop>,
@@ -47,6 +50,8 @@ pub struct Sim {
     pub(crate) pace: Option<[f32; 3]>,
     /// See [`Sim::set_auto_carry_range`].
     pub(crate) auto_carry_range: f32,
+    /// Briefly prevent recalled understrength carriers grabbing the same pellet again.
+    pub(crate) carry_recall_until: std::collections::HashMap<PikiId, u64>,
     /// See [`Sim::set_auto_pluck`].
     pub(crate) auto_pluck_after: Option<f32>,
     /// See [`Sim::set_emergency_recovery`]: (seconds, Pikmin).
@@ -70,6 +75,8 @@ impl Sim {
             pikis: Vec::new(),
             creatures: CreatureFrame::default(),
             pellets: Vec::new(),
+            ship_part_delivery: 0,
+            ship_part_owners: Default::default(),
             onions: Vec::new(),
             sprouts: Vec::new(),
             nectar_drops: Vec::new(),
@@ -88,6 +95,7 @@ impl Sim {
             cursor_homing: false,
             pace: None,
             auto_carry_range: 0.0,
+            carry_recall_until: Default::default(),
             auto_pluck_after: None,
             recovery: None,
         }
@@ -418,7 +426,12 @@ pub(crate) fn integrate(
     let k = (dt / accel.max(1e-4)).min(1.0);
     vel.x += (target.x - vel.x) * k;
     vel.z += (target.z - vel.z) * k;
-    vel.y -= gravity * dt;
+    // A grounded body should travel horizontally until the ground probe says it
+    // has stepped off an edge. Applying gravity before every wall sub-step dips
+    // the collision sphere into an otherwise flat floor; the host can then push
+    // it sideways as a wall and repeatedly restart walking. This rule is shared
+    // by captains and Pikmin (Creature::moveVelocity / MapMgr::traceMove).
+    if *on_ground { vel.y = 0.0; } else { vel.y -= gravity * dt; }
 
     let radius = radius.max(1.0);
     let start_y = pos.y;
@@ -461,5 +474,32 @@ pub(crate) fn integrate(
             vel.y = 0.0;
         }
         _ => *on_ground = false,
+    }
+}
+
+#[cfg(test)]
+mod ground_motion_tests {
+    use super::*;
+
+    struct FloorSnag;
+    impl Host for FloorSnag {
+        fn ground_height(&self, pos: Vec3) -> Option<f32> { (pos.y >= 0.0).then_some(0.0) }
+        fn walls(&self, centre: Vec3, radius: f32) -> Vec3 {
+            if centre.y < radius { centre - Vec3::X * 3.0 } else { centre }
+        }
+    }
+
+    #[test]
+    fn grounded_motion_does_not_dip_into_the_floor_wall_probe() {
+        let mut pos = Vec3::ZERO;
+        let mut vel = Vec3::ZERO;
+        let mut grounded = true;
+        for _ in 0..30 {
+            integrate(&FloorSnag, &mut pos, &mut vel, Vec3::X * 120.0,
+                &mut grounded, 10.0, 0.2, 300.0, 1.0 / 30.0);
+        }
+        assert!(grounded);
+        assert!(pos.x > 50.0, "floor contact must not arrest horizontal walking");
+        assert_eq!(pos.y, 0.0);
     }
 }

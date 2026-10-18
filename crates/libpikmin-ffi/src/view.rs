@@ -222,11 +222,100 @@ pub unsafe extern "C" fn pik_view_show_cursors(view: *mut PikView, show: u8) {
     unsafe { with_view(view, (), |v| v.view.show_cursors = show != 0) }
 }
 
+/// Host UI and Onion-healing sounds. 0 open, 1 count changed, 2 count limit,
+/// 3 close, 4 Olimar healed, 5 one Pikmin ghost, 6/7 recall whistle start/stop.
+/// `pos` is in sim units.
+/// # Safety
+/// `view` is a live view handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_play_sound(view: *mut PikView, sound: u8, pos: PikVec3) {
+    let name = match sound {
+        0 => "SYSSE_CMENU_ON",
+        1 => "SYSSE_CMENU_SELECT",
+        2 => "SYSSE_CMENU_ERROR",
+        3 => "SYSSE_CMENU_OFF",
+        4 => "SE_PLAYER_TOUCHHONEY",
+        5 => "SE_PIKI_DEAD",
+        6 => "SE_GATHER",
+        7 => "SE_GATHER",
+        _ => return,
+    };
+    // Menu cues in drawContainer.cpp; honey heals Olimar in itemAI.cpp; ghost
+    // calls follow Piki::doKill in pikidoKill.cpp.
+    unsafe { with_view(view, (), |v| {
+        if let Some(audio) = &v.audio {
+            if sound == 7 { audio.stop(name); }
+            else { audio.play_at(name, pos.into()); }
+        }
+    }) }
+}
+
 /// Have views made after this draw the Dolphin's parts as the sim fits them (`animator`'s sibling,
 /// `view::set_repaired_ship`). Call before [`pik_view_new`]: the parts' models are loaded then.
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_view_set_repaired_ship(on: u8) {
     libpikmin_present::view::set_repaired_ship(on != 0);
+}
+
+/// Victory posing is host-owned and leaves the simulation unchanged.
+/// # Safety
+/// `view` is a live view handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_celebrating(view: *mut PikView, on: u8) {
+    if let Some(v) = unsafe { view.as_mut() } { v.view.celebrating = on != 0; }
+}
+
+/// # Safety
+/// `view` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_ship_repair_mode(view: *mut PikView, on: u8) {
+    if let Some(v) = unsafe { view.as_mut() } { v.view.repair_mode = on != 0; }
+}
+
+/// The host's terrain height below an Onion, in simulation units.
+/// # Safety
+/// `view` is a live view handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_onion_ground(view: *mut PikView, onion: u32, height: f32) {
+    if let Some(v) = unsafe { view.as_mut() } {
+        v.view.onion_ground.insert(onion, height);
+    }
+}
+
+/// # Safety
+/// `view` is a live view handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_repairs_pending(view: *const PikView) -> u32 {
+    unsafe { view.as_ref() }.map_or(0, |v| v.view.pending_repairs() as u32)
+}
+
+/// The complete-ending farewell music: pikidemo.c DEMOID_GoodEndingWave's
+/// stream 11, piki_scene.c filelist[11] = compend0.stx. Assets remain local.
+/// Returns required/written stereo float samples, zero if unavailable.
+/// # Safety
+/// `assets_dir` is NUL terminated; `rate` writable; non-null `out` writable for `cap` floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_victory_pcm(assets_dir: *const c_char, out: *mut f32, cap: u32, rate: *mut u32) -> u32 {
+    let result = std::panic::catch_unwind(|| {
+        let dir = unsafe { crate::path_arg(assets_dir) }?;
+        let assets = libpikmin_assets::Assets::discover(Some(&dir))?;
+        let data = assets.read("SndData/compend0.stx").ok()?;
+        let header = libpikmin_assets::sound::stream::StreamHeader::parse(&data).ok()?;
+        let hz = header.sample_rate as u32;
+        if !(8000..=96000).contains(&hz) || header.samples == 0 || header.samples > hz * 120 { return None; }
+        let decoded = libpikmin_assets::sound::Stream::decode(&data).ok()?;
+        Some((hz, decoded.stereo))
+    });
+    let Ok(Some((hz, samples))) = result else { return 0 };
+    if let Some(rate) = unsafe { rate.as_mut() } { *rate = hz; } else { return 0; }
+    if out.is_null() { return samples.len() as u32; }
+    if cap < samples.len() as u32 { return 0; }
+    let output = unsafe { std::slice::from_raw_parts_mut(out, samples.len()) };
+    for (i, (&sample, value)) in samples.iter().zip(output).enumerate() {
+        let fade = ((samples.len() - i) as f32 / (hz as f32 * 0.4)).min(1.0);
+        *value = sample as f32 / 32768.0 * fade;
+    }
+    samples.len() as u32
 }
 
 /// Captain `captain` appears in a beam: `progress` 0 (a thin column) to 1 (himself, which ends it).
@@ -237,6 +326,14 @@ pub extern "C" fn pik_view_set_repaired_ship(on: u8) {
 pub unsafe extern "C" fn pik_view_set_materialize(view: *mut PikView, captain: u32, progress: f32) {
     // SAFETY: as documented.
     unsafe { with_view(view, (), |v| v.view.set_materialize(captain, progress)) }
+}
+
+/// Dolphin healing particles and one ghost per sacrificed Pikmin at a captain.
+/// # Safety
+/// `view` from `pik_view_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_healing(view: *mut PikView, captain: u32, progress: f32, ghosts: u32) {
+    unsafe { with_view(view, (), |v| v.view.set_healing(captain, progress, ghosts)) }
 }
 
 /// Olimar jumps with the Pikmin's own jump motion (`animator::set_captain_pikmin_jump`).
