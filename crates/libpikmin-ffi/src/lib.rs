@@ -664,7 +664,9 @@ pub unsafe extern "C" fn pik_carry_digit_texture(
 
 /// One of the original lower-HUD icons from `screen/eng_tex/`: 0 Olimar,
 /// 1 health backing, 2 Pikmin backing, 3 no Pikmin, 4-6 Blue/Red/Yellow leaf,
-/// 7 Dolphin icon, 8 X button, 9 A button, 10 star, 11 menu backing.
+/// 7 Dolphin icon, 8 X button, 9 A button, 10 star, 11 menu backing,
+/// 12 Pikmin multiplication sign, 13-18 bud/flower throw portraits,
+/// 19 the circular backing and 20 the low-life pulse overlay from the original HUD.
 /// RGBA8, rows top first. Null `rgba` queries dimensions.
 /// # Safety
 /// Same writable-buffer contract as [`pik_number_texture`].
@@ -678,6 +680,10 @@ pub unsafe extern "C" fn pik_hud_icon_texture(
         3 => "piki0.bti", 4 => "bp_l64.bti", 5 => "rp_l64.bti", 6 => "yp_l64.bti",
         7 => "i_rocket.bti", 8 => "x_btn.bti", 9 => "a_btn.bti",
         10 => "star2.bti", 11 => "p_bg.bti",
+        12 => "x_64.bti",
+        13 => "bp_b64.bti", 14 => "rp_b64.bti", 15 => "yp_b64.bti",
+        16 => "bp_f64.bti", 17 => "rp_f64.bti", 18 => "yp_f64.bti",
+        19 => "0p.bti", 20 => "pinch64.bti",
         _ => return 0,
     };
     catch_unwind(|| {
