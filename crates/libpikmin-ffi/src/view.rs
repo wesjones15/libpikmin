@@ -290,6 +290,14 @@ pub unsafe extern "C" fn pik_view_set_materialize(view: *mut PikView, captain: u
     unsafe { with_view(view, (), |v| v.view.set_materialize(captain, progress)) }
 }
 
+/// Dolphin healing particles and one ghost per sacrificed Pikmin at a captain.
+/// # Safety
+/// `view` from `pik_view_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_healing(view: *mut PikView, captain: u32, progress: f32, ghosts: u32) {
+    unsafe { with_view(view, (), |v| v.view.set_healing(captain, progress, ghosts)) }
+}
+
 /// Olimar jumps with the Pikmin's own jump motion (`animator::set_captain_pikmin_jump`).
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_view_set_captain_pikmin_jump(on: u8) {

@@ -47,6 +47,19 @@ impl Sim {
         (2.0 * self.params.ai.gravity.max(1.0) * JUMP_HEIGHT).sqrt()
     }
 
+    /// Host jump height in sim units. Compensate the fixed-step gravity integration so
+    /// the sampled apex reaches at least the host's requested height.
+    pub fn set_captain_jump_height(&mut self, captain: crate::CaptainId, height: f32) {
+        if !height.is_finite() || height <= 0.0 { return; }
+        let g = self.params.ai.gravity.max(1.0);
+        let scale = ((2.0 * g * height).sqrt() + g * crate::TICK_DT) / self.jump_speed();
+        if let Some(c) = self.captains.get_mut(captain.0 as usize) { c.jump_scale = scale.clamp(0.1, 10.0); }
+    }
+
+    fn piki_jump_speed(&self, pi: usize) -> f32 {
+        self.jump_speed() * self.pikis[pi].captain.map_or(1.0, |c| self.captains[c.0 as usize].jump_scale)
+    }
+
     pub(crate) fn start_captain_jump(&mut self, ci: usize) {
         let speed = self.jump_speed() * self.captains[ci].jump_scale;
         let c = &mut self.captains[ci];
@@ -97,9 +110,9 @@ impl Sim {
     /// A mid-air jump (Hopoo Feather). Squad members in the air with him jump again now;
     /// ones yet to repeat his takeoff will jump again as far into theirs.
     pub(crate) fn start_air_jump(&mut self, ci: usize) {
-        let speed = self.jump_speed();
+        let speed = self.jump_speed() * self.captains[ci].jump_scale;
         let c = &mut self.captains[ci];
-        c.vel.y = speed * c.jump_scale;
+        c.vel.y = speed;
         c.air_jumps_used += 1;
         let at = c.jump.map_or(0.0, |j| j.elapsed);
         let tick = c.jump_tick;
@@ -219,7 +232,7 @@ impl Sim {
     }
 
     fn start_piki_jump(&mut self, pi: usize, horizontal: Vec3) {
-        let speed = self.jump_speed();
+        let speed = self.piki_jump_speed(pi);
         let p = &mut self.pikis[pi];
         p.vel = horizontal.with_y(speed);
         p.target_vel = horizontal;
@@ -291,7 +304,7 @@ impl Sim {
             && jump.air_done < jump.air_count
             && jump.elapsed >= jump.air[jump.air_done as usize]
         {
-            let speed = self.jump_speed();
+            let speed = self.piki_jump_speed(pi);
             let p = &mut self.pikis[pi];
             p.vel.y = speed;
             if let Some(j) = p.jump.as_mut() {
@@ -340,16 +353,18 @@ impl Sim {
         }
         // Reject tall walls and gaps without a reachable landing. Carriers in Lift/Move
         // never enter this path: their item stays on the ground.
-        let raised = centre + Vec3::Y * JUMP_HEIGHT;
+        let jump_speed = self.piki_jump_speed(pi);
+        let height = jump_speed * jump_speed / (2.0 * self.params.ai.gravity.max(1.0));
+        let raised = centre + Vec3::Y * height;
         if (host.walls(raised, p.size) - raised).with_y(0.0).length() > 0.5 {
             return;
         }
-        let flight = 2.0 * self.jump_speed() / self.params.ai.gravity.max(1.0);
+        let flight = 2.0 * jump_speed / self.params.ai.gravity.max(1.0);
         let landing = p.pos + horizontal * flight;
-        let Some(g) = host.ground_height(landing + Vec3::Y * JUMP_HEIGHT) else {
+        let Some(g) = host.ground_height(landing + Vec3::Y * height) else {
             return;
         };
-        if g > p.pos.y + JUMP_HEIGHT * 0.8 || g < p.pos.y - JUMP_HEIGHT {
+        if g > p.pos.y + height * 0.8 || g < p.pos.y - height {
             return;
         }
         self.start_piki_jump(pi, horizontal);

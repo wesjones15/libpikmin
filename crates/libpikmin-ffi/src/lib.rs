@@ -1613,6 +1613,17 @@ pub unsafe extern "C" fn pik_sim_onion_call_out(sim: *mut PikSim, captain: u32, 
     }
 }
 
+/// Sacrifice unreserved Onion stock, keeping one inside. Leaf/bud/flower restore 5/10/20%.
+/// Returns the health fraction and writes the number consumed for presentation.
+/// # Safety
+/// `sim` from `pik_sim_new`; `killed` null or writable for one u32.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_sacrifice_onion(sim: *mut PikSim, onion: u32, missing: f32, killed: *mut u32) -> f32 {
+    let (count, fraction) = unsafe { with(sim, (0, 0.0), |s| s.sim.sacrifice_onion_stock(OnionId(onion), missing)) };
+    if !killed.is_null() { unsafe { *killed = count; } }
+    fraction
+}
+
 /// Puts `n` Pikmin of `color` at leaf stage `happa` (0 leaf, 1 bud, 2 flower) straight into an
 /// Onion's stock, for a host carrying Pikmin over from one level to the next.
 ///
@@ -2074,6 +2085,14 @@ pub unsafe extern "C" fn pik_sim_set_squad_speed(sim: *mut PikSim, captain: u32,
 pub unsafe extern "C" fn pik_sim_set_captain_motion(sim: *mut PikSim, captain: u32, jump: f32, accel: f32) {
     // SAFETY: as documented.
     unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.set_captain_motion(CaptainId(captain), jump, accel) }) }
+}
+
+/// Match a host's jump height; squad jumps inherit the same takeoff speed.
+/// # Safety
+/// `sim` from `pik_sim_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_captain_jump_height(sim: *mut PikSim, captain: u32, height: f32) {
+    unsafe { with(sim, (), |s| s.sim.set_captain_jump_height(CaptainId(captain), height)) }
 }
 
 /// [`Sim::set_captain_air_jumps`] and [`Sim::set_captain_stomp`].

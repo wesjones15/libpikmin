@@ -449,6 +449,17 @@ from `objects/fl_water/anims.bin` and `objects/water/anims.bin` (retail values i
 `NaviWalkState::exec`, `NaviContainerState` (naviState.cpp); `ActEnter` (aiEnter.cpp),
 `ActExit` (aiExit.cpp); `GoalItem::exitPikis` / `exitPiki` (goalItem.cpp).
 
+RoR2 host extensions: its one-page menu combines all colours, with bulk release/return
+shortcuts. Stored Pikmin can be sacrificed for health: leaves first at 5% max health,
+buds at 10%, flowers at 20%, stopping at the health deficit or one remaining unreserved
+stored Pikmin. Exits reserve their highest stages before sacrifices are selected; squad
+Pikmin are never consumed. The host plays the Dolphin's recovery effects with one soul
+effect per sacrifice, without moving Olimar to the Dolphin.
+
+Hosts can request a world-space jump height after converting it to sim units. The
+fixed-step takeoff compensates gravity integration so the sampled apex meets that height;
+squad and navigation jumps inherit their captain's takeoff speed, including extra jumps.
+
 - **Opening.** A captain standing within reach of the Onion's `cont` sphere opens the window by
   pressing the action button. The walk state checks this before the button does anything
   else. The game pauses while the window is open.
