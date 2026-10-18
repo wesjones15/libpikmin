@@ -351,6 +351,9 @@ pub struct View {
     materialize: HashMap<u32, f32>,
     /// Captains whose arrival effects are running.
     materializing: HashSet<u32>,
+    /// Host healing at the captain, independent of Dolphin arrival/transport.
+    healing: HashMap<u32, (f32, u32)>,
+    healing_active: HashSet<u32>,
     /// Onions whose beacon rings are on (`GoalItem::setSpotActive`).
     spots: HashSet<u32>,
     /// Onions a pellet just reached, for their `GoalEffect`.
@@ -506,6 +509,8 @@ impl View {
             cones: HashMap::new(),
             materialize: HashMap::new(),
             materializing: HashSet::new(),
+            healing: HashMap::new(),
+            healing_active: HashSet::new(),
             spots: HashSet::new(),
             arrivals: Vec::new(),
             grown: Vec::new(),
@@ -694,6 +699,17 @@ impl View {
         } else {
             self.materialize.remove(&captain);
         }
+    }
+
+    /// Dolphin recovery particles at Olimar's current position, with one soul per stored
+    /// Pikmin sacrificed. Progress outside 0..1 ends the attached healing sparkles.
+    pub fn set_healing(&mut self, captain: u32, progress: f32, ghosts: u32) {
+        if progress.is_finite() && (0.0..1.0).contains(&progress) {
+            if self.healing.get(&captain).is_some_and(|&(previous, _)| progress < previous) {
+                self.healing_active.remove(&captain);
+            }
+            self.healing.insert(captain, (progress, ghosts.min(100)));
+        } else { self.healing.remove(&captain); }
     }
 
     /// Poses everything in `sim` for this frame. `alpha` is how far into the next tick the
@@ -1020,6 +1036,26 @@ impl View {
             let anim = self.animator.captain(&self.piki_anims, &params, c, dt);
             let mut root = crate::animator::captain_root(&params, c);
             let fx_key = (8u64 << 48) | ((c.id.0 as u64) << 8);
+            let heal_key = (9u64 << 48) | ((c.id.0 as u64) << 8);
+            if let Some(&(_, ghosts)) = self.healing.get(&c.id.0) {
+                if let Some(fx) = self.effects.as_mut() {
+                    if self.healing_active.insert(c.id.0) {
+                        fx.spawn(fx_defs::NAVI_RECOVER, pos);
+                        fx.attach(heal_key, fx_defs::NAVI_SPARKLE, pos);
+                        fx.attach(heal_key | 1, fx_defs::NAVI_RINGS, pos);
+                        for i in 0..ghosts {
+                            let angle = i as f32 * 2.399_963;
+                            let radius = 8.0 + (i % 3) as f32 * 4.0;
+                            let at = pos + Vec3::new(angle.cos() * radius, 4.0 + (i % 4) as f32 * 3.0, angle.sin() * radius);
+                            fx.spawn(fx_defs::PIKI_DEAD_SOUL, at);
+                        }
+                    }
+                    fx.move_attached(heal_key, pos);
+                    fx.move_attached(heal_key | 1, pos);
+                }
+            } else if self.healing_active.remove(&c.id.0) && let Some(fx) = self.effects.as_mut() {
+                fx.detach_where(|k| k & !255 == heal_key);
+            }
             if let Some(&p) = self.materialize.get(&c.id.0) {
                 // Host extension: transport from the Dolphin's hatch to the captain's
                 // held arrival pose, using NaviUfoState's own recovery effects.

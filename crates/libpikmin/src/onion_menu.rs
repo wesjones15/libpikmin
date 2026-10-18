@@ -162,6 +162,39 @@ impl Sim {
         }
     }
 
+    /// Host extension: sacrifice stored Pikmin to heal a captain, leaves before buds before
+    /// flowers (5%, 10%, 20% max health). Preserve one available Pikmin and every queued exit.
+    /// Returns the number consumed and the health fraction restored, capped at the deficit.
+    pub fn sacrifice_onion_stock(&mut self, onion: OnionId, missing: f32) -> (u32, f32) {
+        if !missing.is_finite() || missing <= 0.0 { return (0, 0.0); }
+        let Some(o) = self.onions.get_mut(onion.0 as usize) else { return (0, 0.0) };
+        if o.ship.is_some() || !o.takes_deliveries() { return (0, 0.0); }
+        let mut available = o.stored;
+        for (colour, stock) in available.iter_mut().enumerate() {
+            // Exits take flowers first, then buds and leaves. These are already promised.
+            let mut pending = o.exits.iter().filter(|e| e.0.index() == colour).count() as u32;
+            for stage in (0..3).rev() {
+                let reserved = stock[stage].min(pending);
+                stock[stage] -= reserved;
+                pending -= reserved;
+            }
+        }
+        let budget = available.iter().flatten().sum::<u32>().saturating_sub(1);
+        let (mut killed, mut healing) = (0, 0.0f32);
+        let missing = missing.min(1.0);
+        for (stage, fraction) in [0.05, 0.1, 0.2].into_iter().enumerate() {
+            for (colour, stock) in available.iter().enumerate() {
+                for _ in 0..stock[stage] {
+                    if killed == budget || healing + 1e-6 >= missing { return (killed, healing.min(missing)); }
+                    o.stored[colour][stage] -= 1;
+                    killed += 1;
+                    healing += fraction;
+                }
+            }
+        }
+        (killed, healing.min(missing))
+    }
+
     /// `GoalItem` dispensing: one Pikmin out every 0.04-0.06 s.
     pub(crate) fn update_onion_exits(&mut self, dt: f32) {
         for oi in 0..self.onions.len() {
