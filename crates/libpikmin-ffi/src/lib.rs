@@ -2438,6 +2438,22 @@ pub unsafe extern "C" fn pik_sim_set_auto_pluck(sim: *mut PikSim, seconds: f32) 
     unsafe { with(sim, (), |s| s.sim.set_auto_pluck((seconds >= 0.0).then_some(seconds))) }
 }
 
+/// Trigger the landed Onion's plucker for ready sprouts in reach.
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_trigger_plucker(sim: *mut PikSim, onion: u32) -> u8 {
+    unsafe { with(sim, 0, |s| s.sim.trigger_plucker(OnionId(onion)) as u8) }
+}
+
+/// Recall a captain's carriers from pellets whose team is below minimum.
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_recall_stuck_carriers(sim: *mut PikSim, captain: u32) -> u32 {
+    unsafe { with(sim, 0, |s| s.sim.recall_stuck_carriers(CaptainId(captain)) as u32) }
+}
+
 /// [`Sim::set_emergency_recovery`] (`count` 0 off).
 ///
 /// # Safety

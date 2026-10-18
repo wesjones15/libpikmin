@@ -295,6 +295,8 @@ struct ShipFlight {
     animator: libpikmin_assets::ship::ShipAnimator,
     progress: Option<f32>,
     flames: Vec<(u8, &'static str)>,
+    trouble: bool,
+    trouble_spark_time: f32,
 }
 
 // Strip only cinematic travel; the clip still supplies every articulated pose. Hosts
@@ -323,6 +325,8 @@ pub struct View {
     /// Each of the 30 ship parts' model, animations and the joints its upper animator drives, when loaded.
     parts: Vec<Option<PartView>>,
     ships: HashMap<u32, ShipFlight>,
+    pub onion_ground: HashMap<u32, f32>,
+    onion_lift_smoke: HashSet<u32>,
     pub ship_sounds: Vec<(libpikmin::onion::OnionId, &'static str, bool)>,
     pub demo_sounds: Vec<Option<(u16, u16)>>,
     pikihead_anims: AnimSet,
@@ -500,6 +504,8 @@ impl View {
             ship_lights,
             parts,
             ships: HashMap::new(),
+            onion_ground: HashMap::new(),
+            onion_lift_smoke: HashSet::new(),
             ship_sounds: Vec::new(),
             demo_sounds: Vec::new(),
             pikihead_anims: AnimSet::load(assets, paths::PIKIHEAD_ANIM_MGR, paths::PIKIHEAD_BUNDLE)?,
@@ -767,6 +773,7 @@ impl View {
                     let mut animator = libpikmin_assets::ship::ShipAnimator::new(&self.ship_mgr, part_mgrs);
                     animator.start(&on_board, level, &mut Vec::new());
                     ShipFlight { animator, progress: None, flames: Vec::new(), ground_anchor: None,
+                        trouble: false, trouble_spark_time: 0.0,
                         sucking: false,
                         seen: on_board.clone(), pending: VecDeque::new(), repair: None }
                 });
@@ -883,6 +890,48 @@ impl View {
                     Some(o.pos + rot * pose.joints.get(c.joint)?.transform_point3(c.centre))
                 };
                 let fx_key = (6u64 << 48) | ((o.id.0 as u64) << 8);
+                // The damaged ship smokes from its authored hull joints while it is
+                // grounded. Keep the emitters attached as repairs change its pose.
+                let wrecked = self.repair_mode && on_board.len() < 30
+                    && o.flight_motion.is_none() && !animator.taking_off() && !animator.landing();
+                let trouble_key = (7u64 << 48) | ((o.id.0 as u64) << 8);
+                let trouble_points = [
+                    ("joint2", Vec3::new(13.1, -98.4, -2.0)),
+                    ("joint2", Vec3::new(-9.2, -68.1, 28.6)),
+                    ("joint41", Vec3::new(-22.2, 4.9, -25.0)),
+                    ("joint2", Vec3::new(0.0, -93.0, 0.0)),
+                ];
+                if let Some(e) = self.effects.as_mut() {
+                    if wrecked && !flight.trouble {
+                        for slot in [0usize, 1, 3] {
+                            if let Some(j) = vm.model.joint_index(trouble_points[slot].0) {
+                                let at = o.pos + rot * pose.joints[j].transform_point3(trouble_points[slot].1);
+                                e.attach(trouble_key | slot as u64, fx_defs::ROCKET_TROUBLE[slot], at);
+                            }
+                        }
+                    }
+                    if wrecked {
+                        for slot in [0usize, 1, 3] {
+                            if let Some(j) = vm.model.joint_index(trouble_points[slot].0) {
+                                e.move_attached(trouble_key | slot as u64,
+                                    o.pos + rot * pose.joints[j].transform_point3(trouble_points[slot].1));
+                            }
+                        }
+                        flight.trouble_spark_time += dt;
+                        if flight.trouble_spark_time >= 2.7 {
+                            flight.trouble_spark_time = 0.0;
+                            for slot in [2usize] {
+                                if let Some(j) = vm.model.joint_index(trouble_points[slot].0) {
+                                    e.spawn(fx_defs::ROCKET_TROUBLE[slot],
+                                        o.pos + rot * pose.joints[j].transform_point3(trouble_points[slot].1));
+                                }
+                            }
+                        }
+                    } else if flight.trouble {
+                        e.detach_where(|k| k & !255 == trouble_key);
+                    }
+                }
+                flight.trouble = wrecked;
                 for cue in cues {
                     match cue {
                         ShipCue::Sound(name) => self.ship_sounds.push((o.id, name, true)),
@@ -935,6 +984,26 @@ impl View {
                 continue;
             }
             self.onion_light(sim, i, o, dt);
+            let smoke_key = (8u64 << 48) | ((o.id.0 as u64) << 8);
+            let lifting = matches!(o.anim, libpikmin::onion::OnionAnim::TakeOff { .. } | libpikmin::onion::OnionAnim::Hover);
+            if lifting {
+                let ground = self.onion_ground.get(&o.id.0).copied().unwrap_or(o.pos.y);
+                let at = Vec3::new(o.pos.x, ground, o.pos.z);
+                if let Some(fx) = self.effects.as_mut() {
+                    if self.onion_lift_smoke.insert(o.id.0) {
+                        if let Some(g) = fx.attach(smoke_key, fx_defs::ROCKET_TAKE_S, at) {
+                            // take_s.pcr is a one-pass burst. Recycle its authored
+                            // 100-frame curve while the Onion is aloft.
+                            std::sync::Arc::make_mut(&mut g.pcr).max_passes = 0;
+                        }
+                    }
+                    fx.move_attached(smoke_key, at);
+                    fx.attached_emission_scale(smoke_key,
+                        (1.0 - (o.pos.y - ground).max(0.0) / 180.0).clamp(0.0, 1.0));
+                }
+            } else if self.onion_lift_smoke.remove(&o.id.0) {
+                if let Some(fx) = self.effects.as_mut() { fx.detach(smoke_key); }
+            }
             let Some((motion, anim, before)) = self.animator.onion(&self.onion_anims, i, o, dt) else {
                 continue;
             };
@@ -1018,7 +1087,7 @@ impl View {
                 if let Some(fx) = self.effects.as_mut() {
                     for value in keys {
                         match (motion, value) {
-                            (6..=8, 2) => { fx.spawn(fx_defs::ROCKET_TAKE_S, o.pos); }
+                            (6..=8, 2) => { /* Attached ground smoke above handles the takeoff key. */ }
                             (9..=11, 0) => { fx.spawn(fx_defs::ROCKET_LAND_S, o.pos); }
                             (9..=11, 1) => { fx.spawn(fx_defs::ROCKET_SMOKE_D, bases[0]); }
                             (9..=11, 2) => { for at in bases { fx.spawn(fx_defs::ROCKET_SMOKE_D, at); } }

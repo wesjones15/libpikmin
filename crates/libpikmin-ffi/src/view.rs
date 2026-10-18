@@ -223,7 +223,8 @@ pub unsafe extern "C" fn pik_view_show_cursors(view: *mut PikView, show: u8) {
 }
 
 /// Host UI and Onion-healing sounds. 0 open, 1 count changed, 2 count limit,
-/// 3 close, 4 Olimar healed, 5 one Pikmin ghost. `pos` is in sim units.
+/// 3 close, 4 Olimar healed, 5 one Pikmin ghost, 6/7 recall whistle start/stop.
+/// `pos` is in sim units.
 /// # Safety
 /// `view` is a live view handle.
 #[unsafe(no_mangle)]
@@ -235,12 +236,17 @@ pub unsafe extern "C" fn pik_view_play_sound(view: *mut PikView, sound: u8, pos:
         3 => "SYSSE_CMENU_OFF",
         4 => "SE_PLAYER_TOUCHHONEY",
         5 => "SE_PIKI_DEAD",
+        6 => "SE_GATHER",
+        7 => "SE_GATHER",
         _ => return,
     };
     // Menu cues in drawContainer.cpp; honey heals Olimar in itemAI.cpp; ghost
     // calls follow Piki::doKill in pikidoKill.cpp.
     unsafe { with_view(view, (), |v| {
-        if let Some(audio) = &v.audio { audio.play_at(name, pos.into()); }
+        if let Some(audio) = &v.audio {
+            if sound == 7 { audio.stop(name); }
+            else { audio.play_at(name, pos.into()); }
+        }
     }) }
 }
 
@@ -264,6 +270,16 @@ pub unsafe extern "C" fn pik_view_set_celebrating(view: *mut PikView, on: u8) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_ship_repair_mode(view: *mut PikView, on: u8) {
     if let Some(v) = unsafe { view.as_mut() } { v.view.repair_mode = on != 0; }
+}
+
+/// The host's terrain height below an Onion, in simulation units.
+/// # Safety
+/// `view` is a live view handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_onion_ground(view: *mut PikView, onion: u32, height: f32) {
+    if let Some(v) = unsafe { view.as_mut() } {
+        v.view.onion_ground.insert(onion, height);
+    }
 }
 
 /// # Safety

@@ -221,6 +221,10 @@ impl Effects {
                 effects::ROCKET_LAND,
                 effects::KAFUN_NG,
                 effects::ROCKET_TAKE_S,
+                effects::ROCKET_TROUBLE[0],
+                effects::ROCKET_TROUBLE[1],
+                effects::ROCKET_TROUBLE[2],
+                effects::ROCKET_TROUBLE[3],
                 effects::ROCKET_LAND_S,
                 effects::ROCKET_SMOKE_D,
                 effects::ONYON_SUCK,
@@ -284,6 +288,12 @@ impl Effects {
     pub fn move_attached(&mut self, key: u64, pos: Vec3) {
         for (_, g) in self.attached.iter_mut().filter(|(k, _)| *k == key) {
             g.emit_pos = pos;
+        }
+    }
+
+    pub fn attached_emission_scale(&mut self, key: u64, scale: f32) {
+        for (_, g) in self.attached.iter_mut().filter(|(k, _)| *k == key) {
+            g.emission_scale = scale;
         }
     }
 

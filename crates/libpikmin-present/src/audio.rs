@@ -208,6 +208,10 @@ impl Audio {
         self.with(|s| s.play(name, pos));
     }
 
+    pub fn stop(&self, name: &str) {
+        self.with(|s| s.stop(name));
+    }
+
     /// Give a host the full vanilla bell as stereo 32 kHz PCM, so its death player can
     /// outlive this scene's audio stream. Ten seconds includes both phrases and the decay.
     pub fn take_death_sting(&mut self) -> Option<Vec<f32>> {

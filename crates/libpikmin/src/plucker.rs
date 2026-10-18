@@ -82,6 +82,19 @@ impl Sim {
         }
     }
 
+    /// Host button: ask this landed Onion's plucker to collect nearby ready sprouts
+    /// now, without changing the automatic pluck delay for the other Onions.
+    pub fn trigger_plucker(&mut self, onion: OnionId) -> bool {
+        let Some(oi) = self.onions.iter().position(|o| o.id == onion && o.ship.is_none()
+            && o.grounded() && o.stored_total() > 0) else { return false; };
+        let at = self.onions[oi].pos;
+        if self.pikis.iter().any(|p| matches!(p.state, PikiState::Plucker(pl) if pl.onion == onion))
+            || !self.sprouts.iter().flatten().any(|s| s.pluckable() && s.claimed_by.is_none()
+                && in_reach(at, s.pos)) { return false; }
+        self.send_plucker(oi);
+        true
+    }
+
     fn send_plucker(&mut self, oi: usize) {
         let o = &self.onions[oi];
         // The colour it holds most of, its best leaf stage.
@@ -300,6 +313,21 @@ mod tests {
         for _ in 0..(seconds * crate::TICK_HZ as f32) as u32 {
             sim.step(host);
         }
+    }
+
+    #[test]
+    fn button_sends_one_plucker_without_waiting_for_auto_delay() {
+        let mut sim = Sim::new(Params::default(), 7);
+        let mut host = FlatHost;
+        let captain = sim.add_captain(Vec3::new(2000.0, 0.0, 0.0));
+        let onion = sim.add_onion(Vec3::ZERO, &PikiColor::ALL);
+        sim.set_onion_owner(onion, Some(captain));
+        sim.store_in_onion(onion, PikiColor::Red, Happa::Leaf, 2);
+        sim.plant_sprout(PikiColor::Blue, Vec3::new(150.0, 0.0, 0.0));
+        run(&mut sim, &mut host, 3.0);
+        assert!(sim.trigger_plucker(onion));
+        assert!(!sim.trigger_plucker(onion), "one plucker per Onion");
+        assert_eq!(sim.onions()[0].stored_total(), 1);
     }
 
     #[test]

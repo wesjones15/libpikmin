@@ -197,6 +197,24 @@ pub struct Carry {
 }
 
 impl Sim {
+    /// Host Onion shortcut: recall only this captain's carriers on objects that
+    /// still lack the minimum team. A full team already moving a part keeps it.
+    pub fn recall_stuck_carriers(&mut self, captain: crate::CaptainId) -> usize {
+        if captain.0 as usize >= self.captains.len() { return 0; }
+        let ids: Vec<_> = self.pellets.iter()
+            .filter(|pel| !pel.carriers.is_empty()
+                && pel.carriers.len() < pel.desc.min_carriers.max(1) as usize)
+            .flat_map(|pel| pel.carriers.iter().copied())
+            .filter(|id| self.pikis[id.0 as usize].captain == Some(captain))
+            .collect();
+        for id in &ids {
+            self.carry_recall_until.insert(*id, self.tick + 2 * crate::TICK_HZ as u64);
+            self.leave_current(*id);
+            self.join_squad(*id, captain);
+        }
+        ids.len()
+    }
+
     /// Host extension to `ActTransport::decideGoal`: receive parts at grounded Onions.
     /// The host owns the recovered set and fits ships after accepting the receipt.
     pub fn set_ship_part_onion_delivery(&mut self, enabled: bool) {
@@ -301,6 +319,9 @@ impl Sim {
 
     /// `ActTransport::init`: head for a random free slot.
     pub(crate) fn start_carry(&mut self, pi: usize, pellet: PelletId) -> bool {
+        if self.carry_recall_until.get(&self.pikis[pi].id).is_some_and(|&until| self.tick < until) {
+            return false;
+        }
         if !self.pellet_has_destination(&self.pellets[pellet.0 as usize]) { return false; }
         if self.ship_part_delivery == 3 && let Some(part) = self.pellets[pellet.0 as usize].desc.ship_part {
             if !self.onions.iter().any(|o| o.grounded() && self.competitive_receiver(o.id, self.pikis[pi].captain, part)) { return false; }
@@ -918,6 +939,24 @@ mod tests {
             CarryPhase::Lift { frame: 30.0, lifted: true }
         };
         sim.pikis[id.0 as usize].state = PikiState::Carry(Carry { pellet, slot: slot as u32, phase });
+    }
+
+    #[test]
+    fn recall_only_releases_understaffed_carry_teams() {
+        let mut sim = Sim::new(Params::default(), 7);
+        let captain = sim.add_captain(Vec3::ZERO);
+        sim.add_onion(Vec3::new(300.0, 0.0, 0.0), &PikiColor::ALL);
+        let short = sim.spawn_pellet(PelletDesc::numbered(&sim.params, 5,
+            PikiColor::Red, Vec3::new(50.0, 0.0, 0.0), 0.0));
+        let full = sim.spawn_pellet(PelletDesc::numbered(&sim.params, 1,
+            PikiColor::Blue, Vec3::new(-50.0, 0.0, 0.0), 0.0));
+        attach(&mut sim, PikiColor::Red, short);
+        attach(&mut sim, PikiColor::Blue, full);
+        for p in &mut sim.pikis { p.captain = Some(captain); }
+        assert_eq!(sim.recall_stuck_carriers(captain), 1);
+        assert!(sim.pellet(short).carriers.is_empty());
+        assert_eq!(sim.pellet(full).carriers.len(), 1);
+        assert!(sim.pikis()[0].state.in_squad());
     }
 
     struct BuriedHost {
