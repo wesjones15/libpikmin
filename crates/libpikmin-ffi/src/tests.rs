@@ -3,6 +3,17 @@
 use super::*;
 
 #[test]
+fn intro_cache_errors_cross_abi_without_panics_or_buffer_overruns() {
+    let mut msg = [0xAB; 64];
+    unsafe {
+        assert_eq!(pik_render_stings(std::ptr::null(), msg.as_mut_ptr(), 4), 0);
+        assert_eq!(&msg[..4], b"mis\0");
+        assert!(msg[4..].iter().all(|b| *b == 0xAB));
+        assert_eq!(pik_render_stings(std::ptr::null(), std::ptr::null_mut(), 0), 0);
+    }
+}
+
+#[test]
 fn hud_digits_cross_the_abi_and_short_buffers_are_rejected() {
     let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
     let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();

@@ -586,6 +586,26 @@ pub unsafe extern "C" fn pik_extract(
     ok
 }
 
+/// Cache the intro in `dir/ror2_audio` from extracted banks, without an audio device.
+/// Existing complete files are reused. Returns 1 on success, with a UTF-8 diagnostic.
+///
+/// # Safety
+/// `dir` null or nul-terminated UTF-8; `msg` null or writable for `msg_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_render_stings(dir: *const c_char, msg: *mut u8, msg_len: u32) -> u8 {
+    let result = catch_unwind(|| -> Result<(), String> {
+        let dir = unsafe { path_arg(dir) }.ok_or("missing asset directory")?;
+        libpikmin_present::stings::render_stings(&dir)
+    });
+    let (ok, text) = match result {
+        Ok(Ok(())) => (1, "Impact Site intro cached".into()),
+        Ok(Err(e)) => (0, e),
+        Err(_) => (0, "intro rendering panicked".into()),
+    };
+    unsafe { write_str(&text, msg, msg_len) };
+    ok
+}
+
 /// # Safety
 /// `p` null or a nul-terminated string.
 unsafe fn path_arg(p: *const c_char) -> Option<PathBuf> {

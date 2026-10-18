@@ -486,6 +486,17 @@ squad and navigation jumps inherit their captain's takeoff speed, including extr
   height 88. The `cont` reach is 70 from the Onion's centre. The real sphere is in the
   Onion's collision data, which isn't loaded.
 
+## RoR2 intro audio cache
+
+Like the Sunshine host, Olimar prepares its intro on the first-run asset worker.
+`pik_render_stings` renders 3.5 seconds of Impact Site (`BGM_Tutorial`, sequence 4;
+piki_scene.c) from the user's extracted sound banks without opening a device.
+Completed stereo PCM16 files are published into `assets/ror2_audio/spawn.wav`,
+with `stings.version` for cache invalidation. Later starts reuse the cache without
+the original disc; missing clips or old versions regenerate. Deployment contains
+no intro WAV. The landed Onion menu is host-gated to Olimar standing in its beam;
+following, airborne, dormant and out-of-reach Onions provide no interact prompt.
+
 ## Planned
 
 - Pikmin 2 types (Purple, White, Bulbmin), Candypop Buds, hazards.
