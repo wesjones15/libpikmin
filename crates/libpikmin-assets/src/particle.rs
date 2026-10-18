@@ -150,6 +150,9 @@ pub mod effects {
     /// `EFF_Onyon_Suck`: light drawn up into an Onion as a pellet arrives (`GoalEffect`,
     /// cast by `PelletGoalState::init`).
     pub const ONYON_SUCK: EffectDef = one("effects/pcr/goal_sui.pcr", "effects/tex/ps_glow.bti");
+    /// GoalItem::playEffect motion 12: sparkle at the top and a smoke puff by a leg.
+    pub const ONYON_SPARKLES: EffectDef = one("effects/pcr/ony_kira.pcr", "effects/tex/star4_i.bti");
+    pub const ONYON_PUFF: EffectDef = one("effects/pcr/ony_paf.pcr", "effects/tex/hokori4.bti");
     /// GoalItem::playEffect, startup motions 3..5.
     pub const ONYON_BOOT_FLOW: [EffectDef; 2] = [
         one("effects/pcr/kafun_b.pcr", "effects/tex/star4_i.bti"),

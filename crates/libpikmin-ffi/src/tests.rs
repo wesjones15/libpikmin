@@ -31,6 +31,35 @@ fn hud_digits_cross_the_abi_and_short_buffers_are_rejected() {
             assert_eq!(pik_number_texture(dir.as_ptr(), digit, 0, &mut info, rgba.as_mut_ptr(), rgba.len() as u32), 1);
             assert!(rgba.chunks_exact(4).any(|p| p[3] != 0));
         }
+        for glyph in 0..4 {
+            assert_eq!(pik_damage_suffix_texture(dir.as_ptr(), glyph, &mut info, std::ptr::null_mut(), 0), 1);
+            assert_eq!((info.width, info.height), (64, 64));
+            let mut rgba = vec![0; 64 * 64 * 4];
+            assert_eq!(pik_damage_suffix_texture(dir.as_ptr(), glyph, &mut info, rgba.as_mut_ptr(), rgba.len() as u32), 1);
+            assert!(rgba.chunks_exact(4).any(|p| p[3] != 0));
+        }
+    }
+}
+
+#[test]
+fn carry_strip_and_bottom_icons_cross_the_abi() {
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    let mut info = PikTexture::default();
+    unsafe {
+        assert_eq!(pik_carry_digit_texture(dir.as_ptr(), &mut info, std::ptr::null_mut(), 0), 1);
+        assert_eq!((info.width, info.height), (176, 16));
+        let mut short = [0xAB; 4];
+        assert_eq!(pik_carry_digit_texture(dir.as_ptr(), &mut info, short.as_mut_ptr(), 4), 0);
+        assert_eq!(short, [0xAB; 4]);
+        let mut rgba = vec![0; (info.width * info.height * 4) as usize];
+        assert_eq!(pik_carry_digit_texture(dir.as_ptr(), &mut info, rgba.as_mut_ptr(), rgba.len() as u32), 1);
+        assert!(rgba.chunks_exact(4).any(|p| p[3] != 0));
+        for icon in 0..7 {
+            assert_eq!(pik_hud_icon_texture(dir.as_ptr(), icon, &mut info, std::ptr::null_mut(), 0), 1);
+            assert!(info.width > 0 && info.height > 0);
+        }
+        assert_eq!(pik_hud_icon_texture(dir.as_ptr(), 7, &mut info, std::ptr::null_mut(), 0), 0);
     }
 }
 
@@ -263,6 +292,22 @@ fn the_view_poses_a_sim_through_the_abi() {
         }
         pik_sim_free(sim);
         pik_view_free(view);
+    }
+}
+
+#[test]
+fn host_can_remove_the_original_field_limit() {
+    // SAFETY: the sim and positions remain live for every ABI call.
+    unsafe {
+        let sim = pik_sim_new(std::ptr::null(), 5);
+        assert!(!sim.is_null());
+        let pos = PikVec3::default();
+        let captain = pik_sim_add_captain(sim, &pos);
+        pik_sim_set_field_limit(sim, i32::MAX as u32);
+        for _ in 0..150 {
+            assert!(pik_sim_spawn_piki(sim, 0, &pos, captain) >= 0);
+        }
+        pik_sim_free(sim);
     }
 }
 

@@ -222,6 +222,28 @@ pub unsafe extern "C" fn pik_view_show_cursors(view: *mut PikView, show: u8) {
     unsafe { with_view(view, (), |v| v.view.show_cursors = show != 0) }
 }
 
+/// Host UI and Onion-healing sounds. 0 open, 1 count changed, 2 count limit,
+/// 3 close, 4 Olimar healed, 5 one Pikmin ghost. `pos` is in sim units.
+/// # Safety
+/// `view` is a live view handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_play_sound(view: *mut PikView, sound: u8, pos: PikVec3) {
+    let name = match sound {
+        0 => "SYSSE_CMENU_ON",
+        1 => "SYSSE_CMENU_SELECT",
+        2 => "SYSSE_CMENU_ERROR",
+        3 => "SYSSE_CMENU_OFF",
+        4 => "SE_PLAYER_TOUCHHONEY",
+        5 => "SE_PIKI_DEAD",
+        _ => return,
+    };
+    // Menu cues in drawContainer.cpp; honey heals Olimar in itemAI.cpp; ghost
+    // calls follow Piki::doKill in pikidoKill.cpp.
+    unsafe { with_view(view, (), |v| {
+        if let Some(audio) = &v.audio { audio.play_at(name, pos.into()); }
+    }) }
+}
+
 /// Have views made after this draw the Dolphin's parts as the sim fits them (`animator`'s sibling,
 /// `view::set_repaired_ship`). Call before [`pik_view_new`]: the parts' models are loaded then.
 #[unsafe(no_mangle)]

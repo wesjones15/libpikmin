@@ -38,7 +38,7 @@ mod view;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 29;
+pub const PIK_ABI_VERSION: u32 = 30;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
@@ -532,6 +532,110 @@ pub unsafe extern "C" fn pik_number_texture(
     }).unwrap_or(0)
 }
 
+/// A K, M, B or ! damage-number suffix from the disc's bigFont bitmap,
+/// also used by the day/location screens. The output is a 64x64 RGBA glyph.
+/// # Safety
+/// Same writable-buffer contract as [`pik_number_texture`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_damage_suffix_texture(
+    dir: *const c_char, glyph: u32, info: *mut PikTexture, rgba: *mut u8, len: u32,
+) -> u8 {
+    let Some(root) = (unsafe { path_arg(dir) }) else { return 0 };
+    let c = match glyph { 0 => b'K', 1 => b'M', 2 => b'B', 3 => b'!', _ => return 0 };
+    catch_unwind(|| {
+        let assets = libpikmin_assets::Assets { root };
+        let Ok(data) = assets.read(libpikmin_assets::screen::Font::PATH) else { return 0 };
+        let Ok((image, _, _)) = libpikmin_assets::texture::decode_bti(&data) else { return 0 };
+        let font = libpikmin_assets::screen::Font::new(image, 21, 42);
+        let Some(g) = font.glyph(c) else { return 0 };
+        if g.width <= 0 || g.height <= 0 { return 0; }
+        let mut pixels = vec![0u8; 64 * 64 * 4];
+        for y in 0..56usize {
+            for x in 0..56usize {
+                let sx = g.x as usize + x * g.width as usize / 56;
+                let sy = g.y as usize + y * g.height as usize / 56;
+                let from = (sy * font.image.width as usize + sx) * 4;
+                let to = ((y + 4) * 64 + x + 4) * 4;
+                pixels[to..to + 4].copy_from_slice(&font.image.rgba[from..from + 4]);
+            }
+        }
+        unsafe {
+            if let Some(info) = info.as_mut() {
+                *info = PikTexture { width: 64, height: 64, wrap_s: 1, wrap_t: 1, _pad: [0; 2] };
+            }
+            if !rgba.is_null() {
+                if (len as usize) < pixels.len() { return 0; }
+                std::ptr::copy_nonoverlapping(pixels.as_ptr(), rgba, pixels.len());
+            }
+        }
+        1
+    }).unwrap_or(0)
+}
+
+/// The original carry gauge's horizontal 0-9, dash glyph strip
+/// (`LifeGaugeMgr::init`, `gauges.cpp`). RGBA8, rows top first. Null `rgba`
+/// queries dimensions. The host selects one of its eleven equal UV cells.
+///
+/// # Safety
+/// Same writable-buffer contract as [`pik_number_texture`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_carry_digit_texture(
+    dir: *const c_char, info: *mut PikTexture, rgba: *mut u8, len: u32,
+) -> u8 {
+    let Some(root) = (unsafe { path_arg(dir) }) else { return 0 };
+    catch_unwind(|| {
+        let assets = libpikmin_assets::Assets { root };
+        let Ok(data) = assets.read("intro/item_0_9.bti") else { return 0 };
+        let Ok((image, _, _)) = libpikmin_assets::texture::decode_bti(&data) else { return 0 };
+        if image.width == 0 || image.width % 11 != 0 { return 0; }
+        // SAFETY: caller promises writable outputs of the documented lengths.
+        unsafe {
+            if let Some(info) = info.as_mut() {
+                *info = PikTexture { width: image.width, height: image.height, wrap_s: 1, wrap_t: 1, _pad: [0; 2] };
+            }
+            if !rgba.is_null() {
+                if (len as usize) < image.rgba.len() { return 0; }
+                std::ptr::copy_nonoverlapping(image.rgba.as_ptr(), rgba, image.rgba.len());
+            }
+        }
+        1
+    }).unwrap_or(0)
+}
+
+/// One of the original lower-HUD icons from `screen/eng_tex/`: 0 Olimar,
+/// 1 health backing, 2 Pikmin backing, 3 no Pikmin, 4-6 Blue/Red/Yellow leaf.
+/// RGBA8, rows top first. Null `rgba` queries dimensions.
+/// # Safety
+/// Same writable-buffer contract as [`pik_number_texture`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_hud_icon_texture(
+    dir: *const c_char, icon: u32, info: *mut PikTexture, rgba: *mut u8, len: u32,
+) -> u8 {
+    let Some(root) = (unsafe { path_arg(dir) }) else { return 0 };
+    let name = match icon {
+        0 => "navi01.bti", 1 => "n_64.bti", 2 => "i_base64.bti",
+        3 => "piki0.bti", 4 => "bp_l64.bti", 5 => "rp_l64.bti", 6 => "yp_l64.bti",
+        _ => return 0,
+    };
+    catch_unwind(|| {
+        let assets = libpikmin_assets::Assets { root };
+        let path = format!("screen/eng_tex/{name}");
+        let Ok(data) = assets.read(&path) else { return 0 };
+        let Ok((image, _, _)) = libpikmin_assets::texture::decode_bti(&data) else { return 0 };
+        // SAFETY: caller promises writable outputs of the documented lengths.
+        unsafe {
+            if let Some(info) = info.as_mut() {
+                *info = PikTexture { width: image.width, height: image.height, wrap_s: 1, wrap_t: 1, _pad: [0; 2] };
+            }
+            if !rgba.is_null() {
+                if (len as usize) < image.rgba.len() { return 0; }
+                std::ptr::copy_nonoverlapping(image.rgba.as_ptr(), rgba, image.rgba.len());
+            }
+        }
+        1
+    }).unwrap_or(0)
+}
+
 /// Looks for a Pikmin disc image (.iso/.gcm/.ciso) in each of the `;`-separated folders in
 /// `dirs` and writes the first one's path (UTF-8, nul-terminated) to `out`. Returns 0 if none
 /// was found or it didn't fit in `out_len` bytes.
@@ -771,6 +875,16 @@ pub unsafe extern "C" fn pik_sim_new(assets_dir: *const c_char, seed: u64) -> *m
         })),
         Err(_) => std::ptr::null_mut(),
     }
+}
+
+/// Overrides the disc's field population limit for hosts with a larger swarm budget.
+/// `i32::MAX` removes the original game's 100-Pikmin gameplay cap.
+///
+/// # Safety
+/// `sim` is a live handle from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_field_limit(sim: *mut PikSim, limit: u32) {
+    unsafe { with(sim, (), |s| s.sim.params_mut().ai.max_pikis_on_field = limit.min(i32::MAX as u32) as i32) }
 }
 
 /// # Safety
@@ -2130,7 +2244,7 @@ pub unsafe extern "C" fn pik_sim_give_onion_seeds(sim: *mut PikSim, onion: u32, 
     unsafe {
         with(sim, (), |s| {
             if onion_ok(&s.sim, onion) {
-                s.sim.give_onion_seeds(OnionId(onion), color, seeds.min(100));
+                s.sim.give_onion_seeds(OnionId(onion), color, seeds.min(i32::MAX as u32));
             }
         })
     }
