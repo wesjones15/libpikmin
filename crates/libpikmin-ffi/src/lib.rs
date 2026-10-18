@@ -666,7 +666,8 @@ pub unsafe extern "C" fn pik_carry_digit_texture(
 /// 1 health backing, 2 Pikmin backing, 3 no Pikmin, 4-6 Blue/Red/Yellow leaf,
 /// 7 Dolphin icon, 8 X button, 9 A button, 10 star, 11 menu backing,
 /// 12 Pikmin multiplication sign, 13-18 bud/flower throw portraits,
-/// 19 the circular backing and 20 the low-life pulse overlay from the original HUD.
+/// 19 the circular backing, 20 the low-life pulse, and 21 the original
+/// w08_160.bti rounded number window (screen/eng_tex).
 /// RGBA8, rows top first. Null `rgba` queries dimensions.
 /// # Safety
 /// Same writable-buffer contract as [`pik_number_texture`].
@@ -684,6 +685,7 @@ pub unsafe extern "C" fn pik_hud_icon_texture(
         13 => "bp_b64.bti", 14 => "rp_b64.bti", 15 => "yp_b64.bti",
         16 => "bp_f64.bti", 17 => "rp_f64.bti", 18 => "yp_f64.bti",
         19 => "0p.bti", 20 => "pinch64.bti",
+        21 => "w08_160.bti",
         _ => return 0,
     };
     catch_unwind(|| {
