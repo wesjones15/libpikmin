@@ -99,11 +99,17 @@ fn carry_strip_and_bottom_icons_cross_the_abi() {
         let mut rgba = vec![0; (info.width * info.height * 4) as usize];
         assert_eq!(pik_carry_digit_texture(dir.as_ptr(), &mut info, rgba.as_mut_ptr(), rgba.len() as u32), 1);
         assert!(rgba.chunks_exact(4).any(|p| p[3] != 0));
-        for icon in 0..7 {
+        for icon in 0..12 {
             assert_eq!(pik_hud_icon_texture(dir.as_ptr(), icon, &mut info, std::ptr::null_mut(), 0), 1);
             assert!(info.width > 0 && info.height > 0);
         }
-        assert_eq!(pik_hud_icon_texture(dir.as_ptr(), 7, &mut info, std::ptr::null_mut(), 0), 0);
+        assert_eq!(pik_hud_icon_texture(dir.as_ptr(), 12, &mut info, std::ptr::null_mut(), 0), 0);
+        for glyph in b"SHIP REPAIR 0123456789" {
+            if *glyph != b' ' {
+                assert_eq!(pik_font_glyph_texture(dir.as_ptr(), *glyph as u32, &mut info, std::ptr::null_mut(), 0), 1);
+                assert_eq!((info.width, info.height), (64, 64));
+            }
+        }
     }
 }
 

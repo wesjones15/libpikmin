@@ -29,3 +29,24 @@ fn disc_stage_songs_render_and_enemy_proximity_changes_the_original_mix() {
     }
     assert!(total_difference > 1.0, "enemy proximity must change the musical layers");
 }
+
+#[test]
+fn ship_repair_menu_songs_render_from_the_disc() {
+    let Some(assets) = Assets::discover(None) else { return };
+    let data = Arc::new(SoundData::load(&assets).unwrap());
+    let tables = JaudioTables::load(&assets).unwrap();
+    // piki_scene.c: title jungle and world-map (space/night) menu music.
+    for song in [7, 12] {
+        let mut audio = SoundSystem::new(data.clone(), tables.clone());
+        audio.play_bgm(0, song);
+        let mut peak = 0.0f32;
+        for _ in 0..90 {
+            audio.frame();
+            for &sample in &audio.render_native(1.0 / 30.0) {
+                assert!(sample.is_finite());
+                peak = peak.max(sample.abs());
+            }
+        }
+        assert!(peak > 0.001, "menu BGM {song} must render original music");
+    }
+}

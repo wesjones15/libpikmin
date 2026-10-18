@@ -20,10 +20,11 @@
 //! [`pik_struct_sizes`] reports their sizes so a host can refuse a mismatched build. Nothing
 //! unwinds into the caller: a panic poisons that sim and later calls on it do nothing.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use libpikmin::carry::PelletState;
 use libpikmin::onion::{OnionAnim, SproutState};
@@ -586,6 +587,51 @@ pub unsafe extern "C" fn pik_damage_suffix_texture(
     }).unwrap_or(0)
 }
 
+/// One printable ASCII glyph from Pikmin's bigFont.bti, used by the landing
+/// banner and Ship Repair score screens. RGBA8, rows top first.
+/// # Safety
+/// Same writable-buffer contract as [`pik_number_texture`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_font_glyph_texture(
+    dir: *const c_char, character: u32, info: *mut PikTexture, rgba: *mut u8, len: u32,
+) -> u8 {
+    let Some(root) = (unsafe { path_arg(dir) }) else { return 0 };
+    if !(0x21..=0x7e).contains(&character) { return 0; }
+    catch_unwind(|| {
+        static FONTS: OnceLock<Mutex<HashMap<PathBuf, libpikmin_assets::screen::Font>>> = OnceLock::new();
+        let Ok(mut fonts) = FONTS.get_or_init(|| Mutex::new(HashMap::new())).lock() else { return 0 };
+        if !fonts.contains_key(&root) {
+            let assets = libpikmin_assets::Assets { root: root.clone() };
+            let Ok(data) = assets.read(libpikmin_assets::screen::Font::PATH) else { return 0 };
+            let Ok((image, _, _)) = libpikmin_assets::texture::decode_bti(&data) else { return 0 };
+            fonts.insert(root.clone(), libpikmin_assets::screen::Font::new(image, 21, 42));
+        }
+        let font = &fonts[&root];
+        let Some(g) = font.glyph(character as u8) else { return 0 };
+        if g.width <= 0 || g.height <= 0 { return 0; }
+        let mut pixels = vec![0u8; 64 * 64 * 4];
+        for y in 0..56usize {
+            for x in 0..56usize {
+                let sx = g.x as usize + x * g.width as usize / 56;
+                let sy = g.y as usize + y * g.height as usize / 56;
+                let from = (sy * font.image.width as usize + sx) * 4;
+                let to = ((y + 4) * 64 + x + 4) * 4;
+                pixels[to..to + 4].copy_from_slice(&font.image.rgba[from..from + 4]);
+            }
+        }
+        unsafe {
+            if let Some(info) = info.as_mut() {
+                *info = PikTexture { width: 64, height: 64, wrap_s: 1, wrap_t: 1, _pad: [0; 2] };
+            }
+            if !rgba.is_null() {
+                if (len as usize) < pixels.len() { return 0; }
+                std::ptr::copy_nonoverlapping(pixels.as_ptr(), rgba, pixels.len());
+            }
+        }
+        1
+    }).unwrap_or(0)
+}
+
 /// The original carry gauge's horizontal 0-9, dash glyph strip
 /// (`LifeGaugeMgr::init`, `gauges.cpp`). RGBA8, rows top first. Null `rgba`
 /// queries dimensions. The host selects one of its eleven equal UV cells.
@@ -617,7 +663,8 @@ pub unsafe extern "C" fn pik_carry_digit_texture(
 }
 
 /// One of the original lower-HUD icons from `screen/eng_tex/`: 0 Olimar,
-/// 1 health backing, 2 Pikmin backing, 3 no Pikmin, 4-6 Blue/Red/Yellow leaf.
+/// 1 health backing, 2 Pikmin backing, 3 no Pikmin, 4-6 Blue/Red/Yellow leaf,
+/// 7 Dolphin icon, 8 X button, 9 A button, 10 star, 11 menu backing.
 /// RGBA8, rows top first. Null `rgba` queries dimensions.
 /// # Safety
 /// Same writable-buffer contract as [`pik_number_texture`].
@@ -629,6 +676,8 @@ pub unsafe extern "C" fn pik_hud_icon_texture(
     let name = match icon {
         0 => "navi01.bti", 1 => "n_64.bti", 2 => "i_base64.bti",
         3 => "piki0.bti", 4 => "bp_l64.bti", 5 => "rp_l64.bti", 6 => "yp_l64.bti",
+        7 => "i_rocket.bti", 8 => "x_btn.bti", 9 => "a_btn.bti",
+        10 => "star2.bti", 11 => "p_bg.bti",
         _ => return 0,
     };
     catch_unwind(|| {
