@@ -224,10 +224,17 @@ impl Effects {
                 effects::ROCKET_LAND_S,
                 effects::ROCKET_SMOKE_D,
                 effects::ONYON_SUCK,
+                effects::ONYON_SPARKLES,
+                effects::ONYON_PUFF,
+                effects::ONYON_BOOT_BUBBLES,
+                effects::SMOKE_RING_M,
             ]
             .into_iter()
             .chain(effects::ONYON_BEACON_RING)
             .chain(effects::ONYON_HALO_RING)
+            .chain(effects::ONYON_BOOT_FLOW)
+            .chain(effects::ONYON_BOOT_DUST)
+            .chain(effects::ONYON_BOOT_WATER)
             .chain(effects::ROCKET_JETS.into_iter().flatten())
             .chain(effects::ROCKET_JET_G)
             .chain(effects::ROCKET_BOOST_GROUND)

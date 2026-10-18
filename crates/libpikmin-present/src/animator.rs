@@ -349,7 +349,8 @@ pub fn onion_motion(o: &Onion) -> Option<(usize, Clock)> {
             Clock::Progress(progress)));
     }
     Some(match o.anim {
-        OnionAnim::Idle => (1, Clock::Loop(30.0)),
+        // GoalAI::WaitInit uses motion 12 for an Onion with Pikmin in storage.
+        OnionAnim::Idle => (if o.stored.iter().flatten().any(|&n| n > 0) { 12 } else { 1 }, Clock::Loop(30.0)),
         OnionAnim::Hover => (libpikmin::anim::ANIM_GOAL_TAKEOFF + colour, Clock::LoopRange(30.0, 200.0, 260.0)),
         OnionAnim::Suction { frame } => (2, Clock::Sim(frame)),
         OnionAnim::Emitting { frame } => (0, Clock::Sim(frame)),

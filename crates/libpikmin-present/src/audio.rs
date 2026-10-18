@@ -7,6 +7,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
+use std::collections::HashSet;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use glam::{Mat4, Vec3};
@@ -82,6 +83,8 @@ pub struct Audio {
     bgm: usize,
     /// Pellets whose `SE_LIFT_TRY` loop is on (`Pellet::mIsPlayTrySound`).
     trying: Vec<libpikmin::PelletId>,
+    /// Pikmin already heard entering their Onion leg this frame sequence.
+    climbing: HashSet<libpikmin::PikiId>,
     /// The output's rate and channels, for the log.
     pub rate: u32,
     pub channels: u16,
@@ -148,6 +151,7 @@ impl Audio {
             external_death_sting: false,
             bgm: 0,
             trying: Vec::new(),
+            climbing: HashSet::new(),
             rate,
             channels,
         })
@@ -197,6 +201,11 @@ impl Audio {
     /// A system (menu) sound by name.
     pub fn play(&self, name: &str) {
         self.with(|s| s.play(name, Vec3::ZERO));
+    }
+
+    /// A host-triggered sound at a world position (sim units).
+    pub fn play_at(&self, name: &str, pos: Vec3) {
+        self.with(|s| s.play(name, pos));
     }
 
     /// Give a host the full vanilla bell as stereo 32 kHz PCM, so its death player can
@@ -251,6 +260,18 @@ impl Audio {
             .map(|p| (pellet_owner(p.id), p.pos))
             .collect();
         let onions: Vec<Vec3> = sim.onions().iter().map(|o| o.pos).collect();
+        // ActEnter::gotoLeg plays SE_CONTAINER_CLIMB once as each Pikmin starts climbing.
+        let mut climbing_now = HashSet::new();
+        let mut climb_sounds = Vec::new();
+        for p in sim.pikis() {
+            if let libpikmin::PikiState::Enter { onion, climbing: true, .. } = p.state {
+                climbing_now.insert(p.id);
+                if !self.climbing.contains(&p.id) {
+                    climb_sounds.push((onion, p.pos));
+                }
+            }
+        }
+        self.climbing = climbing_now;
         self.with(|s| {
             s.set_listener(view, listener);
             s.set_piki_count(squad as u32);
@@ -271,6 +292,9 @@ impl Audio {
             }
             for p in stop {
                 s.stop_from(pellet_owner(p), "SE_LIFT_TRY");
+            }
+            for (onion, pos) in climb_sounds {
+                s.play_from(onion_owner(onion), "SE_CONTAINER_CLIMB", pos);
             }
             // `PikiHeadItem::playSound`: key value v is `SE` 0xCC + v on the parent Onion, else
             // `SEF` 0x108 + v (only for v > 0).

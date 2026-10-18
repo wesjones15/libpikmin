@@ -600,9 +600,13 @@ impl View {
         // Grounded it stands lit; flying, landing or away it closes (`startLand` sets it to 0,
         // the takeoff motion's key starts `startConeShrink`) and opens again once down.
         let grounded = o.grounded();
-        let cone = self.cones.entry(o.id.0).or_insert(if grounded { 1.0 } else { 0.0 });
+        // PelletGoalState::init uses the Onion beam while an airborne Onion ingests a pellet.
+        let ingesting = sim.pellets().iter().any(|p| matches!(p.state,
+            libpikmin::PelletState::Sucking { onion, .. } if onion == o.id));
+        let beam_active = grounded || ingesting;
+        let cone = self.cones.entry(o.id.0).or_insert(if beam_active { 1.0 } else { 0.0 });
         let step = dt / CONE_TIME;
-        *cone = if grounded { (*cone + step).min(1.0) } else { (*cone - step).max(0.0) };
+        *cone = if beam_active { (*cone + step).min(1.0) } else { (*cone - step).max(0.0) };
         let width = *cone;
         if width > 0.0 && o.anim != OnionAnim::Away {
             let model = models::BEAMS[colour];
@@ -990,6 +994,43 @@ impl View {
             } else if self.boot_progress.remove(&o.id.0).is_some()
                 && !sim.onions().iter().any(|on| on.dormancy.is_some_and(|d| d.reviving)) {
                 self.demo_sounds.push(None);
+            }
+            if o.dormancy.is_none() && (6..=12).contains(&motion) {
+                // GoalItem::playEffect: the disc animation keys drive takeoff dust,
+                // landing smoke, and the stocked Onion's idle sparkle/puff and wheeze.
+                let now = anim.map_or(0.0, |(_, f)| f);
+                let prev = before.unwrap_or(now);
+                let keys: Vec<_> = self.onion_anims.get(motion).into_iter()
+                    .flat_map(|(info, _)| &info.event_keys)
+                    .filter(|e| e.event == 1 && (if now >= prev {
+                        (e.frame as f32) > prev && (e.frame as f32) <= now
+                    } else {
+                        (e.frame as f32) > prev || (e.frame as f32) <= now
+                    }))
+                    .map(|e| e.value).collect();
+                let vm = &self.models[models::ONION as usize];
+                let sphere = |id: &str| vm.model.coll.iter().find(|c| c.id == id)
+                    .and_then(|c| pose.joints.get(c.joint).map(|m| o.pos + m.transform_point3(c.centre)))
+                    .unwrap_or(o.pos);
+                let bases = [sphere("bas1"), sphere("bas2"), sphere("bas3")];
+                let puffs = [sphere("eff1"), sphere("eff2"), sphere("eff3")];
+                let flower = sphere("piki");
+                if let Some(fx) = self.effects.as_mut() {
+                    for value in keys {
+                        match (motion, value) {
+                            (6..=8, 2) => { fx.spawn(fx_defs::ROCKET_TAKE_S, o.pos); }
+                            (9..=11, 0) => { fx.spawn(fx_defs::ROCKET_LAND_S, o.pos); }
+                            (9..=11, 1) => { fx.spawn(fx_defs::ROCKET_SMOKE_D, bases[0]); }
+                            (9..=11, 2) => { for at in bases { fx.spawn(fx_defs::ROCKET_SMOKE_D, at); } }
+                            (12, value) => {
+                                if value == 0 { fx.spawn(fx_defs::ONYON_SPARKLES, flower); }
+                                fx.spawn(fx_defs::ONYON_PUFF, puffs[((o.id.0 as usize) + value as usize) % 3]);
+                                self.ship_sounds.push((o.id, "SE_CONTAINER_PIKI", true));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
             // GoalItem::refresh: even frames live, odd frames dormant, per colour.
             let frame = o.colors[0].index() as f32 * 2.0
