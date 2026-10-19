@@ -246,9 +246,12 @@ enum Read {
     Average(C4),
 }
 
-/// Each stage's read (one for a material without TEV stages). Texture matrices are taken at
-/// frame 0: a scrolling texture bakes still.
+/// Each stage's read at rest (one for a material without TEV stages).
 fn reads(model: &Model, mi: usize, images: &Images) -> Vec<Read> {
+    reads_at(model, mi, images, 0.0)
+}
+
+fn reads_at(model: &Model, mi: usize, images: &Images, seconds: f32) -> Vec<Read> {
     let m = &model.materials[mi];
     let Some(t) = tev(model, mi) else {
         return vec![m.tex_attr.map_or(Read::None, |attr| Read::Uv { attr, mtx: None })];
@@ -258,7 +261,7 @@ fn reads(model: &Model, mi: usize, images: &Images) -> Vec<Read> {
     let mut j = 0;
     for g in &m.tex_gens {
         let mtx = if g.kind == 1 {
-            let mtx = m.tex_datas.get(j).filter(|_| g.matrix != 10).and_then(|d| d.matrix(0.0));
+            let mtx = m.tex_datas.get(j).filter(|_| g.matrix != 10).and_then(|d| d.matrix(seconds * 30.0 * d.speed));
             j += 1;
             mtx
         } else {
@@ -378,7 +381,12 @@ fn sample(img: &Image, wrap: [u8; 2], u: f32, v: f32) -> C4 {
 /// textures' sizes, or failing that over its environment maps' own space ([`Baked::env`]).
 /// `None` for an untextured material.
 pub fn bake(model: &Model, mi: usize, inputs: Inputs, images: &Images) -> Option<Baked> {
-    let rd = reads(model, mi, images);
+    bake_at(model, mi, inputs, images, 0.0)
+}
+
+/// PVWTextureData::animate: each layer advances at its own disc-authored speed.
+pub fn bake_at(model: &Model, mi: usize, inputs: Inputs, images: &Images, seconds: f32) -> Option<Baked> {
+    let rd = reads_at(model, mi, images, seconds);
     let uv_mapped = rd.iter().any(|r| matches!(r, Read::Uv { attr, .. } if images.image(model, *attr).is_some()));
     let mut size = (0u32, 0u32);
     let mut out_wrap = None;

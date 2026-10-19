@@ -503,3 +503,6 @@ following, airborne, dormant and out-of-reach Onions provide no interact prompt.
 - Onion menu (calling stored Pikmin out, putting them away), sunset.
 - Honeywisps and Spotty/Dwarf Bulborb AI in the core (they are viewer-side for now).
 - Free-mode AI (`ActFree`: wandering and the periodic work search).
+
+### Onion texture animation
+The beam's PVW texture matrices advance independently at 30 frames/second times each layer's disc speed (graphics.cpp PVWTextureData::animate). The presentation rebakes visible beams at 30 Hz into stable texture slots; hosts refresh pixels by texture version. Headless checks cover all three colors, moving pixels and bounded texture storage. In-game visual confirmation remains manual.

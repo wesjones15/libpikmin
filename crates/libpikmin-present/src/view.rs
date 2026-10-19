@@ -171,9 +171,24 @@ impl ViewModel {
 pub struct Textures {
     pub list: Vec<tev::Baked>,
     ids: HashMap<(u32, usize, [u8; 16]), i32>,
+    versions: HashMap<i32, u32>,
 }
 
 impl Textures {
+    pub fn version(&self, id: u32) -> u32 { self.versions.get(&(id as i32)).copied().unwrap_or(0) }
+
+    fn animated(&mut self, model: u32, vm: &ViewModel, material: usize, seconds: f32) -> i32 {
+        let id = self.get(model, vm, material, Inputs::default());
+        if id < 0 || !vm.model.materials[material].tex_datas.iter().any(|t| t.frames > 0 && t.anim_factor != 255) { return id; }
+        let version = (seconds * 30.0).floor() as u32 + 1;
+        if self.version(id as u32) != version {
+            if let Some(baked) = tev::bake_at(&vm.model, material, Inputs::default(), &vm.images, seconds) {
+                self.list[id as usize] = baked;
+                self.versions.insert(id, version);
+            }
+        }
+        id
+    }
     /// The texture for `material` of `vm` with `inputs`, baking it the first time; -1 if the
     /// material isn't textured.
     fn get(&mut self, model: u32, vm: &ViewModel, material: usize, inputs: Inputs) -> i32 {
@@ -190,12 +205,40 @@ impl Textures {
         let id = match tev::bake(&vm.model, material, inputs, &vm.images) {
             Some(b) => {
                 self.list.push(b);
-                self.list.len() as i32 - 1
+                let id = self.list.len() as i32 - 1;
+                if models::BEAMS.contains(&model) && vm.model.materials[material].tex_datas.iter().any(|t| t.frames > 0 && t.anim_factor != 255) {
+                    self.versions.insert(id, 1);
+                }
+                id
             }
             None => -1,
         };
         self.ids.insert(k, id);
         id
+    }
+}
+
+#[cfg(test)]
+mod texture_motion_tests {
+    use super::*;
+    #[test]
+    fn onion_layers_move_at_disc_speeds_without_new_texture_slots() {
+        let assets = Assets { root: Assets::default_dir() };
+        if !assets.root.join(paths::ONION_BEAMS[0]).exists() { eprintln!("SKIP: Pikmin beam assets absent"); return; }
+        for (i, path) in paths::ONION_BEAMS.iter().enumerate() {
+            let model = ViewModel::load(&assets, path).unwrap();
+            let mut textures = Textures::default();
+            let id = textures.animated(models::BEAMS[i], &model, 1, 0.);
+            let before = textures.list[id as usize].rgba.clone();
+            let count = textures.list.len();
+            textures.animated(models::BEAMS[i], &model, 1, 0.34);
+            assert_ne!(before, textures.list[id as usize].rgba, "{path} layers froze");
+            let version = textures.version(id as u32);
+            textures.animated(models::BEAMS[i], &model, 1, 0.35);
+            assert_eq!(version, textures.version(id as u32), "rebaked within the same game frame");
+            for seconds in [1., 2., 5., 60.] { assert_eq!(id, textures.animated(models::BEAMS[i], &model, 1, seconds)); }
+            assert_eq!(count, textures.list.len());
+        }
     }
 }
 
@@ -705,7 +748,9 @@ impl View {
                 });
             }
             let inp = inputs(b.material);
-            let id = self.textures.get(model, vm, b.material, inp);
+            let id = if kind == kinds::BEAM {
+                self.textures.animated(model, vm, b.material, self.time)
+            } else { self.textures.get(model, vm, b.material, inp) };
             let mut c = if id >= 0 { [1.0; 4] } else { tev::flat_color(&vm.model, b.material, inp, &vm.images) };
             c[3] *= alpha;
             self.colors.push(c);

@@ -563,6 +563,13 @@ pub unsafe extern "C" fn pik_view_texture(view: *mut PikView, id: u32, info: *mu
     }
 }
 
+/// # Safety
+/// `view` must be a live view handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_texture_version(view: *mut PikView, id: u32) -> u32 {
+    unsafe { with_view(view, 0, |v| v.view.textures.version(id)) }
+}
+
 /// World-to-camera for the sound system: camera looking down -Z with +X to its right.
 /// Hosts pass Unity-style axes (left-handed: right = up x forward), which is what the sim's
 /// numbers are in a host that copies its coordinates straight across.
