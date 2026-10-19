@@ -143,6 +143,58 @@ impl Sim {
         ids.len() as u32
     }
 
+    /// Host extension: the Pikmin a captain left behind (he went down, or his owner died) that stand about
+    /// join `to`'s squad instead. Returns how many.
+    pub fn adopt_orphans(&mut self, from: CaptainId, to: CaptainId) -> u32 {
+        if from == to || to.0 as usize >= self.captains.len() || self.captains[to.0 as usize].down {
+            return 0;
+        }
+        let ids = self.orphans_of(from, None);
+        for &id in &ids {
+            self.leave_current(id);
+            self.join_squad(id, to);
+        }
+        ids.len() as u32
+    }
+
+    /// Host extension: the Pikmin a captain left behind that stand about go into the landed `onion` (the
+    /// ones of a colour it takes), walking to it. Returns how many were sent.
+    pub fn send_orphans_home(&mut self, from: CaptainId, onion: OnionId) -> u32 {
+        let Some(o) = self.onions.get(onion.0 as usize) else { return 0 };
+        if o.ship.is_some() || !o.grounded() {
+            return 0;
+        }
+        let ids = self.orphans_of(from, Some(onion));
+        for &id in &ids {
+            self.leave_current(id);
+            let leg = (self.rng.f32() * 3.0) as u8 % 3;
+            self.pikis[id.0 as usize].state = PikiState::Enter { onion, leg, climbing: false, ratio: 0.0 };
+        }
+        ids.len() as u32
+    }
+
+    /// Pikmin that were `captain`'s and are not doing anything else: standing about or still following
+    /// (of a colour `onion` accepts, when one is given).
+    fn orphans_of(&self, captain: CaptainId, onion: Option<OnionId>) -> Vec<PikiId> {
+        self.pikis
+            .iter()
+            .filter(|p| p.is_alive() && p.captain == Some(captain) && matches!(p.state, PikiState::Idle | PikiState::Squad { .. }))
+            .filter(|p| onion.is_none_or(|o| self.onions[o.0 as usize].accepts(p.color)))
+            .map(|p| p.id)
+            .collect()
+    }
+
+    /// Host extension: how long a dormant Onion still has to wait before it revives (it does not restart a
+    /// revival already under way). 0 wakes it.
+    pub fn set_onion_dormancy_seconds(&mut self, onion: OnionId, seconds: f32) {
+        if let Some(d) = self.onions.get_mut(onion.0 as usize).and_then(|o| o.dormancy.as_mut())
+            && !d.reviving
+            && seconds.is_finite()
+        {
+            d.remaining = seconds.max(0.0);
+        }
+    }
+
     /// Asks the Onion to let up to `n` Pikmin of `color` out to join `captain`. Limited by the
     /// stock and the field limit. Returns how many will come out.
     pub fn onion_call_out(&mut self, captain: CaptainId, onion: OnionId, color: PikiColor, n: u32) -> u32 {

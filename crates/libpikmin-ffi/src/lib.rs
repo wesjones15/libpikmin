@@ -41,7 +41,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 38;
+pub const PIK_ABI_VERSION: u32 = 39;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
@@ -1794,6 +1794,57 @@ pub unsafe extern "C" fn pik_sim_onion_counts(
 /// (`NaviContainerState::enterPikis`). Returns how many went.
 ///
 /// # Safety
+/// The Pikmin captain `from` left behind join captain `to`'s squad; returns how many.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_adopt_orphans(sim: *mut PikSim, from: u32, to: u32) -> u32 {
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, 0, |s| {
+            let n = s.sim.captains().len() as u32;
+            if from >= n || to >= n {
+                return 0;
+            }
+            s.sim.adopt_orphans(CaptainId(from), CaptainId(to))
+        })
+    }
+}
+
+/// The Pikmin captain `from` left behind go into the landed Onion `onion`; returns how many.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_send_orphans_home(sim: *mut PikSim, from: u32, onion: u32) -> u32 {
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, 0, |s| {
+            if !onion_ok(&s.sim, onion) || from as usize >= s.sim.captains().len() {
+                return 0;
+            }
+            s.sim.send_orphans_home(CaptainId(from), OnionId(onion))
+        })
+    }
+}
+
+/// How many seconds a dormant Onion still waits before reviving (0 wakes it).
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_onion_dormancy_seconds(sim: *mut PikSim, onion: u32, seconds: f32) {
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, (), |s| {
+            if onion_ok(&s.sim, onion) {
+                s.sim.set_onion_dormancy_seconds(OnionId(onion), seconds);
+            }
+        })
+    }
+}
+
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_onion_put_away(sim: *mut PikSim, captain: u32, onion: u32, color: u32, n: u32) -> u32 {
