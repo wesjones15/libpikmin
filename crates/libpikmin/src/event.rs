@@ -211,4 +211,6 @@ pub enum Event {
         captain: CaptainId,
         pos: Vec3,
     },
+    /// Host extension: one of `captain`'s Pikmin took off to repeat his jump-pad throw.
+    PikiLaunched { piki: PikiId, captain: CaptainId },
 }

@@ -287,6 +287,7 @@ fn every_pikmin_state_round_trips() {
         Event::StrikeStarted { captain: cap },
         Event::CaptainLanded { captain: cap, drop: 4.0, stomp: false },
         Event::PikiStomped { piki: p, captain: cap, pos: Vec3::ONE },
+        Event::PikiLaunched { piki: p, captain: cap },
     ];
     let bytes = snap.encode();
     let back = Snapshot::decode(&bytes).expect("decodes");

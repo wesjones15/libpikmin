@@ -1667,6 +1667,11 @@ fn w_event(w: &mut Writer, e: &Event) {
             w.u32(captain.0);
             w.vec3(pos);
         }
+        PikiLaunched { piki, captain } => {
+            w.u8(46);
+            w.u32(piki.0);
+            w.u32(captain.0);
+        }
     }
 }
 
@@ -1724,6 +1729,7 @@ fn r_event(r: &mut Reader) -> Option<Event> {
         43 => StrikeStarted { captain: cap(r)? },
         44 => CaptainLanded { captain: cap(r)?, drop: r.f32()?, stomp: r.bool()? },
         45 => PikiStomped { piki: piki(r)?, captain: cap(r)?, pos: r.vec3()? },
+        46 => PikiLaunched { piki: piki(r)?, captain: cap(r)? },
         _ => return None,
     })
 }

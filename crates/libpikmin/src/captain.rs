@@ -12,6 +12,9 @@ use crate::{CaptainId, Host, PikiId};
 /// How far above Olimar the cursor looks down for the ground. Pikmin's maps keep the cursor
 /// on a heightfield; a 3D host needs the probe to start above any slope within reach.
 const CURSOR_PROBE_LIFT: f32 = 100.0;
+/// Host extension: pad throws reported this soon after the first (30 Hz ticks) are the same
+/// takeoff, a pad volume reporting each tick he is still inside it.
+const SAME_PAD_THROW_TICKS: u64 = 15;
 /// How high above his feet the locked-on cursor looks back at him (host extension).
 const LOCK_EYE_HEIGHT: f32 = 24.0;
 /// The locked-on cursor stays at least this far from the captain's eye.
@@ -298,6 +301,15 @@ impl Sim {
         let gravity = (gravity > 0.0).then_some(gravity);
         let mut cue = None;
         if let Some(c) = self.captains.get_mut(captain.0 as usize) {
+            // A pad's volume reports its throw on every tick he is still inside it. Those are
+            // the same takeoff: the followers repeat it once, not once per report (the extra
+            // cues would walk them back to the pad after they land with him).
+            let same_throw = squad
+                && gravity.is_some()
+                && !c.on_ground
+                && c.jump.is_some_and(|j| j.gravity.is_some())
+                && c.jump_tick.is_some_and(|t| self.tick.saturating_sub(t) <= SAME_PAD_THROW_TICKS);
+            let squad = squad && !same_throw;
             c.vel = velocity;
             if let Some(g) = gravity {
                 // integrate applies gravity before position: centre the velocity on the tick.

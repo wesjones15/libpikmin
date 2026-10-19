@@ -85,6 +85,8 @@ pub struct Audio {
     trying: Vec<libpikmin::PelletId>,
     /// Pikmin already heard entering their Onion leg this frame sequence.
     climbing: HashSet<libpikmin::PikiId>,
+    /// The tick a jump pad's flying voice last played, so a squad leaving together is one cry.
+    pad_voice: Option<u64>,
     /// The output's rate and channels, for the log.
     pub rate: u32,
     pub channels: u16,
@@ -152,6 +154,7 @@ impl Audio {
             bgm: 0,
             trying: Vec::new(),
             climbing: HashSet::new(),
+            pad_voice: None,
             rate,
             channels,
         })
@@ -351,7 +354,22 @@ impl Audio {
         let teki_pos = |id: CreatureId| creatures.pos(id);
         let mut trying = std::mem::take(&mut self.trying);
         let external_death_sting = self.external_death_sting;
+        // A host jump pad throws the squad the way a throw does: `PikiFlyingState::init`
+        // (pikiState.cpp) plays `SE_PIKI_FLY` as each Pikmin goes airborne. Pikmin leave the
+        // pad over several ticks, so they share one cry per few ticks.
+        let pad_voice = match *e {
+            Event::PikiLaunched { .. } if self.pad_voice.is_none_or(|t| sim.tick().saturating_sub(t) >= 6) => {
+                self.pad_voice = Some(sim.tick());
+                true
+            }
+            _ => false,
+        };
         self.with(|s| match *e {
+            Event::PikiLaunched { .. } => {
+                if pad_voice {
+                    s.play("SE_PIKI_FLY", Vec3::ZERO);
+                }
+            }
             Event::Recruited { piki, .. } => {
                 // `PikiLookAtState::init` (pikiState.cpp): the call and the Pikmin's answer.
                 s.play("SE_PIKI_CALLED", Vec3::ZERO);

@@ -24,6 +24,11 @@ Host jump pads supply full launch velocity and gravity through `Sim::launch_capt
 Following squad members queue that exact takeoff position and repeat its ballistic arc,
 including vertical pads; other captains' squads and busy Pikmin stay on their own jobs.
 Ordinary knockback does not queue a squad launch. Ground contact restores normal walking.
+A pad volume reports its throw on every tick the captain is still inside it; reports within
+half a second of the first are the same takeoff, so each follower queues it once (extra cues
+would walk the squad back to the pad after landing). Each follower that takes off on a pad
+cue emits `Event::PikiLaunched`, which the shared audio maps to `SE_PIKI_FLY`, the voice
+`PikiFlyingState::init` plays when a Pikmin goes airborne (one cry per few ticks).
 `set_captain_hold` holds voluntary movement for roots and actions as well for stuns;
 external launches and gravity still run. These are host extensions, not Pikmin 1 behavior.
 

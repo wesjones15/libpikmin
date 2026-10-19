@@ -379,6 +379,50 @@ fn vertical_pad_sends_followers_to_the_pad_before_launching() {
     assert!(launched, "follower at {:?}, state {:?}, captain {:?}", sim.piki(p).pos, sim.piki(p).state, sim.captain(c).pos);
 }
 
+// A host pad can report its throw on several ticks in a row while the captain still overlaps
+// its volume. Followers must repeat that one takeoff, then stay with their captain on landing,
+// not walk back to the pad for the extra reports.
+#[test]
+fn repeated_pad_reports_launch_followers_once_and_they_stay_with_the_captain() {
+    let (mut sim, c, p) = setup();
+    let v = Vec3::new(180.0, 400.0, 0.0);
+    for _ in 0..5 {
+        sim.launch_captain(c, v, 200.0, true);
+        sim.step(&mut FlatHost);
+    }
+    let mut takeoffs = 0;
+    let mut launch_events = 0;
+    let mut was_airborne = false;
+    let mut landed_at = None;
+    let mut farthest_after_landing = 0.0f32;
+    for _ in 0..900 {
+        sim.step(&mut FlatHost);
+        launch_events += sim
+            .drain_events()
+            .filter(|e| matches!(e, libpikmin::Event::PikiLaunched { piki, captain } if *piki == p && *captain == c))
+            .count();
+        let airborne = sim.piki(p).jump.is_some();
+        if airborne && !was_airborne {
+            takeoffs += 1;
+        }
+        was_airborne = airborne;
+        if takeoffs > 0 && !airborne && landed_at.is_none() {
+            landed_at = Some(sim.piki(p).pos);
+        }
+        if landed_at.is_some() {
+            farthest_after_landing = farthest_after_landing.max((sim.piki(p).pos - sim.captain(c).pos).with_y(0.0).length());
+        }
+    }
+    let landed = landed_at.expect("follower must land");
+    assert_eq!(takeoffs, 1, "one pad throw is one takeoff, not one per report");
+    assert_eq!(launch_events, 1, "the follower's pad takeoff is announced once, for its voice");
+    assert!(
+        farthest_after_landing < 150.0,
+        "follower left its captain after landing (landed {landed}, captain {}, farthest {farthest_after_landing})",
+        sim.captain(c).pos
+    );
+}
+
 fn landings(sim: &mut Sim) -> Vec<(f32, bool)> {
     sim.drain_events()
         .filter_map(|e| match e {

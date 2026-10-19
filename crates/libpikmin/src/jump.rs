@@ -294,6 +294,10 @@ impl Sim {
                 p.pos = cue.origin;
                 p.vel.y = vertical + 0.5 * gravity * crate::TICK_DT;
                 p.jump.as_mut().unwrap().gravity = Some(gravity);
+                if let Some(captain) = p.captain {
+                    let piki = p.id;
+                    self.events.push(crate::Event::PikiLaunched { piki, captain });
+                }
             }
         }
         let Some(jump) = self.pikis[pi].jump else {

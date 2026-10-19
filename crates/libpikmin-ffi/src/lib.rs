@@ -41,7 +41,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 35;
+pub const PIK_ABI_VERSION: u32 = 36;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
@@ -426,6 +426,8 @@ pub mod event_kind {
     pub const PIKI_GREW: u32 = 44;
     /// `a` the captain began a dismiss strike.
     pub const STRIKE_STARTED: u32 = 45;
+    /// `a` the Pikmin, `b` its captain: it took off to repeat his jump-pad throw.
+    pub const PIKI_LAUNCHED: u32 = 46;
 }
 
 /// One [`Event`]. `a` is the Pikmin, pellet, sprout or captain it's about (the first id in the
@@ -2237,6 +2239,7 @@ fn event(e: Event) -> PikEvent {
         Event::PikiStomped { piki, captain, pos } => {
             (v.kind, v.a, v.b, v.pos) = (PIKI_STOMPED, piki.0, captain.0 as i32, pos.into())
         }
+        Event::PikiLaunched { piki, captain } => (v.kind, v.a, v.b) = (PIKI_LAUNCHED, piki.0, captain.0 as i32),
     }
     v
 }
