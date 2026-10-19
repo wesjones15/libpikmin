@@ -609,6 +609,9 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
     // SAFETY: as documented.
     unsafe {
         with_view(view, (), |v| {
+            if let Some(a) = v.audio.as_mut() {
+                a.set_listener_captain(usize::try_from(f.listener).ok());
+            }
             let events = std::mem::take(&mut s.view_log);
             let positions: Vec<(libpikmin::CreatureId, Vec3)> =
                 s.frame.creatures.iter().map(|c| (c.id, c.pos)).collect();

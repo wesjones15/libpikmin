@@ -209,6 +209,10 @@ impl Sim {
             .collect();
         for id in &ids {
             self.carry_recall_until.insert(*id, self.tick + 2 * crate::TICK_HZ as u64);
+            if let PikiState::Carry(c) = self.pikis[id.0 as usize].state {
+                let until = self.tick + (crate::items::RECALLED_PELLET_SECONDS * crate::TICK_HZ as f32) as u64;
+                self.auto_carry_skip.insert(*id, (c.pellet, until));
+            }
             self.leave_current(*id);
             self.join_squad(*id, captain);
         }
@@ -957,6 +961,31 @@ mod tests {
         assert!(sim.pellet(short).carriers.is_empty());
         assert_eq!(sim.pellet(full).carriers.len(), 1);
         assert!(sim.pikis()[0].state.in_squad());
+    }
+
+    #[test]
+    fn a_squad_whistled_off_a_load_it_cannot_lift_is_not_drawn_back_to_it() {
+        struct Flat;
+        impl Host for Flat {
+            fn ground_height(&self, _: Vec3) -> Option<f32> { Some(0.0) }
+        }
+        let mut sim = Sim::new(Params::default(), 11);
+        let captain = sim.add_captain(Vec3::new(60.0, 0.0, 0.0));
+        sim.add_onion(Vec3::new(400.0, 0.0, 0.0), &PikiColor::ALL);
+        sim.set_auto_carry_range(400.0);
+        let mut desc = PelletDesc::numbered(&sim.params, 1, PikiColor::Red, Vec3::ZERO, 0.0);
+        desc.min_carriers = 5;
+        let pellet = sim.spawn_pellet(desc);
+        attach(&mut sim, PikiColor::Red, pellet);
+        sim.pikis[0].captain = Some(captain);
+        sim.pikis[0].on_ground = true;
+        sim.call_pikis(0, Vec3::ZERO, 1000.0);
+        assert!(sim.pellet(pellet).carriers.is_empty());
+        let mut host = Flat;
+        for _ in 0..(20 * crate::TICK_HZ as u32) {
+            sim.step(&mut host);
+            assert!(sim.pellet(pellet).carriers.is_empty(), "went back to the pellet at tick {}", sim.tick());
+        }
     }
 
     struct BuriedHost {

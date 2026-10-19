@@ -87,6 +87,9 @@ pub struct Audio {
     climbing: HashSet<libpikmin::PikiId>,
     /// The tick a jump pad's flying voice last played, so a squad leaving together is one cry.
     pad_voice: Option<u64>,
+    /// The captain this machine's player is (`None`: no one in particular). Another captain's player
+    /// sounds are not played in the listener's ears: the positional ones come from where he is.
+    listener: Option<usize>,
     /// The output's rate and channels, for the log.
     pub rate: u32,
     pub channels: u16,
@@ -155,6 +158,7 @@ impl Audio {
             trying: Vec::new(),
             climbing: HashSet::new(),
             pad_voice: None,
+            listener: None,
             rate,
             channels,
         })
@@ -205,6 +209,12 @@ impl Audio {
         if !paused {
             self.with(|s| { s.frame(); s.set_bgm_mode_flag(0, 1, nearby_enemy as u8); });
         }
+    }
+
+    /// Which captain this machine's player controls, so the player sounds of the others (their
+    /// throws, calls and punches) are heard from where they are rather than as the listener's own.
+    pub fn set_listener_captain(&mut self, captain: Option<usize>) {
+        self.listener = captain;
     }
 
     /// A system (menu) sound by name.
@@ -363,6 +373,9 @@ impl Audio {
         // A host jump pad throws the squad the way a throw does: `PikiFlyingState::init`
         // (pikiState.cpp) plays `SE_PIKI_FLY` as each Pikmin goes airborne. Pikmin leave the
         // pad over several ticks, so they share one cry per few ticks.
+        let listener = self.listener;
+        // True for the listener's own captain, and for everyone when no listener is set.
+        let mine = move |c: libpikmin::CaptainId| listener.is_none_or(|l| l == c.0 as usize);
         let pad_voice = match *e {
             Event::PikiLaunched { .. } if self.pad_voice.is_none_or(|t| sim.tick().saturating_sub(t) >= 6) => {
                 self.pad_voice = Some(sim.tick());
@@ -371,28 +384,35 @@ impl Audio {
             _ => false,
         };
         self.with(|s| match *e {
-            Event::PikiLaunched { .. } => {
+            Event::PikiLaunched { piki, captain } => {
                 if pad_voice {
-                    s.play("SE_PIKI_FLY", Vec3::ZERO);
+                    s.play("SE_PIKI_FLY", if mine(captain) { Vec3::ZERO } else { piki_pos(piki) });
                 }
             }
-            Event::Recruited { piki, .. } => {
+            Event::Recruited { piki, captain, .. } => {
                 // `PikiLookAtState::init` (pikiState.cpp): the call and the Pikmin's answer.
-                s.play("SE_PIKI_CALLED", Vec3::ZERO);
+                if mine(captain) {
+                    s.play("SE_PIKI_CALLED", Vec3::ZERO);
+                }
                 s.play("SEF_PIKI_CALLED", piki_pos(piki));
             }
-            Event::Thrown { .. } => {
+            Event::Thrown { piki, captain } => {
                 // `NaviThrowState` (naviState.cpp) and `PikiFlyingState::init` (pikiState.cpp).
-                s.play("SE_THROW", Vec3::ZERO);
-                s.play("SE_PIKI_FLY", Vec3::ZERO);
+                if mine(captain) {
+                    s.play("SE_THROW", Vec3::ZERO);
+                    s.play("SE_PIKI_FLY", Vec3::ZERO);
+                } else {
+                    s.play("SE_PIKI_FLY", piki_pos(piki));
+                }
             }
             // `PikiFlyingState::exec` landing (pikiState.cpp).
             Event::Landed { piki } => {
                 s.play("SEF_PIKI_LAND", piki_pos(piki));
             }
             // `PikiFlyingState::collideAI` (pikiState.cpp).
-            Event::Latched { .. } => {
-                s.play("SE_PIKI_ATTACHENEMY", Vec3::ZERO);
+            Event::Latched { piki, .. } => {
+                let other = sim.piki(piki).captain.is_some_and(|c| !mine(c));
+                s.play("SE_PIKI_ATTACHENEMY", if other { piki_pos(piki) } else { Vec3::ZERO });
             }
             // `InteractFlick::actPiki` (interactBattle.cpp): `SE_PIKI_DAMAGED` on the flicking
             // creature's emitter as the Pikmin flies off.
@@ -424,26 +444,34 @@ impl Audio {
                 s.release_emitter(piki_owner(piki));
             }
             // `NaviPluckState` (naviState.cpp): `SE_PIKI_PULLED` once out.
-            Event::Plucked { .. } => {
-                s.play("SE_PIKI_PULLED", Vec3::ZERO);
+            Event::Plucked { captain, .. } => {
+                if mine(captain) {
+                    s.play("SE_PIKI_PULLED", Vec3::ZERO);
+                }
             }
             // `NaviBreakupState` (naviState.cpp).
-            Event::Dismissed { .. } | Event::StrikeStarted { .. } => {
-                s.play("SE_BREAKUP", Vec3::ZERO);
+            Event::Dismissed { captain } | Event::StrikeStarted { captain } => {
+                if mine(captain) {
+                    s.play("SE_BREAKUP", Vec3::ZERO);
+                }
             }
             // `NaviAttackState` (naviState.cpp): punch, and the hit on the enemy.
-            Event::Punched { creature, .. } => {
-                s.play("SE_PLAYER_PUNCH", Vec3::ZERO);
+            Event::Punched { captain, creature, .. } => {
+                if mine(captain) {
+                    s.play("SE_PLAYER_PUNCH", Vec3::ZERO);
+                }
                 s.play_from(creature_owner(creature), "SE_PIKI_ATTACK_HIT", teki_pos(creature));
             }
             // `Navi` damage handlers (navi.cpp).
-            Event::CaptainHurt { .. } => {
-                s.play("SE_DAMAGED", Vec3::ZERO);
+            Event::CaptainHurt { captain, .. } => {
+                if mine(captain) {
+                    s.play("SE_DAMAGED", Vec3::ZERO);
+                }
             }
             // `NaviDeadState` (naviState.cpp) plays `SE_PLAYER_DOWN`; here the sundown bell
             // (`GameCoreSection::startSundownWarn`'s `SYSSE_EVENING_ALERT`) stands in for it.
-            Event::CaptainDown { .. } => {
-                if !external_death_sting { s.play(CAPTAIN_DOWN_SOUND, Vec3::ZERO); }
+            Event::CaptainDown { captain } => {
+                if !external_death_sting && mine(captain) { s.play(CAPTAIN_DOWN_SOUND, Vec3::ZERO); }
             }
             // `ActTransport::gotoLiftPos` (aiTransport.cpp): `SEF_PIKI_HANG` as each carrier takes
             // hold, and the pellet's `SE_LIFT_TRY` loop while it isn't up yet

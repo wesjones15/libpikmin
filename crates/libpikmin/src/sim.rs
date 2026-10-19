@@ -52,6 +52,9 @@ pub struct Sim {
     pub(crate) auto_carry_range: f32,
     /// Briefly prevent recalled understrength carriers grabbing the same pellet again.
     pub(crate) carry_recall_until: std::collections::HashMap<PikiId, u64>,
+    /// A Pikmin whistled off a pellet does not auto-carry that same pellet again until this tick
+    /// (see [`Sim::set_auto_carry_range`]), or it would walk straight back from the squad.
+    pub(crate) auto_carry_skip: std::collections::HashMap<PikiId, (crate::carry::PelletId, u64)>,
     /// See [`Sim::set_auto_pluck`].
     pub(crate) auto_pluck_after: Option<f32>,
     /// See [`Sim::set_emergency_recovery`]: (seconds, Pikmin).
@@ -96,6 +99,7 @@ impl Sim {
             pace: None,
             auto_carry_range: 0.0,
             carry_recall_until: Default::default(),
+            auto_carry_skip: Default::default(),
             auto_pluck_after: None,
             recovery: None,
         }

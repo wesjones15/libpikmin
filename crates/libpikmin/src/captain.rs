@@ -710,7 +710,7 @@ impl Sim {
 
     /// `Navi::callPikis`, with our multi-captain rule: a whistle recruits every eligible Pikmin
     /// in range, including members of other captains' squads.
-    fn call_pikis(&mut self, ci: usize, centre: Vec3, radius: f32) {
+    pub(crate) fn call_pikis(&mut self, ci: usize, centre: Vec3, radius: f32) {
         let me = self.captains[ci].id;
         for pi in 0..self.pikis.len() {
             let p = &self.pikis[pi];
@@ -754,6 +754,14 @@ impl Sim {
             }
             let stolen_from = p.captain.filter(|&c| c != me && p.state.in_squad());
             let id = p.id;
+            // Whistled off a pellet it was carrying (too few to lift it): the squad must not take it
+            // straight back to that pellet.
+            if let PikiState::Carry(c) = p.state {
+                let until = self.tick + (crate::items::RECALLED_PELLET_SECONDS * crate::TICK_HZ as f32) as u64;
+                let now = self.tick;
+                self.auto_carry_skip.retain(|_, (_, t)| *t > now);
+                self.auto_carry_skip.insert(id, (c.pellet, until));
+            }
             self.leave_current(id);
             self.join_squad(id, me);
             self.events.push(Event::Recruited {

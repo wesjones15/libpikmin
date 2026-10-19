@@ -27,6 +27,10 @@ const RECOVERY_COLOURS: [PikiColor; 3] = [PikiColor::Red, PikiColor::Yellow, Pik
 /// How far below every captain, over a void, a Pikmin has to be before it is brought back
 /// (see `Sim::rescue_fallen`): 200 units, about 8 m at the RoR2 host's scale.
 pub const VOID_RESCUE_DROP: f32 = 200.0;
+/// Seconds a Pikmin whistled off a pellet will not auto-carry that same pellet again, so a squad
+/// called away from a load too heavy for it is not drawn straight back (host extension to
+/// `Sim::set_auto_carry_range`).
+pub const RECALLED_PELLET_SECONDS: f32 = 30.0;
 
 impl Sim {
     /// How fast `captain`'s punches and plucks and his Pikmin's attacks play, as a multiple
@@ -240,6 +244,11 @@ impl Sim {
             .iter()
             .filter(|pl| pl.can_take_carrier() && self.pellet_has_destination(pl) && matches!(pl.state, crate::carry::PelletState::Idle))
             .filter(|pl| (pl.pos.y - pos.y).abs() < 60.0)
+            .filter(|pl| {
+                self.auto_carry_skip
+                    .get(&self.pikis[pi].id)
+                    .is_none_or(|&(skipped, until)| skipped != pl.id || self.tick >= until)
+            })
             .map(|pl| (pl.id, crate::math::dist_xz(pos, pl.pos) - pl.desc.radius - size))
             .filter(|&(_, d)| d <= range)
             .min_by(|a, b| a.1.total_cmp(&b.1))
