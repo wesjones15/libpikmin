@@ -900,15 +900,23 @@ impl Sim {
         let want = if self.captains[ci].lock_target.is_some() { None } else { self.captains[ci].throw_color };
         let grab = self.params.navi.pluck_grab_range;
         let nearest = want.is_none();
-        // Locked on, any Pikmin within 350 units is called (he runs to the captain); Any alone 120; a colour 80.
-        let reach = if self.captains[ci].lock_target.is_some() { 350.0 } else if nearest { 120.0 } else { 80.0 };
+        // Locked on, any Pikmin of his squad is called, however far (it runs to the captain); Any alone 120;
+        // a colour 80.
+        let locked = self.captains[ci].lock_target.is_some();
+        let reach = if locked { f32::INFINITY } else if nearest { 120.0 } else { 80.0 };
         let c = &self.captains[ci];
         let fwd = dir_of(c.face);
         // The nearest of the picked colour, and the nearest of any.
         let mut best: Option<(PikiId, f32)> = None;
         let mut any: Option<(PikiId, f32)> = None;
         let mut have_want = false;
-        for &id in &c.plate.members {
+        // Locked on, every Pikmin following him counts, whether or not its formation slot has caught up.
+        let squad: Vec<PikiId> = if locked {
+            self.pikis.iter().filter(|p| p.captain == Some(c.id)).map(|p| p.id).collect()
+        } else {
+            c.plate.members.iter().copied().collect()
+        };
+        for id in squad {
             let p = &self.pikis[id.0 as usize];
             if !matches!(p.state, PikiState::Squad { .. }) || p.frozen > 0.0 {
                 continue;

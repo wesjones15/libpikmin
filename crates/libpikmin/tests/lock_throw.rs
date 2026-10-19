@@ -119,8 +119,8 @@ fn with_any_picked_the_nearest_is_thrown() {
 }
 
 #[test]
-fn lock_on_calls_pikmin_up_to_the_350_unit_grab_limit() {
-    for (locked, distance, expected) in [(true, 300.0, true), (false, 300.0, false), (true, 349.0, true), (true, 350.0, false)] {
+fn lock_on_calls_any_squad_pikmin_however_far() {
+    for (locked, distance, expected) in [(true, 300.0, true), (false, 300.0, false), (true, 349.0, true), (true, 350.0, true), (true, 900.0, true)] {
         let mut sim = Sim::new(Params::default(), 5);
         let c = sim.add_captain(Vec3::ZERO);
         let far = sim.spawn_piki_in_squad(PikiColor::Red, Vec3::new(-distance, 0.0, 0.0), c).unwrap();
@@ -133,6 +133,12 @@ fn lock_on_calls_pikmin_up_to_the_350_unit_grab_limit() {
         sim.piki_mut(far).pos = Vec3::new(-distance, 0.0, 0.0);
         sim.set_input(c, CaptainInput { pose: Some(pose), throw: true, ..Default::default() });
         sim.step(&mut Enemy);
+        // A far one has to get to his hand first (a lock-on feeds it at once, but only so fast).
+        for _ in 0..120 {
+            if in_hand(&sim, c) == Some(far) { break; }
+            sim.set_input(c, CaptainInput { pose: Some(pose), throw: true, ..Default::default() });
+            sim.step(&mut Enemy);
+        }
         assert_eq!(in_hand(&sim, c) == Some(far), expected, "locked: {locked}, distance: {distance}");
     }
 }
