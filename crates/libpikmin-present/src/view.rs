@@ -436,6 +436,8 @@ const GROWTH_FX_LIFT: f32 = 13.0;
 const CONE_TIME: f32 = 0.8;
 /// `EffectMgr`'s `geometryLoadInfo` scale for the cone models.
 const CONE_SCALE: f32 = 0.1;
+/// The longest a hovering Onion's beam is stretched to reach the ground, in sim units (about 32 m).
+const BEAM_MAX_DROP: f32 = 800.0;
 /// `GoalEffect::invoke`: no more gravity from this frame of the suck effect.
 const SUCK_GRAVITY_FRAMES: f32 = 50.0;
 
@@ -659,11 +661,21 @@ impl View {
         let width = *cone;
         if width > 0.0 && o.anim != OnionAnim::Away {
             let model = models::BEAMS[colour];
+            let (lo, hi) = (self.models[model as usize].lo.y, self.models[model as usize].hi.y);
+            // A flying Onion hovers above the ground, so its beam would hang in the air. Host extension:
+            // the beam is stretched down to the ground below it, its top staying where it was.
+            let drop = if o.anim == OnionAnim::Hover && hi > lo {
+                self.onion_ground.get(&o.id.0).map_or(0.0, |g| (o.pos.y - g).clamp(0.0, BEAM_MAX_DROP))
+            } else { 0.0 };
+            let (height, base) = if drop > 1.0 {
+                let height = (drop + hi * CONE_SCALE) / (hi - lo);
+                (height, o.pos.y - drop - lo * height)
+            } else { (CONE_SCALE, o.pos.y) };
             let skel = &self.models[model as usize].skel;
-            let root = Mat4::from_scale(Vec3::new(CONE_SCALE * width, CONE_SCALE, CONE_SCALE * width));
+            let root = Mat4::from_scale(Vec3::new(CONE_SCALE * width, height, CONE_SCALE * width));
             let pose = skel.pose(root, None);
             let k = key(kinds::BEAM, i as u64);
-            self.push(k, kinds::BEAM, model, o.pos, Quat::IDENTITY, pose, &|_| Inputs::default(), 1.0, 0);
+            self.push(k, kinds::BEAM, model, Vec3::new(o.pos.x, base, o.pos.z), Quat::IDENTITY, pose, &|_| Inputs::default(), 1.0, 0);
         }
 
         // `NaviWalkState::exec`: a captain at the Onion lights its rings.
