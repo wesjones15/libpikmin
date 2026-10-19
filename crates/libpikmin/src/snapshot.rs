@@ -31,7 +31,7 @@ use crate::strike::Strike;
 use crate::{CaptainId, PikiId};
 
 /// Bumped when the encoding changes.
-pub const SNAPSHOT_VERSION: u8 = 4;
+pub const SNAPSHOT_VERSION: u8 = 5;
 
 // Far more than any real sim has; a corrupt length can't make decoding allocate wildly.
 const MAX_ENTITIES: usize = 4096;
@@ -41,6 +41,7 @@ const MAX_PATH: usize = 512;
 #[derive(Debug, Clone, Default)]
 pub struct Snapshot {
     pub tick: u64,
+    pub piki_deaths: u64,
     pub captains: Vec<Captain>,
     pub pikis: Vec<Piki>,
     pub pellets: Vec<Pellet>,
@@ -61,6 +62,7 @@ impl Snapshot {
     pub fn of(sim: &Sim, events: &[Event]) -> Snapshot {
         Snapshot {
             tick: sim.tick,
+            piki_deaths: sim.piki_deaths,
             captains: sim.captains.clone(),
             pikis: sim.pikis.clone(),
             pellets: sim.pellets.clone(),
@@ -78,6 +80,7 @@ impl Snapshot {
         let mut w = Writer::default();
         w.u8(SNAPSHOT_VERSION);
         w.u64(self.tick);
+        w.u64(self.piki_deaths);
         w.u32(self.next_nectar);
         w.len(self.captains.len());
         for c in &self.captains {
@@ -127,6 +130,7 @@ impl Snapshot {
             return None;
         }
         let tick = r.u64()?;
+        let piki_deaths = r.u64()?;
         let next_nectar = r.u32()?;
         let n = r.len()?;
         let captains = (0..n).map(|_| r_captain(&mut r)).collect::<Option<Vec<_>>>()?;
@@ -148,6 +152,7 @@ impl Snapshot {
         let events = (0..n).map(|_| r_event(&mut r)).collect::<Option<Vec<_>>>()?;
         (r.pos == bytes.len()).then_some(Snapshot {
             tick,
+            piki_deaths,
             captains,
             pikis,
             pellets,
@@ -166,14 +171,16 @@ impl Sim {
     /// Makes this sim's entities the snapshot's. For a replica: it doesn't step, so nothing here
     /// is simulated, only laid out for the presentation layer. The events go to the caller.
     pub fn apply_snapshot(&mut self, s: &Snapshot) {
+        self.reusable_pikis.clear();
         self.tick = s.tick;
-        self.captains = s.captains.clone();
-        self.pikis = s.pikis.clone();
-        self.pellets = s.pellets.clone();
-        self.onions = s.onions.clone();
-        self.sprouts = s.sprouts.clone();
-        self.nectar_drops = s.nectar_drops.clone();
-        self.puddles = s.puddles.clone();
+        self.piki_deaths = s.piki_deaths;
+        self.captains.clone_from(&s.captains);
+        self.pikis.clone_from(&s.pikis);
+        self.pellets.clone_from(&s.pellets);
+        self.onions.clone_from(&s.onions);
+        self.sprouts.clone_from(&s.sprouts);
+        self.nectar_drops.clone_from(&s.nectar_drops);
+        self.puddles.clone_from(&s.puddles);
         self.next_nectar = s.next_nectar;
         self.creatures.clear();
         for &(id, pos, yaw) in &s.creatures {
@@ -203,35 +210,46 @@ impl Sim {
     /// the snapshots arrive. Anything new in `to`, or with a different id order, is as `to` has it.
     pub fn apply_snapshot_blend(&mut self, from: &Snapshot, to: &Snapshot, t: f32) {
         self.apply_snapshot(to);
+        self.blend_snapshot_motion(from, to, t);
+    }
+
+    /// Render-only interpolation after `apply_snapshot(to)`, without recloning AI state.
+    /// Always use the authoritative endpoints, never the previous rendered position.
+    pub fn blend_snapshot_motion(&mut self, from: &Snapshot, to: &Snapshot, t: f32) {
         let t = t.clamp(0.0, 1.0);
-        if t >= 1.0 {
-            return;
-        }
-        for c in &mut self.captains {
+        for (c, b) in self.captains.iter_mut().zip(&to.captains) {
+            c.pos = b.pos;
+            c.face = b.face;
             if let Some(a) = from.captains.iter().find(|a| a.id == c.id) {
                 blend_pos(&mut c.pos, a.pos, t, c.vel);
                 c.face = lerp_angle(a.face, c.face, t);
             }
         }
         // Ids are indices into the vectors on the server, so they line up by position too.
-        for p in &mut self.pikis {
-            if let Some(a) = from.pikis.get(p.id.0 as usize).filter(|a| a.id == p.id) {
+        for (p, b) in self.pikis.iter_mut().zip(&to.pikis) {
+            p.pos = b.pos;
+            p.face = b.face;
+            if let Some(a) = from.pikis.get(p.id.0 as usize).filter(|a| a.id == p.id && a.generation == p.generation) {
                 blend_pos(&mut p.pos, a.pos, t, p.vel);
                 p.face = lerp_angle(a.face, p.face, t);
             }
         }
-        for p in &mut self.pellets {
+        for (p, b) in self.pellets.iter_mut().zip(&to.pellets) {
+            p.pos = b.pos;
+            p.yaw = b.yaw;
             if let Some(a) = from.pellets.get(p.id.0 as usize).filter(|a| a.id == p.id) {
                 blend_pos(&mut p.pos, a.pos, t, Vec3::ZERO);
                 p.yaw = lerp_angle(a.yaw, p.yaw, t);
             }
         }
-        for o in &mut self.onions {
+        for (o, b) in self.onions.iter_mut().zip(&to.onions) {
+            o.pos = b.pos;
             if let Some(a) = from.onions.get(o.id.0 as usize).filter(|a| a.id == o.id) {
                 blend_pos(&mut o.pos, a.pos, t, Vec3::ZERO);
             }
         }
         for s in self.sprouts.iter_mut().flatten() {
+            if let Some(Some(b)) = to.sprouts.get(s.id.0 as usize) { s.pos = b.pos; }
             if let Some(Some(a)) = from.sprouts.get(s.id.0 as usize).filter(|a| a.as_ref().is_some_and(|a| a.id == s.id)) {
                 blend_pos(&mut s.pos, a.pos, t, s.vel);
             }
@@ -689,6 +707,7 @@ fn r_state(r: &mut Reader) -> Option<PikiState> {
 
 fn w_piki(w: &mut Writer, p: &Piki) {
     w.u32(p.id.0);
+    w.u32(p.generation);
     w_color(w, p.color);
     w_happa(w, p.happa);
     w.vec3(p.pos);
@@ -724,6 +743,7 @@ fn w_piki(w: &mut Writer, p: &Piki) {
 
 fn r_piki(r: &mut Reader) -> Option<Piki> {
     let id = PikiId(r.u32()?);
+    let generation = r.u32()?;
     let color = r_color(r)?;
     let happa = r_happa(r)?;
     let pos = r.vec3()?;
@@ -751,6 +771,7 @@ fn r_piki(r: &mut Reader) -> Option<Piki> {
     }
     Some(Piki {
         id,
+        generation,
         color,
         happa,
         pos,

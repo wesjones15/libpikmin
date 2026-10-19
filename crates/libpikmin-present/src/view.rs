@@ -75,6 +75,8 @@ pub mod flags {
     /// Frozen ([`libpikmin::Sim::freeze_pikis_in_sphere`]): hosts may add an icy sheen. Its
     /// colour is already paled and its animation held.
     pub const FROZEN: u8 = 2;
+    /// Host keeps this instance's previous mesh; this draw contains no vertices.
+    pub const RETAIN_POSE: u8 = 4;
 }
 
 /// How a host draws a batch.
@@ -351,6 +353,10 @@ fn rebase_pose(pose: &mut libpikmin_assets::pose::Pose, offset: Vec3) {
 }
 
 pub struct View {
+    /// Opt-in distant skinning budget; hosts must understand RETAIN_POSE first.
+    pub pose_budget: Option<(Vec3, f32)>,
+    render_frame: u64,
+    posed_models: HashMap<u64, u32>,
     /// Opt in to the original wreck and progressively repaired root poses.
     pub repair_mode: bool,
     /// Host-owned victory presentation; never changes simulation or objective state.
@@ -562,6 +568,9 @@ impl View {
             texture_ids: Vec::new(),
             uvs: Vec::new(),
             camera: [Vec3::X, Vec3::Y, Vec3::Z],
+            pose_budget: None,
+            render_frame: 0,
+            posed_models: HashMap::new(),
             textures,
             effects: Effects::load(assets),
             particles: Flat::default(),
@@ -741,11 +750,16 @@ impl View {
         flags: u8,
     ) {
         let vm = &self.models[model as usize];
+        let retain_pose = matches!(kind, kinds::PIKI | kinds::HAPPA)
+            && self.posed_models.get(&k) == Some(&model)
+            && self.pose_budget.is_some_and(|(eye, far)| pos.distance_squared(eye) > far * far)
+            && (self.render_frame + (k & 0xffff_ffff)) % 3 != 0;
         let first_vertex = self.positions.len() as u32;
         let first_color = self.colors.len() as u32;
         for (bi, b) in vm.batches.iter().enumerate() {
             let env = vm.batch_env.get(bi).copied().flatten();
             for v in &b.vertices {
+                if retain_pose { break; }
                 let (p, n) = pose.skin(v);
                 let n = n.normalize_or_zero();
                 self.positions.push(p);
@@ -768,6 +782,8 @@ impl View {
             self.colors.push(c);
             self.texture_ids.push(id);
         }
+        let flags = flags | if retain_pose { flags::RETAIN_POSE } else { 0 };
+        if !retain_pose { self.posed_models.insert(k, model); }
         self.draws.push(Draw { key: k, kind, flags, model, pos, rot, first_vertex, first_color, alpha });
     }
 
@@ -795,6 +811,7 @@ impl View {
     /// Poses everything in `sim` for this frame. `alpha` is how far into the next tick the
     /// clock is ([`Sim::alpha`]), `dt` the frame time.
     pub fn update(&mut self, sim: &Sim, alpha: f32, dt: f32) {
+        self.render_frame = self.render_frame.wrapping_add(1);
         self.draws.clear();
         self.positions.clear();
         self.normals.clear();
@@ -1251,8 +1268,8 @@ impl View {
             let Some(look) = piki_look(&params, p) else {
                 continue;
             };
-            live.insert(crate::animator::piki_key(p.id));
-            let k = key(kinds::PIKI, p.id.0 as u64);
+            live.insert(crate::animator::piki_key(p));
+            let k = key(kinds::PIKI, crate::animator::piki_key(p));
             let (pos, rot) = self.place_rot(k, p.pos, Quat::from_rotation_y(p.face), tick, alpha);
             // Frozen: the pose held where it was, the body paled toward ice.
             let frozen = p.frozen > 0.0;
@@ -1272,7 +1289,7 @@ impl View {
             {
                 let model = models::HAPPA[p.happa as usize];
                 let pose = self.models[model as usize].skel.pose(j, None);
-                let k = key(kinds::HAPPA, p.id.0 as u64);
+                let k = key(kinds::HAPPA, crate::animator::piki_key(p));
                 self.push(k, kinds::HAPPA, model, pos, rot, pose, &no_inputs, look.fade, 0);
             }
         }
@@ -1416,5 +1433,6 @@ impl View {
         self.animator.retain_players(&live);
         let drawn: HashSet<u64> = self.draws.iter().map(|d| d.key).collect();
         self.interp.retain(|k, _| drawn.contains(k));
+        self.posed_models.retain(|k, _| drawn.contains(k));
     }
 }

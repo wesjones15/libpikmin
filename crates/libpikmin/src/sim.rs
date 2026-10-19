@@ -17,6 +17,9 @@ pub struct Sim {
     pub(crate) rng: Rng,
     pub(crate) captains: Vec<Captain>,
     pub(crate) pikis: Vec<Piki>,
+    pub(crate) reusable_pikis: Vec<usize>,
+    protected_pikis: std::collections::HashSet<PikiId>,
+    pub(crate) piki_deaths: u64,
     pub(crate) creatures: CreatureFrame,
     pub(crate) pellets: Vec<crate::carry::Pellet>,
     /// Opt-in host delivery policy; replicas do not run carry AI.
@@ -76,6 +79,9 @@ impl Sim {
             rng: Rng::new(seed),
             captains: Vec::new(),
             pikis: Vec::new(),
+            reusable_pikis: Vec::new(),
+            protected_pikis: Default::default(),
+            piki_deaths: 0,
             creatures: CreatureFrame::default(),
             pellets: Vec::new(),
             ship_part_delivery: 0,
@@ -130,9 +136,14 @@ impl Sim {
             self.params.piki.min_piki_size,
             self.params.piki.max_piki_size,
         );
-        let id = PikiId(self.pikis.len() as u32);
-        self.pikis.push(Piki {
+        let slot = std::iter::from_fn(|| self.reusable_pikis.pop())
+            .find(|&slot| self.pikis.get(slot).is_some_and(|p| matches!(p.state, PikiState::Dead)))
+            .unwrap_or(self.pikis.len());
+        let generation = self.pikis.get(slot).map_or(0, |p| p.generation + 1);
+        let id = PikiId(slot as u32);
+        let piki = Piki {
             id,
+            generation,
             color,
             happa: Default::default(),
             pos,
@@ -155,9 +166,29 @@ impl Sim {
             hit_next: 0,
             kill_credit: 0,
             frozen: 0.0,
-        });
+        };
+        if slot == self.pikis.len() { self.pikis.push(piki); }
+        else { self.pikis[slot] = piki; }
         Some(id)
     }
+
+    /// Release terminal slots once the host has finished all queued events referring to them.
+    /// IDs remain vector slots. Hosts must not retain a dead ID as a live entity handle.
+    /// Dying/fading bodies are never recycled; storage does not count as a death.
+    pub fn reclaim_dead_pikis(&mut self, pending: impl Iterator<Item = PikiId>) {
+        self.protected_pikis.clear();
+        self.protected_pikis.extend(pending.chain(self.events.iter().flat_map(Event::piki_ids)));
+        self.reusable_pikis.clear();
+        for p in &self.pikis {
+            if matches!(p.state, PikiState::Dead) && p.generation < 0x00ff_ffff && !self.protected_pikis.contains(&p.id) {
+                self.reusable_pikis.push(p.id.0 as usize);
+                self.carry_recall_until.remove(&p.id);
+                self.auto_carry_skip.remove(&p.id);
+            }
+        }
+    }
+
+    pub fn piki_deaths(&self) -> u64 { self.piki_deaths }
 
     /// Spawns a Pikmin straight into a captain's squad.
     pub fn spawn_piki_in_squad(

@@ -14,6 +14,34 @@ fn assets() -> Option<Assets> {
     a
 }
 
+#[test]
+fn distant_pose_budget_keeps_draws_and_clocks_but_skips_vertex_work() {
+    use libpikmin_present::view::flags::RETAIN_POSE;
+    let Some(assets) = assets() else { return };
+    let mut view = View::load(&assets).unwrap();
+    let mut sim = Sim::default();
+    sim.spawn_piki(PikiColor::Red, Vec3::X * 5000.0).unwrap();
+    view.update(&sim, 1.0, TICK_DT);
+    let full_vertices = view.positions.len();
+    assert!(full_vertices > 0);
+    let draws = view.draws.len();
+    view.pose_budget = Some((Vec3::ZERO, 3500.0));
+    let mut fresh = 0;
+    for _ in 0..6 {
+        sim.step(&mut FlatHost);
+        view.update(&sim, 1.0, TICK_DT);
+        assert_eq!(view.draws.len(), draws);
+        let retained = view.draws.iter().all(|d| d.flags & RETAIN_POSE != 0);
+        if retained { assert!(view.positions.is_empty()); }
+        else { fresh += 1; assert_eq!(view.positions.len(), full_vertices); }
+    }
+    assert_eq!(fresh, 2);
+    view.pose_budget = None;
+    view.update(&sim, 1.0, TICK_DT);
+    assert_eq!(view.positions.len(), full_vertices);
+    assert!(view.draws.iter().all(|d| d.flags & RETAIN_POSE == 0));
+}
+
 fn world(assets: &Assets) -> Sim {
     let mut params = Params::default();
     let _ = params.load_extracted(&assets.root);
@@ -382,7 +410,7 @@ fn jumps_use_disc_geyser_and_pikmin_airborne_motions_then_resume_walking() {
         sim.step(&mut FlatHost);
         view.update(&sim, 1.0, TICK_DT);
         assert_eq!(view.animator.players[&captain_key(c)].anim, Motion::OCarry.anim_index().unwrap());
-        assert_eq!(view.animator.players[&piki_key(p)].anim, Motion::RollJmp.anim_index().unwrap());
+        assert_eq!(view.animator.players[&piki_key(sim.piki(p))].anim, Motion::RollJmp.anim_index().unwrap());
         poses_c.push(vertices(&view, kinds::CAPTAIN));
         poses_p.push(vertices(&view, kinds::PIKI));
         assert!(view.positions.iter().all(|p| p.is_finite()));
@@ -395,5 +423,5 @@ fn jumps_use_disc_geyser_and_pikmin_airborne_motions_then_resume_walking() {
     for _ in 0..90 { sim.step(&mut FlatHost); }
     view.update(&sim, 1.0, TICK_DT);
     assert_ne!(view.animator.players[&captain_key(c)].anim, Motion::OCarry.anim_index().unwrap());
-    assert_ne!(view.animator.players[&piki_key(p)].anim, Motion::RollJmp.anim_index().unwrap());
+    assert_ne!(view.animator.players[&piki_key(sim.piki(p))].anim, Motion::RollJmp.anim_index().unwrap());
 }

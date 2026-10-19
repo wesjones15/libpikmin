@@ -44,17 +44,17 @@ pub struct Player {
 }
 
 /// Player keys, one space per kind of object.
-pub fn piki_key(id: libpikmin::PikiId) -> u64 {
-    id.0 as u64
+pub fn piki_key(p: &Piki) -> u64 {
+    ((p.generation as u64) << 32) | p.id.0 as u64
 }
 pub fn captain_key(id: CaptainId) -> u64 {
-    (1u64 << 40) | id.0 as u64
+    (1u64 << 56) | id.0 as u64
 }
 pub fn onion_key(index: usize) -> u64 {
-    (3u64 << 40) | index as u64
+    (3u64 << 56) | index as u64
 }
 pub fn sprout_key(id: SproutId) -> u64 {
-    (4u64 << 40) | id.0 as u64
+    (4u64 << 56) | id.0 as u64
 }
 
 pub fn advance<'a>(
@@ -451,8 +451,8 @@ impl Animator {
     }
 
     pub fn piki<'a>(&mut self, set: &'a AnimSet, p: &Piki, look: &PikiLook, dt: f32) -> Option<(&'a Anim, f32)> {
-        let clock = self.clock(piki_key(p.id), look.motion.anim_index()?, look.clock);
-        advance(&mut self.players, piki_key(p.id), set, look.motion, clock, dt)
+        let clock = self.clock(piki_key(p), look.motion.anim_index()?, look.clock);
+        advance(&mut self.players, piki_key(p), set, look.motion, clock, dt)
     }
 
     pub fn captain<'a>(&mut self, set: &'a AnimSet, params: &Params, c: &Captain, dt: f32) -> Option<(&'a Anim, f32)> {

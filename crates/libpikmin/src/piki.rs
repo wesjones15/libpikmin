@@ -210,6 +210,8 @@ pub struct GuidedThrow {
 #[derive(Debug, Clone)]
 pub struct Piki {
     pub id: PikiId,
+    /// Incarnation of a reusable slot; presentation must not blend different occupants.
+    pub generation: u32,
     pub color: PikiColor,
     pub happa: Happa,
     pub pos: Vec3,
@@ -985,6 +987,7 @@ impl Sim {
                 if p.health <= 0.0 {
                     let id = p.id;
                     p.state = PikiState::Fading { timer: 1.5 };
+                    self.piki_deaths += 1;
                     self.events.push(Event::PikiDied {
                         piki: id,
                         cause: crate::damage::DeathCause::Attacked,

@@ -41,7 +41,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 37;
+pub const PIK_ABI_VERSION: u32 = 38;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
@@ -286,6 +286,7 @@ pub struct PikPiki {
     pub face: f32,
     pub size: f32,
     pub id: u32,
+    pub generation: u32,
     /// Its captain, or -1.
     pub captain: i32,
     /// The pellet it carries, or -1.
@@ -828,6 +829,7 @@ pub struct PikSim {
     view_log: Vec<Event>,
     /// Events for the next [`pik_sim_snapshot`] (what clients' replicas need to play).
     net_log: Vec<Event>,
+    networked: bool,
     /// Set on a replica ([`pik_replica_new`]): the sim a client lays the server's snapshots over.
     replica: Option<Replica>,
     params_source: CString,
@@ -945,6 +947,7 @@ pub unsafe extern "C" fn pik_sim_new(assets_dir: *const c_char, seed: u64) -> *m
             pending: VecDeque::new(),
             view_log: Vec::new(),
             net_log: Vec::new(),
+            networked: true,
             replica: None,
             params_source: CString::new(source).unwrap_or_default(),
             poisoned: false,
@@ -1468,6 +1471,7 @@ pub unsafe extern "C" fn pik_sim_advance(sim: *mut PikSim, host: *const PikHost,
     // SAFETY: as documented.
     unsafe {
         with(sim, 0, |s| {
+            s.sim.reclaim_dead_pikis(s.pending.iter().chain(&s.view_log).chain(&s.net_log).flat_map(Event::piki_ids));
             let mut h = FfiHost { host, frame: &s.frame, path: Vec::new() };
             let ticks = s.sim.advance(&mut h, dt.clamp(0.0, 0.25));
             let events: Vec<Event> = s.sim.drain_events().collect();
@@ -1475,7 +1479,7 @@ pub unsafe extern "C" fn pik_sim_advance(sim: *mut PikSim, host: *const PikHost,
             if s.view_log.len() + events.len() <= EVENT_BACKLOG {
                 s.view_log.extend_from_slice(&events);
             }
-            if s.net_log.len() + events.len() <= EVENT_BACKLOG {
+            if s.networked && s.net_log.len() + events.len() <= EVENT_BACKLOG {
                 s.net_log.extend_from_slice(&events);
             }
             s.pending.extend(events);
@@ -1485,6 +1489,18 @@ pub unsafe extern "C" fn pik_sim_advance(sim: *mut PikSim, host: *const PikHost,
             ticks
         })
     }
+}
+
+/// Whether this sim has network snapshot consumers. Disable for solo/local prediction so
+/// undeliverable network events cannot pin retired entity slots.
+/// # Safety
+/// `sim` from `pik_sim_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_networked(sim: *mut PikSim, enabled: u8) {
+    unsafe { with(sim, (), |s| {
+        s.networked = enabled != 0;
+        if !s.networked { s.net_log.clear(); }
+    }) }
 }
 
 /// Encodes the sim's entities, and the events since the last call, into `out` (at most `cap`
@@ -1551,6 +1567,14 @@ pub unsafe extern "C" fn pik_replica_apply(sim: *mut PikSim, bytes: *const u8, l
             if r.cur.as_ref().is_some_and(|c| snap.tick < c.tick) {
                 return 0;
             }
+            // Several packets may arrive before a render. Don't resolve an older occupant's
+            // deferred spatial cue through a recycled slot. Ghosts carry their own position.
+            if let Some(previous) = &r.cur {
+                s.view_log.retain(|event| matches!(event, Event::PikiGone { .. }) || event.piki_ids().all(|id| {
+                    previous.pikis.get(id.0 as usize).zip(snap.pikis.get(id.0 as usize))
+                        .is_some_and(|(a, b)| a.generation == b.generation)
+                }));
+            }
             if s.view_log.len() + snap.events.len() <= EVENT_BACKLOG {
                 s.view_log.extend_from_slice(&snap.events);
             }
@@ -1559,8 +1583,10 @@ pub unsafe extern "C" fn pik_replica_apply(sim: *mut PikSim, bytes: *const u8, l
             }
             r.since = 0.0;
             r.prev = r.cur.take();
-            let from = r.prev.clone().unwrap_or_else(|| snap.clone());
-            s.sim.apply_snapshot_blend(&from, &snap, 0.0);
+            let clock = s.sim.tick();
+            let from = r.prev.as_ref().unwrap_or(&snap);
+            s.sim.apply_snapshot_blend(from, &snap, 0.0);
+            s.sim.set_tick(clock.max(snap.tick));
             // Where the creatures were, for the sounds of what they do.
             s.frame.clear();
             for &(id, pos, yaw) in &snap.creatures {
@@ -1588,10 +1614,10 @@ pub unsafe extern "C" fn pik_replica_update(sim: *mut PikSim, dt: f32) {
             r.since += dt.clamp(0.0, 0.25);
             let from = r.prev.as_ref().unwrap_or(cur);
             let t = (r.since / r.interval).min(1.0);
-            s.sim.apply_snapshot_blend(from, cur, t);
+            s.sim.blend_snapshot_motion(from, cur, t);
             // Time past the newest snapshot, so the view still sees ticks go by while waiting.
             let ahead = (r.since * libpikmin::TICK_HZ as f32) as u64;
-            s.sim.set_tick(cur.tick + ahead);
+            s.sim.set_tick(s.sim.tick().max(cur.tick + ahead));
         })
     }
 }
@@ -1902,6 +1928,7 @@ pub unsafe extern "C" fn pik_sim_pikis(sim: *mut PikSim, out: *mut PikPiki, max:
                     face: p.face,
                     size: p.size,
                     id: p.id.0,
+                    generation: p.generation,
                     captain: p.captain.map_or(-1, |c| c.0 as i32),
                     pellet: pellet.map_or(-1, |id| id as i32),
                     health: p.health,

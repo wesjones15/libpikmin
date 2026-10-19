@@ -261,6 +261,16 @@ pub unsafe extern "C" fn pik_view_set_paused(view: *mut PikView, paused: u8) {
     }
 }
 
+/// Budget distant Pikmin skinning (sim units); zero disables it. Requires draw flag 4 support.
+/// # Safety
+/// `view` is a live view handle, `eye` is readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_pose_budget(view: *mut PikView, eye: *const PikVec3, far: f32) {
+    if let (Some(v), Some(eye)) = (unsafe { view.as_mut() }, unsafe { eye.as_ref() }) {
+        v.view.pose_budget = (far.is_finite() && far > 0.0).then_some((Vec3::from(*eye), far));
+    }
+}
+
 /// Have views made after this draw the Dolphin's parts as the sim fits them (`animator`'s sibling,
 /// `view::set_repaired_ship`). Call before [`pik_view_new`]: the parts' models are loaded then.
 #[unsafe(no_mangle)]
@@ -612,7 +622,7 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
             if let Some(a) = v.audio.as_mut() {
                 a.set_listener_captain(usize::try_from(f.listener).ok());
             }
-            let events = std::mem::take(&mut s.view_log);
+            let mut events = std::mem::take(&mut s.view_log);
             let positions: Vec<(libpikmin::CreatureId, Vec3)> =
                 s.frame.creatures.iter().map(|c| (c.id, c.pos)).collect();
             let creatures = Creatures { positions: &positions, table_sounds: &[] };
@@ -662,6 +672,8 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
                 v.view.demo_sounds.clear();
             }
             v.last_tick = Some(tick);
+            events.clear();
+            s.view_log = events;
         })
     }
 }

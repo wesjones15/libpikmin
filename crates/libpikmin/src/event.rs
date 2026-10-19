@@ -214,3 +214,23 @@ pub enum Event {
     /// Host extension: one of `captain`'s Pikmin took off to repeat his jump-pad throw.
     PikiLaunched { piki: PikiId, captain: CaptainId },
 }
+
+impl Event {
+    /// Entity references whose storage must survive deferred sound/network/host delivery.
+    pub fn piki_ids(&self) -> impl Iterator<Item = PikiId> {
+        use Event::*;
+        let ids = match *self {
+            PluckerPulled { plucker, plucked, .. } => [Some(plucker), Some(plucked)],
+            PikiEnteredOnion { piki, .. } | PikiLeftOnion { piki, .. }
+            | PikiDrinking { piki } | Bloomed { piki } | Recruited { piki, .. }
+            | Thrown { piki, .. } | Landed { piki } | Latched { piki, .. }
+            | Hit { piki, .. } | KnockedOff { piki, .. } | PikiHurt { piki, .. }
+            | CarrierGrabbed { piki, .. } | Deflowered { piki } | PikiGone { piki, .. }
+            | PikiDied { piki, .. } | Swallowed { piki, .. } | SpitOut { piki }
+            | Plucked { piki, .. } | PluckerOut { piki, .. } | PikiGrew { piki, .. }
+            | PikiStomped { piki, .. } | PikiLaunched { piki, .. } => [Some(piki), None],
+            _ => [None, None],
+        };
+        ids.into_iter().flatten()
+    }
+}

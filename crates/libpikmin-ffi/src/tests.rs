@@ -181,7 +181,7 @@ fn struct_sizes_are_what_hosts_mirror() {
     );
     assert_eq!(
         (s.captain, s.piki, s.pellet, s.onion, s.sprout, s.event, s.onion_counts),
-        (60, 64, 64, 36, 20, 48, 16)
+        (60, 72, 64, 36, 20, 48, 16)
     );
     assert_eq!((s.model_info, s.batch, s.texture, s.draw, s.view_frame, s.particle), (40, 24, 12, 64, 52, 72));
 }
@@ -611,6 +611,50 @@ fn a_replica_follows_the_server_through_snapshots() {
         let mut tiny = [0u8; 8];
         assert_eq!(pik_sim_snapshot(server, tiny.as_mut_ptr(), 8), 0);
         pik_sim_free(server);
+        pik_sim_free(replica);
+    }
+}
+
+#[test]
+fn delayed_snapshots_do_not_rewind_the_replica_animation_clock() {
+    unsafe {
+        let server = pik_sim_new(std::ptr::null(), 4);
+        let replica = pik_replica_new(std::ptr::null());
+        let mut bytes = vec![0; 4096];
+        (*server).sim.set_tick(30);
+        let n = pik_sim_snapshot(server, bytes.as_mut_ptr(), bytes.len() as u32);
+        assert_eq!(pik_replica_apply(replica, bytes.as_ptr(), n), 1);
+        pik_replica_update(replica, 0.25);
+        let before = (*replica).sim.tick();
+        assert!(before > 33);
+        (*server).sim.set_tick(33);
+        let n = pik_sim_snapshot(server, bytes.as_mut_ptr(), bytes.len() as u32);
+        assert_eq!(pik_replica_apply(replica, bytes.as_ptr(), n), 1);
+        assert_eq!((*replica).sim.tick(), before);
+        pik_replica_update(replica, 0.01);
+        assert!((*replica).sim.tick() >= before);
+        pik_sim_free(server);
+        pik_sim_free(replica);
+    }
+}
+
+#[test]
+fn burst_snapshots_do_not_play_old_spatial_cues_on_a_recycled_pikmin() {
+    unsafe {
+        let replica = pik_replica_new(std::ptr::null());
+        let mut source = Sim::default();
+        let id = source.spawn_piki(PikiColor::Red, Vec3::ZERO).unwrap();
+        source.set_tick(1);
+        let ghost = Event::PikiGone { piki: id, pos: Vec3::X * 10.0 };
+        let bytes = Snapshot::of(&source, &[Event::Landed { piki: id }, ghost]).encode();
+        assert_eq!(pik_replica_apply(replica, bytes.as_ptr(), bytes.len() as u32), 1);
+        source.piki_mut(id).state = PikiState::Dead;
+        source.reclaim_dead_pikis(std::iter::empty());
+        source.spawn_piki(PikiColor::Blue, Vec3::X * 30.0).unwrap();
+        source.set_tick(2);
+        let bytes = Snapshot::of(&source, &[]).encode();
+        assert_eq!(pik_replica_apply(replica, bytes.as_ptr(), bytes.len() as u32), 1);
+        assert_eq!((*replica).view_log, vec![ghost]);
         pik_sim_free(replica);
     }
 }

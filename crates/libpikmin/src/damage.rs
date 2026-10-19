@@ -94,6 +94,7 @@ impl Sim {
             p.target_vel = Vec3::ZERO;
             if p.health <= 0.0 {
                 // The press check fires on the first tick: death timer > factor − normal factor.
+                self.piki_deaths += 1;
                 self.events.push(Event::PikiDied {
                     piki: id,
                     cause: DeathCause::Crushed,
@@ -238,6 +239,7 @@ impl Sim {
             {
                 let id = self.pikis[pi].id;
                 self.pikis[pi].state = PikiState::Fading { timer: 1.5 };
+                self.piki_deaths += 1;
                 self.events.push(Event::PikiDied {
                     piki: id,
                     cause: DeathCause::Eaten,
@@ -266,12 +268,13 @@ impl Sim {
         let pi = id.0 as usize;
         if matches!(
             self.pikis[pi].state,
-            PikiState::Fading { .. } | PikiState::Dead | PikiState::Plucker(_)
+            PikiState::Dying { .. } | PikiState::Fading { .. } | PikiState::Dead | PikiState::Plucker(_)
         ) {
             return;
         }
         self.leave_current(id);
         self.pikis[pi].state = PikiState::Fading { timer: 1.5 };
+        self.piki_deaths += 1;
         self.events.push(Event::PikiDied {
             piki: id,
             cause: DeathCause::Killed,
@@ -296,6 +299,7 @@ impl Sim {
         p.vel = Vec3::ZERO;
         p.target_vel = Vec3::ZERO;
         p.state = PikiState::Dying { frame: 0.0, end };
+        self.piki_deaths += 1;
         self.events.push(Event::PikiDied { piki: id, cause });
     }
 
@@ -358,6 +362,7 @@ impl Sim {
                 {
                     let id = p.id;
                     p.state = PikiState::Fading { timer: 1.5 };
+                    self.piki_deaths += 1;
                     self.events.push(Event::PikiDied {
                         piki: id,
                         cause: DeathCause::Crushed,
