@@ -431,6 +431,11 @@ impl Animator {
         if let Event::Thrown { captain, .. } = e {
             // The throw motion's length (`NaviThrowState`).
             self.throw_timer.insert(*captain, 9.0 / 30.0);
+            // Each throw plays the motion afresh. Rapid throws (a lock-on feeds the hand in one tick)
+            // land inside the last one's window, where the same clip would otherwise just hold its
+            // final frame and leave him standing still.
+            self.players.remove(&captain_key(*captain));
+            self.frames.remove(&captain_key(*captain));
         }
     }
 
