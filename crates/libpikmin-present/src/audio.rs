@@ -164,6 +164,12 @@ impl Audio {
         self.sys.lock().ok().map(|mut s| f(&mut s))
     }
 
+    /// Holds every sound where it is (a paused game): silence out and the sound system standing
+    /// still, so they carry on from the same place when unpaused.
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
+    }
+
     /// Output volume, 0..1 (the host's sound-effects volume).
     pub fn set_volume(&self, v: f32) {
         self.gain.store(v.clamp(0.0, 4.0).to_bits(), Ordering::Relaxed);

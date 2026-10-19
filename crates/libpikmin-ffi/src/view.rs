@@ -250,6 +250,17 @@ pub unsafe extern "C" fn pik_view_play_sound(view: *mut PikView, sound: u8, pos:
     }) }
 }
 
+/// Holds this view's sounds still while the host's game is paused (nonzero) and lets them go on
+/// from the same place when it isn't. Call it every frame; a view without sound ignores it.
+/// # Safety
+/// `view` is a live view handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_paused(view: *mut PikView, paused: u8) {
+    if let Some(v) = unsafe { view.as_mut() } {
+        if let Some(audio) = &v.audio { audio.set_paused(paused != 0); }
+    }
+}
+
 /// Have views made after this draw the Dolphin's parts as the sim fits them (`animator`'s sibling,
 /// `view::set_repaired_ship`). Call before [`pik_view_new`]: the parts' models are loaded then.
 #[unsafe(no_mangle)]
