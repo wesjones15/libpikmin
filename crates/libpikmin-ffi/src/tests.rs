@@ -228,8 +228,12 @@ fn events_past_one_read_wait_for_the_next() {
     }
 }
 
+/// Both tests make views, and the enemy models are a process-wide switch.
+static VIEWS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn the_view_poses_a_sim_through_the_abi() {
+    let _views = VIEWS.lock().unwrap_or_else(|e| e.into_inner());
     let Some(assets) = libpikmin_assets::Assets::discover(None) else {
         eprintln!("no extracted assets; skipping");
         return;
@@ -656,5 +660,84 @@ fn burst_snapshots_do_not_play_old_spatial_cues_on_a_recycled_pikmin() {
         assert_eq!(pik_replica_apply(replica, bytes.as_ptr(), bytes.len() as u32), 1);
         assert_eq!((*replica).view_log, vec![ghost]);
         pik_sim_free(replica);
+    }
+}
+
+#[test]
+fn teki_structs_are_what_hosts_mirror() {
+    // ror2-olimar's Native.TekiInfo / TekiInstance.
+    let mut s = [0u32; 2];
+    unsafe { crate::view::pik_view_teki_sizes(s.as_mut_ptr()) };
+    assert_eq!(s, [4 * 21 + 12 * 3 + 28 * 10, 44]);
+}
+
+#[test]
+fn the_view_draws_a_hosts_enemies() {
+    let _views = VIEWS.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else {
+        eprintln!("no extracted assets; skipping");
+        return;
+    };
+    if !assets.root.join("tekis/swallow/swallow.mod").exists() {
+        eprintln!("no enemy models; skipping");
+        return;
+    }
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        crate::view::pik_view_set_teki_models(1);
+        let view = pik_view_new(dir.as_ptr(), 0);
+        crate::view::pik_view_set_teki_models(0);
+        assert!(!view.is_null());
+        let sim = pik_sim_new(dir.as_ptr(), 1);
+        let mut infos = [crate::view::PikTekiInfo::default(); 2];
+        for k in 0..2 {
+            assert_eq!(crate::view::pik_view_teki_info(view, k, &mut infos[k as usize]), 1);
+        }
+        assert_eq!(crate::view::pik_view_teki_info(view, 7, &mut infos[0]), 0);
+        assert!(infos[1].life > infos[0].life && infos[1].model != infos[0].model);
+        let list = [
+            crate::view::PikTekiInstance {
+                id: 5, kind: 0, motion: infos[0].motions[6].index, frame: 30.0, scale: 1.0, alpha: 1.0, flash: 0.1,
+                ..Default::default()
+            },
+            crate::view::PikTekiInstance {
+                id: 9, kind: 1, motion: infos[1].motions[2].index, frame: 3.0, scale: 0.5, alpha: 1.0,
+                pos: PikVec3 { x: 100.0, y: 0.0, z: 0.0 }, yaw: 1.0, ..Default::default()
+            },
+        ];
+        let frame = PikViewFrame {
+            dt: 1.0 / 60.0,
+            forward: PikVec3 { x: 0.0, y: 0.0, z: 1.0 },
+            up: PikVec3 { x: 0.0, y: 1.0, z: 0.0 },
+            listener: -1,
+            volume: 0.0,
+            ..Default::default()
+        };
+        crate::view::pik_view_set_tekis(view, list.as_ptr(), 2);
+        pik_view_update(view, sim, &frame);
+        let n = pik_view_draws(view, std::ptr::null_mut(), 0);
+        let mut draws = vec![PikDraw::default(); n as usize];
+        pik_view_draws(view, draws.as_mut_ptr(), n);
+        let tekis: Vec<_> = draws.iter().filter(|d| d.kind == 12).collect();
+        assert_eq!(tekis.len(), 2, "{draws:?}");
+        assert_eq!((tekis[0].id, tekis[0].model, tekis[0].flags & 1), (5, infos[0].model, 1));
+        assert_eq!((tekis[1].id, tekis[1].model), (9, infos[1].model));
+        // Skinned vertices are in a draw of the model's own size and the half-size one is smaller.
+        let mut m = PikModelInfo::default();
+        pik_view_model(view, infos[1].model, &mut m);
+        let mut count = 0u32;
+        let pos = std::slice::from_raw_parts(pik_view_positions(view, &mut count), count as usize);
+        let first = tekis[1].first_vertex as usize;
+        let top = pos[first..first + m.vertex_count as usize].iter().map(|p| p.y).fold(f32::MIN, f32::max);
+        assert!(top > 5.0 && top < infos[1].hi.y, "half-size Spotty is {top} tall of {}", infos[1].hi.y);
+        // Not asked for again: gone next frame.
+        pik_view_update(view, sim, &frame);
+        let n = pik_view_draws(view, std::ptr::null_mut(), 0);
+        let mut draws = vec![PikDraw::default(); n as usize];
+        pik_view_draws(view, draws.as_mut_ptr(), n);
+        assert!(draws.iter().all(|d| d.kind != 12));
+        pik_sim_free(sim);
+        pik_view_free(view);
     }
 }

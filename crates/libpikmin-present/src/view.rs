@@ -50,6 +50,15 @@ pub fn set_repaired_ship(on: bool) {
     REPAIRED_SHIP.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
+static TEKI_MODELS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Host extension: load the enemies' models (Dwarf and Spotty Bulborbs, [`crate::teki`]) so the host can
+/// draw its own AI's enemies with [`View::set_tekis`]. Off by default (each model's materials are baked
+/// at load). Call before [`View::load`].
+pub fn set_teki_models(on: bool) {
+    TEKI_MODELS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// What a draw is, for hosts that treat some kinds differently.
 pub mod kinds {
     pub const CAPTAIN: u8 = 0;
@@ -66,6 +75,8 @@ pub mod kinds {
     pub const BEAM: u8 = 10;
     /// A part on the ship (`models::COUNT` and up, see [`super::View::part_model`]).
     pub const SHIP_PART: u8 = 11;
+    /// An enemy the host asked for ([`super::View::set_tekis`]); its id is the host's.
+    pub const TEKI: u8 = 12;
 }
 
 /// Draw flags.
@@ -352,7 +363,16 @@ fn rebase_pose(pose: &mut libpikmin_assets::pose::Pose, offset: Vec3) {
     for matrix in pose.joints.iter_mut().chain(pose.envelopes.iter_mut()) { *matrix = translation * *matrix; }
 }
 
+/// A loaded enemy kind: its facts and animations (the model is in [`View::models`]).
+pub struct TekiView {
+    pub info: crate::teki::TekiInfo,
+    anims: AnimSet,
+}
+
 pub struct View {
+    /// Enemy kinds that loaded ([`set_teki_models`]), by [`crate::teki::TekiInfo::kind`] order.
+    pub tekis: Vec<TekiView>,
+    teki_input: Vec<crate::teki::TekiInstance>,
     /// Opt-in distant skinning budget; hosts must understand RETAIN_POSE first.
     pub pose_budget: Option<(Vec3, f32)>,
     render_frame: u64,
@@ -486,6 +506,25 @@ impl View {
                 }));
             }
         }
+        let mut tekis = Vec::new();
+        if TEKI_MODELS.load(std::sync::atomic::Ordering::Relaxed) {
+            let pellets = assets.read("parms/pelMgr.bin").ok()
+                .and_then(|d| libpikmin::pellet_config::parse_pellet_configs(&d).ok()).unwrap_or_default();
+            for kind in 0..crate::teki::KINDS as u8 {
+                let Some(name) = crate::teki::name(kind) else { continue };
+                let [model_path, anm, key, _] = libpikmin_assets::teki::teki_paths(name);
+                let loaded = (|| {
+                    let vm = ViewModel::load(assets, &model_path).ok()?;
+                    let info = crate::teki::TekiInfo::load(assets, kind, models.len() as u32, &pellets).ok()?;
+                    let anims = AnimSet::load(assets, &key, &anm).ok()?;
+                    Some((vm, TekiView { info, anims }))
+                })();
+                if let Some((vm, teki)) = loaded {
+                    models.push(vm);
+                    tekis.push(teki);
+                }
+            }
+        }
         // Each material baked as it is with no per-draw inputs, which also says how opaque it is.
         let mut textures = Textures::default();
         for (mi, vm) in models.iter_mut().enumerate() {
@@ -538,6 +577,8 @@ impl View {
         }
         let ship_contexts = models[models::SHIP as usize].skel.override_map(&libpikmin_assets::ship::CONTEXT_JOINTS);
         Ok(View {
+            tekis,
+            teki_input: Vec::new(),
             repair_mode: false,
             celebrating: false,
             models,
@@ -709,6 +750,18 @@ impl View {
                 g.gravity_off_at = Some(SUCK_GRAVITY_FRAMES);
             }
         }
+    }
+
+    /// The enemies to draw at the next [`View::update`] (and only that one): the host's own, posed
+    /// by the animation and frame it names. Kinds that didn't load are skipped.
+    pub fn set_tekis(&mut self, list: &[crate::teki::TekiInstance]) {
+        self.teki_input.clear();
+        self.teki_input.extend_from_slice(list);
+    }
+
+    /// The loaded kind `kind` ([`crate::teki::DWARF`]...), if its files were on the disc.
+    pub fn teki(&self, kind: u8) -> Option<&TekiView> {
+        self.tekis.iter().find(|t| t.info.kind == kind)
     }
 
     /// The camera's world axes (`forward` is where it looks), for environment maps and
@@ -1229,6 +1282,20 @@ impl View {
             let tint = pel.desc.color.map(piki_rgb).unwrap_or([230, 230, 230, 255]);
             let inputs = move |_: usize| Inputs { reg0: Some(tint), ..Default::default() };
             self.push(k, kinds::PELLET, model, pos, rot, pose, &inputs, 1.0, 0);
+        }
+
+        // The host's enemies, each in the pose it names (`PaniTekiAnimator` plays the `.key`
+        // motions directly).
+        for t in std::mem::take(&mut self.teki_input) {
+            let Some(view) = self.tekis.iter().find(|v| v.info.kind == t.kind) else { continue };
+            let model = view.info.model;
+            let anim = view.anims.get(t.motion as usize)
+                .map(|(_, a)| (a, t.frame.clamp(0.0, a.frames.saturating_sub(1) as f32)));
+            let scale = view.info.scale * t.scale.max(0.0);
+            let pose = self.models[model as usize].skel.pose(srt_matrix(Vec3::splat(scale), Vec3::ZERO, Vec3::ZERO), anim);
+            let flags = if t.flash > 0.0 { flags::FLASH } else { 0 };
+            let k = key(kinds::TEKI, t.id as u64);
+            self.push(k, kinds::TEKI, model, t.pos, Quat::from_rotation_y(t.yaw), pose, &no_inputs, t.alpha.clamp(0.0, 1.0), flags);
         }
 
         // Sprouts and flying seeds, with the leaf, bud or flower on joint 3.

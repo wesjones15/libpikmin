@@ -857,3 +857,190 @@ pub unsafe extern "C" fn pik_view_particle_texture(
 }
 
 const _: () = assert!(std::mem::size_of::<PikVec3>() == std::mem::size_of::<Vec3>());
+
+// ------------------------------------------------------------------------------------------
+// Enemies (teki) that a host's own AI moves: the view only draws them.
+
+/// Frame keys of one of an enemy's motions, in animation frames (30 a second).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PikTekiMotion {
+    /// The `.key` AnimMgr index to give [`PikTekiInstance::motion`].
+    pub index: u32,
+    pub start: f32,
+    pub end: f32,
+    pub loop_start: f32,
+    pub loop_end: f32,
+    /// Where a bite lands and where the chewing ends (`end` when the motion has none).
+    pub action0: f32,
+    pub action1: f32,
+}
+
+/// What the disc says about an enemy kind (`libpikmin_present::teki::TekiInfo`), in sim units.
+/// `motions` follow `teki::slot`: wait, turn, chase, attack, gulp, flick, dead, hurt, sleep, cry.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PikTekiInfo {
+    pub kind: u32,
+    /// The kind's model, as in [`pik_view_model`] and [`PikDraw::model`].
+    pub model: u32,
+    pub life: f32,
+    pub scale: f32,
+    pub weight: f32,
+    pub run_speed: f32,
+    /// Radians a second.
+    pub turn_speed: f32,
+    pub visible_range: f32,
+    pub visible_angle: f32,
+    pub attackable_range: f32,
+    pub attackable_angle: f32,
+    pub attack_range: f32,
+    pub attack_power: f32,
+    pub collision_radius: f32,
+    pub corpse_size: f32,
+    pub corpse_height: f32,
+    pub corpse_min_carriers: u32,
+    pub corpse_max_carriers: u32,
+    pub corpse_seeds_matching: i32,
+    pub corpse_seeds_other: i32,
+    pub swallow_count: u32,
+    pub corpse_offset: PikVec3,
+    pub lo: PikVec3,
+    pub hi: PikVec3,
+    pub motions: [PikTekiMotion; 10],
+}
+
+/// One enemy to draw at the next [`pik_view_update`].
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PikTekiInstance {
+    /// Stable while it lives: the draw's `id`.
+    pub id: u32,
+    pub kind: u32,
+    pub pos: PikVec3,
+    /// Radians about +Y; it faces `(sin, 0, cos)`.
+    pub yaw: f32,
+    pub motion: u32,
+    pub frame: f32,
+    /// Seconds of hit flash left.
+    pub flash: f32,
+    /// 1 at the disc's size.
+    pub scale: f32,
+    /// 1 opaque .. 0 gone.
+    pub alpha: f32,
+}
+
+/// Have views made after this load the enemy models (`view::set_teki_models`). Call before
+/// [`pik_view_new`].
+#[unsafe(no_mangle)]
+pub extern "C" fn pik_view_set_teki_models(on: u8) {
+    libpikmin_present::view::set_teki_models(on != 0);
+}
+
+/// `out[0]` the size of [`PikTekiInfo`], `out[1]` of [`PikTekiInstance`], for hosts to check
+/// their mirrors.
+///
+/// # Safety
+/// `out` writable for two `u32`s.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_teki_sizes(out: *mut u32) {
+    if out.is_null() {
+        return;
+    }
+    // SAFETY: as documented.
+    unsafe {
+        out.write(std::mem::size_of::<PikTekiInfo>() as u32);
+        out.add(1).write(std::mem::size_of::<PikTekiInstance>() as u32);
+    }
+}
+
+/// Fills `out` for enemy kind `kind` (0 Dwarf Bulborb, 1 Spotty Bulborb); 0 if the kind's files
+/// weren't loaded (no enemy models, or not on the disc).
+///
+/// # Safety
+/// `view` from [`pik_view_new`]; `out` writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_teki_info(view: *mut PikView, kind: u32, out: *mut PikTekiInfo) -> u8 {
+    if out.is_null() {
+        return 0;
+    }
+    // SAFETY: as documented.
+    unsafe {
+        with_view(view, 0, |v| {
+            let Some(t) = u8::try_from(kind).ok().and_then(|k| v.view.teki(k)) else { return 0 };
+            let i = &t.info;
+            let mut m = [PikTekiMotion::default(); 10];
+            for (o, s) in m.iter_mut().zip(&i.motions) {
+                *o = PikTekiMotion {
+                    index: s.index,
+                    start: s.start,
+                    end: s.end,
+                    loop_start: s.loop_start,
+                    loop_end: s.loop_end,
+                    action0: s.action0,
+                    action1: s.action1,
+                };
+            }
+            out.write(PikTekiInfo {
+                kind,
+                model: i.model,
+                life: i.life,
+                scale: i.scale,
+                weight: i.weight,
+                run_speed: i.run_speed,
+                turn_speed: i.turn_speed,
+                visible_range: i.visible_range,
+                visible_angle: i.visible_angle,
+                attackable_range: i.attackable_range,
+                attackable_angle: i.attackable_angle,
+                attack_range: i.attack_range,
+                attack_power: i.attack_power,
+                collision_radius: i.collision_radius,
+                corpse_size: i.corpse_size,
+                corpse_height: i.corpse_height,
+                corpse_min_carriers: i.corpse_min_carriers,
+                corpse_max_carriers: i.corpse_max_carriers,
+                corpse_seeds_matching: i.corpse_seeds_matching,
+                corpse_seeds_other: i.corpse_seeds_other,
+                swallow_count: i.swallow_count,
+                corpse_offset: i.corpse_offset.into(),
+                lo: i.lo.into(),
+                hi: i.hi.into(),
+                motions: m,
+            });
+            1
+        })
+    }
+}
+
+/// The enemies to draw at the next [`pik_view_update`] (replacing any given since the last):
+/// their draws have kind 12 and `id` = [`PikTekiInstance::id`].
+///
+/// # Safety
+/// `view` from [`pik_view_new`]; `list` readable for `count`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_tekis(view: *mut PikView, list: *const PikTekiInstance, count: u32) {
+    // SAFETY: as documented.
+    unsafe {
+        with_view(view, (), |v| {
+            let src = if list.is_null() || count == 0 { &[][..] } else { std::slice::from_raw_parts(list, count as usize) };
+            let instances: Vec<_> = src
+                .iter()
+                .filter_map(|t| {
+                    Some(libpikmin_present::teki::TekiInstance {
+                        id: t.id,
+                        kind: u8::try_from(t.kind).ok()?,
+                        pos: t.pos.into(),
+                        yaw: t.yaw,
+                        motion: t.motion,
+                        frame: t.frame,
+                        flash: t.flash,
+                        scale: t.scale,
+                        alpha: t.alpha,
+                    })
+                })
+                .collect();
+            v.view.set_tekis(&instances);
+        })
+    }
+}
