@@ -41,7 +41,10 @@ Workspace:
   reads count as their average; blended materials are tagged opaque, cutout or translucent),
   and `effects` (the whistle and one-shots like the dead Pikmin's ghost, on the particle
   generator port; `Flat` splits GX's additive colour modes into one-texture layers for host
-  shaders). No music: hosts keep theirs.
+  shaders). No music: hosts keep theirs. `teki` is for hosts with their own enemy AI (RoR2 monsters):
+  `TekiInfo` (the disc's parms, motions and corpse config for the Dwarf and Spotty Bulborb) and
+  `View::set_tekis`, which draws the instances a host names (kind, pos, yaw, `.key` motion, frame);
+  off unless `set_teki_models(true)` before `View::load`.
 - `crates/libpikmin-ffi/`: C ABI for hosts: `pikmin.dll`, `pik_*` functions (`pik_view_*` for
   drawing and sound), `PIK_ABI_VERSION`. ror2-olimar's `Native.cs` mirrors its structs and
   checks `pik_struct_sizes` at load; change both together (and the size test in `src/tests.rs`).

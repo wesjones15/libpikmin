@@ -968,46 +968,7 @@ pub unsafe extern "C" fn pik_view_teki_info(view: *mut PikView, kind: u32, out: 
     unsafe {
         with_view(view, 0, |v| {
             let Some(t) = u8::try_from(kind).ok().and_then(|k| v.view.teki(k)) else { return 0 };
-            let i = &t.info;
-            let mut m = [PikTekiMotion::default(); 10];
-            for (o, s) in m.iter_mut().zip(&i.motions) {
-                *o = PikTekiMotion {
-                    index: s.index,
-                    start: s.start,
-                    end: s.end,
-                    loop_start: s.loop_start,
-                    loop_end: s.loop_end,
-                    action0: s.action0,
-                    action1: s.action1,
-                };
-            }
-            out.write(PikTekiInfo {
-                kind,
-                model: i.model,
-                life: i.life,
-                scale: i.scale,
-                weight: i.weight,
-                run_speed: i.run_speed,
-                turn_speed: i.turn_speed,
-                visible_range: i.visible_range,
-                visible_angle: i.visible_angle,
-                attackable_range: i.attackable_range,
-                attackable_angle: i.attackable_angle,
-                attack_range: i.attack_range,
-                attack_power: i.attack_power,
-                collision_radius: i.collision_radius,
-                corpse_size: i.corpse_size,
-                corpse_height: i.corpse_height,
-                corpse_min_carriers: i.corpse_min_carriers,
-                corpse_max_carriers: i.corpse_max_carriers,
-                corpse_seeds_matching: i.corpse_seeds_matching,
-                corpse_seeds_other: i.corpse_seeds_other,
-                swallow_count: i.swallow_count,
-                corpse_offset: i.corpse_offset.into(),
-                lo: i.lo.into(),
-                hi: i.hi.into(),
-                motions: m,
-            });
+            out.write(info_struct(kind, &t.info));
             1
         })
     }
@@ -1042,5 +1003,71 @@ pub unsafe extern "C" fn pik_view_set_tekis(view: *mut PikView, list: *const Pik
                 .collect();
             v.view.set_tekis(&instances);
         })
+    }
+}
+
+/// [`pik_view_teki_info`] without a view, straight from the extracted assets (for a host that
+/// sets enemies up before it has drawn anything). `model` is 0.
+///
+/// # Safety
+/// `assets_dir` a nul-terminated UTF-8 path; `out` writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_teki_info(assets_dir: *const c_char, kind: u32, out: *mut PikTekiInfo) -> u8 {
+    if out.is_null() {
+        return 0;
+    }
+    // SAFETY: as documented.
+    let Some(dir) = (unsafe { path_arg(assets_dir) }) else { return 0 };
+    let made = catch_unwind(|| {
+        let assets = Assets { root: dir };
+        let pellets = assets.read("parms/pelMgr.bin").ok()
+            .and_then(|d| libpikmin::pellet_config::parse_pellet_configs(&d).ok()).unwrap_or_default();
+        libpikmin_present::teki::TekiInfo::load(&assets, u8::try_from(kind).ok()?, 0, &pellets).ok()
+    });
+    let Ok(Some(i)) = made else { return 0 };
+    // SAFETY: as documented.
+    unsafe { out.write(info_struct(kind, &i)) };
+    1
+}
+
+fn info_struct(kind: u32, i: &libpikmin_present::teki::TekiInfo) -> PikTekiInfo {
+    let mut m = [PikTekiMotion::default(); 10];
+    for (o, s) in m.iter_mut().zip(&i.motions) {
+        *o = PikTekiMotion {
+            index: s.index,
+            start: s.start,
+            end: s.end,
+            loop_start: s.loop_start,
+            loop_end: s.loop_end,
+            action0: s.action0,
+            action1: s.action1,
+        };
+    }
+    PikTekiInfo {
+        kind,
+        model: i.model,
+        life: i.life,
+        scale: i.scale,
+        weight: i.weight,
+        run_speed: i.run_speed,
+        turn_speed: i.turn_speed,
+        visible_range: i.visible_range,
+        visible_angle: i.visible_angle,
+        attackable_range: i.attackable_range,
+        attackable_angle: i.attackable_angle,
+        attack_range: i.attack_range,
+        attack_power: i.attack_power,
+        collision_radius: i.collision_radius,
+        corpse_size: i.corpse_size,
+        corpse_height: i.corpse_height,
+        corpse_min_carriers: i.corpse_min_carriers,
+        corpse_max_carriers: i.corpse_max_carriers,
+        corpse_seeds_matching: i.corpse_seeds_matching,
+        corpse_seeds_other: i.corpse_seeds_other,
+        swallow_count: i.swallow_count,
+        corpse_offset: i.corpse_offset.into(),
+        lo: i.lo.into(),
+        hi: i.hi.into(),
+        motions: m,
     }
 }
