@@ -1140,6 +1140,7 @@ fn w_pellet(w: &mut Writer, p: &Pellet) {
             w.f32(*speed);
         }
         PelletState::Gone => w.u8(3),
+        PelletState::Held => w.u8(4),
     }
     w.len(p.slots.len());
     for s in &p.slots {
@@ -1191,6 +1192,7 @@ fn r_pellet(r: &mut Reader) -> Option<Pellet> {
             speed: r.f32()?,
         },
         3 => PelletState::Gone,
+        4 => PelletState::Held,
         _ => return None,
     };
     let n = r.len()?;

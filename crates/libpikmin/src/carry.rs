@@ -103,6 +103,9 @@ pub enum PelletState {
         progress: f32,
         speed: f32,
     },
+    /// In a host character's hands (Mario's): the host drives its pose each tick with
+    /// [`Sim::hold_pellet`]; no Pikmin take hold of it until [`Sim::release_pellet`].
+    Held,
     /// Sucked in. The host should remove its object.
     Gone,
 }
@@ -250,12 +253,84 @@ impl Sim {
                 std::cmp::Reverse(p.carriers.iter().position(|id| self.pikis[id.0 as usize].captain == Some(*captain)).unwrap_or(usize::MAX))))
     }
 
+    /// Marks `ship` as a host character's own (Mario's, who has no captain): in competitive delivery it takes
+    /// only parts it lacks, put in by hand ([`Sim::hand_ship_part`]); no captain's Pikmin deliver to it.
+    pub fn set_ship_hand_owned(&mut self, ship: OnionId) {
+        if self.onions.get(ship.0 as usize).is_some_and(|o| o.ship.is_some()) {
+            self.hand_ships.insert(ship);
+        }
+    }
+
     fn competitive_receiver(&self, onion: OnionId, captain: Option<crate::CaptainId>, part: u32) -> bool {
+        if self.hand_ships.contains(&onion) {
+            return captain.is_none() && self.onions[onion.0 as usize].ship.as_ref().is_some_and(|s| !s.parts.contains(&part));
+        }
         let Some(captain) = captain else { return false };
         if self.ship_part_owners.get(&onion) != Some(&captain) { return false; }
         let has_part = self.ship_part_owners.iter().any(|(&ship, &owner)| owner == captain &&
             self.onions[ship.0 as usize].ship.as_ref().is_some_and(|s| s.parts.contains(&part)));
         if self.onions[onion.0 as usize].ship.is_some() { !has_part } else { has_part }
+    }
+
+    /// A host character takes the pellet in his hands, or moves the one he holds: it is at `pos` facing `yaw`
+    /// and no Pikmin carry it. False if it is gone, being sucked into an Onion or not there.
+    pub fn hold_pellet(&mut self, id: PelletId, pos: Vec3, yaw: f32) -> bool {
+        if !pos.is_finite() || !yaw.is_finite() { return false; }
+        let Some(p) = self.pellets.get(id.0 as usize) else { return false };
+        if !matches!(p.state, PelletState::Idle | PelletState::Held | PelletState::Carried { .. }) { return false; }
+        if p.state != PelletState::Held {
+            let carriers = p.carriers.clone();
+            for carrier in carriers { self.leave_current(carrier); self.pikis[carrier.0 as usize].state = PikiState::Idle; }
+        }
+        let p = &mut self.pellets[id.0 as usize];
+        p.slots.iter_mut().for_each(|s| *s = None);
+        p.carriers.clear();
+        p.state = PelletState::Held;
+        p.pos = pos;
+        p.yaw = yaw;
+        p.scale = 1.0;
+        p.stalled = 0.0;
+        true
+    }
+
+    /// Puts a held pellet down at `pos`, where Pikmin can lift it again. False if it isn't held.
+    pub fn release_pellet(&mut self, id: PelletId, pos: Vec3, yaw: f32) -> bool {
+        if !pos.is_finite() || !yaw.is_finite() { return false; }
+        let Some(p) = self.pellets.get_mut(id.0 as usize) else { return false };
+        if p.state != PelletState::Held { return false; }
+        p.state = PelletState::Idle;
+        p.pos = pos;
+        p.yaw = yaw;
+        p.stalled = 0.0;
+        true
+    }
+
+    /// The horizontal reach of a ship's receiver for a part put in by hand (the Onion's loose pickup is 20).
+    pub const HAND_RECEIVER_RADIUS: f32 = 60.0;
+
+    /// A host character puts the held (or loose) ship part `pellet` into `ship`'s receiver: it is sucked in like a
+    /// carried one, and the host gets the usual [`Event::ShipPartCollected`] to accept or refuse. The part has to
+    /// be within [`Self::HAND_RECEIVER_RADIUS`] of the receiver, and the ship has to be down and taking it.
+    pub fn hand_ship_part(&mut self, ship: OnionId, pellet: PelletId) -> bool {
+        let Some(o) = self.onions.get(ship.0 as usize) else { return false };
+        let Some(p) = self.pellets.get(pellet.0 as usize) else { return false };
+        let Some(part) = p.desc.ship_part else { return false };
+        if o.ship.is_none() || !o.grounded() || !o.takes_deliveries() || self.ship_part_delivery == 0
+            || self.ship_part_delivery == 1
+            || !matches!(p.state, PelletState::Idle | PelletState::Held)
+            || dist_xz(o.goal_pos(), p.pos) > Self::HAND_RECEIVER_RADIUS
+            || (o.pos.y - p.pos.y).abs() > 90.0 { return false; }
+        if self.ship_part_delivery == 3 && !self.competitive_receiver(ship, self.ship_part_owners.get(&ship).copied(), part) {
+            return false;
+        }
+        let color = p.desc.color.unwrap_or(PikiColor::Red);
+        let carriers = self.pellets[pellet.0 as usize].carriers.clone();
+        for id in carriers { self.leave_current(id); self.pikis[id.0 as usize].state = PikiState::Idle; }
+        let p = &mut self.pellets[pellet.0 as usize];
+        p.carriers.clear();
+        p.slots.iter_mut().for_each(|s| *s = None);
+        p.state = PelletState::Sucking { onion: ship, color, wait: 1.5, start: p.pos, progress: 0.0, speed: 0.0 };
+        true
     }
 
     /// Put down an undelivered objective safely, releasing its carry team.
@@ -521,7 +596,7 @@ impl Sim {
                     progress,
                     speed,
                 } => self.suck_step(i, dt, onion, color, wait, start, progress, speed),
-                PelletState::Gone => {}
+                PelletState::Gone | PelletState::Held => {}
             }
             if trying_to_move && matches!(self.pellets[i].state, PelletState::Idle | PelletState::Carried { .. }) {
                 let pos = self.pellets[i].pos;
@@ -1141,6 +1216,64 @@ mod tests {
         sim.give_ship_part(ship, 4);
         assert_eq!(sim.onions()[ship.0 as usize].ship.as_ref().unwrap().parts, vec![4]);
         assert!(sim.sprouts().next().is_none());
+    }
+
+    #[test]
+    fn a_held_part_is_nobodys_to_lift_and_goes_into_a_ship_by_hand() {
+        let mut sim = Sim::default();
+        sim.set_ship_part_host_delivery(true);
+        sim.add_onion(Vec3::new(-400.0, 0.0, 0.0), &[PikiColor::Red]);
+        let ship = sim.add_ship(Vec3::X * 100.0, Vec3::X * 80.0, Vec3::new(100.0, 60.0, 0.0));
+        let mut desc = PelletDesc::numbered(sim.params(), 1, PikiColor::Red, Vec3::new(600.0, 0.0, 0.0), 0.0);
+        desc.ship_part = Some(4);
+        let part = sim.spawn_pellet(desc);
+        // Far from the receiver: refused.
+        assert!(sim.hold_pellet(part, Vec3::new(600.0, 10.0, 0.0), 0.5));
+        assert_eq!(sim.pellet(part).state, PelletState::Held);
+        assert!(!sim.pellet(part).can_take_carrier(), "a held part took a carrier");
+        assert!(!sim.hand_ship_part(ship, part), "a part far from the receiver went in");
+        // Carried to the receiver, still in his hands: taken, sucked in, and the host gets its receipt.
+        let goal = sim.onions()[ship.0 as usize].goal_pos();
+        assert!(sim.hold_pellet(part, goal + Vec3::new(10.0, 12.0, 0.0), 0.0));
+        assert!(sim.hand_ship_part(ship, part));
+        let mut receipts = 0;
+        for _ in 0..900 {
+            sim.step(&mut FlatHost);
+            for event in sim.drain_events() {
+                if let Event::ShipPartCollected { pellet, ship: receiver, part: id, .. } = event {
+                    assert_eq!((pellet, receiver, id), (part, ship, 4));
+                    receipts += 1;
+                }
+            }
+        }
+        assert_eq!(receipts, 1);
+        // A held part can be set down again, and then Pikmin can lift it.
+        let other = sim.spawn_pellet(desc);
+        assert!(sim.hold_pellet(other, Vec3::new(300.0, 0.0, 0.0), 0.0));
+        assert!(sim.release_pellet(other, Vec3::new(300.0, 0.0, 40.0), 1.0));
+        assert_eq!(sim.pellet(other).state, PelletState::Idle);
+        assert!(!sim.release_pellet(other, Vec3::ZERO, 0.0), "released twice");
+    }
+
+    #[test]
+    fn a_competitive_hand_ship_takes_only_the_parts_it_lacks_and_no_captains_pikmin_deliver_to_it() {
+        let mut sim = Sim::default();
+        sim.set_ship_part_competitive_delivery(true);
+        let a = sim.add_captain(Vec3::ZERO);
+        let theirs = sim.add_ship(Vec3::X * 300.0, Vec3::X * 280.0, Vec3::new(300.0, 60.0, 0.0));
+        let mine = sim.add_ship(Vec3::X * 20.0, Vec3::X * 15.0, Vec3::new(20.0, 60.0, 0.0));
+        sim.set_ship_part_owner(theirs, a);
+        sim.set_ship_hand_owned(mine);
+        let mut desc = PelletDesc::numbered(sim.params(), 1, PikiColor::Red, Vec3::new(40.0, 0.0, 0.0), 0.0);
+        desc.ship_part = Some(4);
+        let part = sim.spawn_pellet(desc);
+        attach(&mut sim, PikiColor::Red, part);
+        sim.pikis.last_mut().unwrap().captain = Some(a);
+        assert_eq!(sim.decide_goal(part.0 as usize, &mut FlatHost).unwrap().0, theirs, "a captain's Pikmin delivered to the hand ship");
+        sim.give_ship_part(mine, 4);
+        assert!(!sim.hand_ship_part(mine, part), "the hand ship took a part it already has");
+        let another = sim.spawn_pellet(PelletDesc { ship_part: Some(7), ..desc });
+        assert!(sim.hand_ship_part(mine, another));
     }
 
     #[test]

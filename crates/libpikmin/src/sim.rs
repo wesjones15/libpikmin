@@ -25,6 +25,8 @@ pub struct Sim {
     /// Opt-in host delivery policy; replicas do not run carry AI.
     pub(crate) ship_part_delivery: u8,
     pub(crate) ship_part_owners: std::collections::HashMap<crate::onion::OnionId, CaptainId>,
+    /// Ships that belong to a host character who has no captain (Mario): parts are put in them by hand.
+    pub(crate) hand_ships: std::collections::HashSet<crate::onion::OnionId>,
     pub(crate) onions: Vec<crate::onion::Onion>,
     pub(crate) sprouts: Vec<Option<crate::onion::Sprout>>,
     pub(crate) nectar_drops: Vec<crate::nectar::NectarDrop>,
@@ -86,6 +88,7 @@ impl Sim {
             pellets: Vec::new(),
             ship_part_delivery: 0,
             ship_part_owners: Default::default(),
+            hand_ships: Default::default(),
             onions: Vec::new(),
             sprouts: Vec::new(),
             nectar_drops: Vec::new(),

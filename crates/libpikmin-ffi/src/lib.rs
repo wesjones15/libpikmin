@@ -41,7 +41,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 39;
+pub const PIK_ABI_VERSION: u32 = 40;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
@@ -1038,6 +1038,40 @@ pub unsafe extern "C" fn pik_sim_spawn_ship_part(sim: *mut PikSim, part: u32, po
     }) }
 }
 
+/// A host character (Mario) takes the pellet in his hands, or moves the one he holds.
+/// # Safety
+/// `sim` is live; `pos` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_hold_pellet(sim: *mut PikSim, pellet: u32, pos: *const PikVec3, yaw: f32) -> u8 {
+    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return 0 };
+    unsafe { with(sim, 0, |s| s.sim.hold_pellet(libpikmin::PelletId(pellet), pos.into(), yaw) as u8) }
+}
+
+/// Puts a held pellet down at `pos`.
+/// # Safety
+/// `sim` is live; `pos` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_release_pellet(sim: *mut PikSim, pellet: u32, pos: *const PikVec3, yaw: f32) -> u8 {
+    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return 0 };
+    unsafe { with(sim, 0, |s| s.sim.release_pellet(libpikmin::PelletId(pellet), pos.into(), yaw) as u8) }
+}
+
+/// Puts a held or loose ship part into `ship`'s receiver by hand; returns whether the ship took it.
+/// # Safety
+/// `sim` is live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_hand_ship_part(sim: *mut PikSim, ship: u32, pellet: u32) -> u8 {
+    unsafe { with(sim, 0, |s| s.sim.hand_ship_part(libpikmin::OnionId(ship), libpikmin::PelletId(pellet)) as u8) }
+}
+
+/// Marks `ship` as a captain-less host character's (Mario's): parts go in by hand, no Pikmin deliver.
+/// # Safety
+/// `sim` is live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_ship_hand_owned(sim: *mut PikSim, ship: u32) {
+    unsafe { with(sim, (), |s| s.sim.set_ship_hand_owned(libpikmin::OnionId(ship))) }
+}
+
 /// # Safety
 /// `sim` is live; `pos` readable.
 #[unsafe(no_mangle)]
@@ -2016,6 +2050,7 @@ pub unsafe extern "C" fn pik_sim_pellets(sim: *mut PikSim, out: *mut PikPellet, 
                     PelletState::Carried { onion, .. } => (1, onion.0 as i32),
                     PelletState::Sucking { onion, .. } => (2, onion.0 as i32),
                     PelletState::Gone => (3, -1),
+                    PelletState::Held => (4, -1),
                 };
                 let v = PikPellet {
                     creature: p.desc.creature.unwrap_or(0),
