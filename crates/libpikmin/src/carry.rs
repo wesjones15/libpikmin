@@ -306,7 +306,7 @@ impl Sim {
     }
 
     /// The horizontal reach of a ship's receiver for a part put in by hand (the Onion's loose pickup is 20).
-    pub const HAND_RECEIVER_RADIUS: f32 = 60.0;
+    pub const HAND_RECEIVER_RADIUS: f32 = 100.0;
 
     /// A host character puts the held (or loose) ship part `pellet` into `ship`'s receiver: it is sucked in like a
     /// carried one, and the host gets the usual [`Event::ShipPartCollected`] to accept or refuse. The part has to
