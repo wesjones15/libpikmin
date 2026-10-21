@@ -271,8 +271,8 @@ pub unsafe extern "C" fn pik_tekis_outs(t: *const PikTekis, out: *mut PikTekiOut
             Out::Spawn { kind, pos, yaw, parent, velocity } => {
                 (r.kind, r.a, r.pos, r.x, r.teki, r.vel) = (3, *kind as u32, (*pos).into(), *yaw, *parent, (*velocity).into());
             }
-            Out::HitNavi { navi, damage, from, knock } => {
-                (r.kind, r.a, r.x, r.y, r.vel) = (4, *navi, *damage, *knock, (*from).into());
+            Out::HitNavi { teki, navi, damage, from, knock } => {
+                (r.kind, r.teki, r.a, r.x, r.y, r.vel) = (4, *teki, *navi, *damage, *knock, (*from).into());
             }
             Out::Died { teki } => (r.kind, r.teki) = (5, *teki),
             Out::Dying { teki } => (r.kind, r.teki) = (6, *teki),

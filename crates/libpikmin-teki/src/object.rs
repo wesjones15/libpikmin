@@ -66,7 +66,7 @@ pub enum Out {
     /// A new enemy (`BTeki::spawnTeki`).
     Spawn { kind: u8, pos: Vec3, yaw: f32, parent: TekiId, velocity: Vec3 },
     /// Damage to a player (`InteractAttack` on a Navi): `knock` away from the point, if it knocks.
-    HitNavi { navi: u32, damage: f32, from: Vec3, knock: f32 },
+    HitNavi { teki: TekiId, navi: u32, damage: f32, from: Vec3, knock: f32 },
     /// A pellet dropped for the host to place (`BTeki::spawnPellets`): kind 0..2 numbered, color.
     SpawnPellets { pos: Vec3, number: u32, color: u32, count: u32 },
     /// Nectar (`spawnWaters`).
@@ -634,7 +634,7 @@ impl Teki {
         let range = self.f(tpf::LOWER_RANGE) + self.info.collision_radius;
         w.sim.flick_pikis_in_sphere(self.pos, range, self.f(tpf::LOWER_ATTACK_POWER), self.pos);
         for n in w.navis.iter().filter(|n| n.alive && dist_xz(self.pos, n.pos) - n.size <= range) {
-            w.out.push(Out::HitNavi { navi: n.id, damage: self.f(tpf::LOWER_ATTACK_POWER), from: self.pos, knock: self.f(tpf::LOWER_FLICK_POWER) });
+            w.out.push(Out::HitNavi { teki: self.id, navi: n.id, damage: self.f(tpf::LOWER_ATTACK_POWER), from: self.pos, knock: self.f(tpf::LOWER_FLICK_POWER) });
         }
     }
 

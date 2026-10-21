@@ -213,7 +213,7 @@ fn swallow_flicking(next: i32, m: usize) -> Act {
                         Target::Piki(_) => {
                             w.sim.flick_pikis_in_sphere(c.pos, 0.5, 0.0, pos);
                         }
-                        Target::Navi(id) => w.out.push(Out::HitNavi { navi: id, damage: attack, from: pos, knock: power }),
+                        Target::Navi(id) => w.out.push(Out::HitNavi { teki: t.id, navi: id, damage: attack, from: pos, knock: power }),
                         Target::Pellet(_) => {}
                     }
                 }

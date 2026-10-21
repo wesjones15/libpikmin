@@ -539,7 +539,7 @@ pub fn animation_swallowing(next: i32) -> Act {
 fn swallow_navis(t: &Teki, w: &mut World, centre: glam::Vec3, range: f32) -> bool {
     let mut any = false;
     for n in w.navis.iter().filter(|n| n.alive && dist_xz(centre, n.pos) - n.size <= range) {
-        w.out.push(Out::HitNavi { navi: n.id, damage: t.f(tpf::ATTACK_POWER), from: t.pos, knock: 0.0 });
+        w.out.push(Out::HitNavi { teki: t.id, navi: n.id, damage: t.f(tpf::ATTACK_POWER), from: t.pos, knock: 0.0 });
         any = true;
     }
     any
