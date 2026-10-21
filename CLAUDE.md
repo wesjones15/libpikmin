@@ -45,6 +45,10 @@ Workspace:
   `TekiInfo` (the disc's parms, motions and corpse config for the Dwarf and Spotty Bulborb) and
   `View::set_tekis`, which draws the instances a host names (kind, pos, yaw, `.key` motion, frame);
   off unless `set_teki_models(true)` before `View::load`.
+- `crates/libpikmin-teki/`: Pikmin 1's enemies as engine-free state machines ported from the decomp's `Tai*` (plugPikiNakata) and
+  `TAI*` (plugPikiYamashita) strategies: `tai.rs`/`yai.rs` the shared actions, one module per enemy, `info.rs` the per-kind
+  disc facts. A host spawns an enemy for a body of its own, feeds it the ground, water and damage, and applies its `Out`s
+  (`pik_tekis_*` in the ffi). The viewer's own ports of the Bulborbs and Honeywisp are older and separate.
 - `crates/libpikmin-ffi/`: C ABI for hosts: `pikmin.dll`, `pik_*` functions (`pik_view_*` for
   drawing and sound), `PIK_ABI_VERSION`. ror2-olimar's `Native.cs` mirrors its structs and
   checks `pik_struct_sizes` at load; change both together (and the size test in `src/tests.rs`).
