@@ -9,6 +9,20 @@ pub const COLLEC_HM_A: usize = 97;
 pub const COLLEC_HM_B: usize = 98;
 
 pub const BUBBLES: usize = 15;
+pub const DORORO_EYE: usize = 157;
+pub const DORORO_DEAD_FRAGMENTS: usize = 162;
+pub const DORORO_HOWL_ZIGZAGS: usize = 163;
+pub const DORORO_HOWL_RIPPLES: usize = 164;
+pub const DORORO_HOWL_HALO: usize = 165;
+pub const DORORO_DEAD_FUMES: usize = 166;
+pub const TAMAGO_DEAD_FUMES: usize = 167;
+pub const TAMAGO_EYE_GLOW: usize = 168;
+pub const TAMAGO_DEAD_FRAGMENTS: usize = 169;
+pub const TAMAGO_DEAD_SMOKE: usize = 170;
+pub const DORORO_BODY_FRAGMENTS: usize = 171;
+pub const DORORO_BODY_SPECKS: usize = 172;
+pub const DORORO_BODY_TRAIL: usize = 173;
+pub const DORORO_BODY_SMOKE: usize = 175;
 pub const MAR_WIND_JET: usize = 176;
 pub const MAR_DEAD_SMOKE: usize = 179;
 pub const MAR_DEAD_JET: usize = 180;
@@ -39,6 +53,7 @@ pub const SMOKE_RING_S: usize = 68;
 pub fn keyed(kind: u8, index: u8) -> Vec<usize> {
     use crate::info::*;
     match (kind, index) {
+        (SMOKY_PROGG, 0..=2) => vec![SMOKE_RING_M],
         (PUFFSTOOL, 0) => vec![KINOKO_SPORES_UP],
         (PUFFSTOOL, 1) => vec![KINOKO_ATTACK_SPORES, KINOKO_ATTACK_CLOUD],
         (PUFFSTOOL, 2) => vec![KINOKO_POST_ATTACK_SPORES, KINOKO_POST_ATTACK_CLOUD],

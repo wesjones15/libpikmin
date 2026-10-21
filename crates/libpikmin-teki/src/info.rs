@@ -57,9 +57,15 @@ pub const WATER_DUMPLE: u8 = 17;
 pub const HONEYWISP: u8 = 18;
 pub const BREADBUG: u8 = 19;
 pub const IWAGON: u8 = 20;
+pub const GIANT_EGG: u8 = 21;
+pub const FIRE_GEYSER: u8 = 22;
+pub const PELLET_POSY: u8 = 23;
+pub const CLAMCLAMP: u8 = 24;
+pub const PEARL: u8 = 25;
+pub const ROCPE: u8 = 26;
 
 /// Every kind a host can draw, indexed by the constants above.
-pub const KIND_TABLE: [Kind; 21] = [
+pub const KIND_TABLE: [Kind; 27] = [
     Kind { name: "chappy", ints: 21, corpse: "tkch", sound_base: "SE_MINIC_WALK", motions: STANDARD },
     Kind { name: "swallow", ints: 20, corpse: "tksw", sound_base: "SE_CHAPPY_WALK", motions: BULBORB },
     Kind { name: "chappb", ints: 21, corpse: "tkcb", sound_base: "SE_MINIC_WALK", motions: STANDARD },
@@ -81,6 +87,12 @@ pub const KIND_TABLE: [Kind; 21] = [
     Kind { name: "qurione", ints: 20, corpse: "tkqu", sound_base: "SE_KURIONE_HIT", motions: STANDARD },
     Kind { name: "collec", ints: 21, corpse: "tkco", sound_base: "SE_COLLEC_BREATH", motions: STANDARD },
     Kind { name: "iwagon", ints: 20, corpse: "tkiw", sound_base: "SE_ROCK_ROLL", motions: STANDARD },
+    Kind { name: "tamago", ints: 20, corpse: "tktm", sound_base: "SE_DORORO_EGG_CRASH", motions: STANDARD },
+    Kind { name: "hibaA", ints: 20, corpse: "tkhi", sound_base: "SE_TANK_FIRE", motions: STANDARD },
+    Kind { name: "palm", ints: 20, corpse: "tkpa", sound_base: "SE_FLOWER_DOWN", motions: STANDARD },
+    Kind { name: "shell", ints: 21, corpse: "tksh", sound_base: "SE_SHELL_CLOSE", motions: STANDARD },
+    Kind { name: "pearl", ints: 20, corpse: "tkpe", sound_base: "SE_SHELL_CLOSE", motions: STANDARD },
+    Kind { name: "rocpe", ints: 20, corpse: "tkro", sound_base: "SE_SHELL_CLOSE", motions: STANDARD },
 ];
 pub const KINDS: usize = KIND_TABLE.len();
 
@@ -304,10 +316,14 @@ mod tests {
         let Some(a) = assets() else { eprintln!("SKIP: Pikmin assets absent"); return };
         let pellets = pellets(&a);
         for kind in 0..KINDS as u8 {
-            let t = TekiInfo::load(&a, kind, 0, &pellets).unwrap();
+            let t = match TekiInfo::load(&a, kind, 0, &pellets) {
+                Ok(t) => t,
+                Err(e) => panic!("kind {kind} ({}): {e}", KIND_TABLE[kind as usize].name),
+            };
             assert!(t.life > 0.0 && t.scale > 0.0, "{kind}: {t:?}");
-            // The Honeywisp flies a path and the Rolling Boulder rolls; neither runs nor turns.
-            assert!(kind == HONEYWISP || kind == IWAGON || (t.run_speed > 0.0 && t.turn_speed > 0.0), "kind {kind}: run {} turn {}", t.run_speed, t.turn_speed);
+            // Some kinds fly a path, roll, sit or are only parts of others, and neither run nor turn.
+            let stationary = [HONEYWISP, IWAGON, GIANT_EGG, FIRE_GEYSER, PELLET_POSY, CLAMCLAMP, PEARL, ROCPE];
+            assert!(stationary.contains(&kind) || (t.run_speed > 0.0 && t.turn_speed > 0.0), "kind {kind}: run {} turn {}", t.run_speed, t.turn_speed);
             assert!(t.corpse_min_carriers >= 1 && t.corpse_max_carriers >= t.corpse_min_carriers);
             assert!(t.hi.y > t.lo.y);
             for m in &t.motions {

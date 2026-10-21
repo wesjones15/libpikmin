@@ -11,6 +11,7 @@ pub mod beatle;
 pub mod bulborb;
 pub mod collec;
 pub mod object;
+pub mod dororo;
 pub mod effects;
 pub mod info;
 pub mod kabekui;
@@ -108,6 +109,20 @@ impl Tekis {
     }
 
     /// The host body is somewhere else (blocked, pushed): the enemy follows it.
+    /// Where an enemy should head (the Smoky Progg's Onion).
+    pub fn set_goal(&mut self, id: TekiId, goal: Option<Vec3>) {
+        if let Some(t) = self.get_mut(id) {
+            t.goal = goal;
+        }
+    }
+
+    /// The ground under an enemy is water, or not (a body that moves itself tells it each tick).
+    pub fn set_water(&mut self, id: TekiId, water: bool) {
+        if let Some(t) = self.get_mut(id) {
+            t.in_water = water;
+        }
+    }
+
     pub fn set_position(&mut self, id: TekiId, pos: Vec3) {
         if let Some(t) = self.get_mut(id) {
             t.pos = pos;
@@ -182,6 +197,8 @@ fn strategy_for(info: &TekiInfo) -> Option<Strategy> {
         FIERY_BLOWHOG => tank::tank(info),
         SNITCHBUG => napkid::snitchbug(info),
         PUFFSTOOL => kinoko::puffstool(info),
+        SMOKY_PROGG => dororo::smoky_progg(info),
+        GIANT_EGG => dororo::giant_egg(info),
         PUFFY_BLOWHOG => mar::puffy_blowhog(info),
         SHEARGRUB_F => kabekui::female(info),
         SHEARGRUB_M => kabekui::male(info),

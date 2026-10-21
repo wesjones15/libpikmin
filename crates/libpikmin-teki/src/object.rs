@@ -248,6 +248,8 @@ pub struct Teki {
     pub spawn_vel: Vec3,
     /// The ground under it is water (`MapCode::getAttribute == ATTR_Water`), from the host.
     pub in_water: bool,
+    /// Where the host wants it to go (the Smoky Progg walks to its Onion).
+    pub goal: Option<Vec3>,
 }
 
 /// A flame stream (`CylinderTypeCallBack`): a cylinder from the mouth, `length` long and `radius` wide.
@@ -368,6 +370,7 @@ impl Teki {
             next_override: None,
             spawn_vel: Vec3::ZERO,
             in_water: false,
+            goal: None,
         }
     }
 
