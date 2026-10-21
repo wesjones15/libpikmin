@@ -7,6 +7,7 @@
 //! damage in with [`Tekis::damage`] and the real position back with [`Tekis::set_position`].
 
 pub mod anim;
+pub mod beatle;
 pub mod bulborb;
 pub mod collec;
 pub mod object;
@@ -173,6 +174,8 @@ fn strategy_for(info: &TekiInfo) -> Option<Strategy> {
         BREADBUG => collec::breadbug(info),
         WOLLYWOG | WOLLYWOG_YELLOW => otimoti::wollywog(info),
         FIERY_BLOWHOG => tank::tank(info),
+        CANNON_BEETLE => beatle::beatle(info),
+        IWAGON => beatle::iwagon(info),
         _ => return None,
     })
 }
@@ -249,7 +252,11 @@ fn step(t: &mut Teki, strategy: &Strategy, w: &mut World, events: &mut Vec<(Teki
         }
     }
     let r = t.coll_radius;
+    let before = t.pos;
     t.pos = w.host.walls(t.pos + Vec3::Y * r, r) - Vec3::Y * r;
+    if (t.pos - before).with_y(0.0).length() > 0.01 {
+        strategy.event(t, w, &Event::Wall);
+    }
 
     // A pellet in its mouth goes where it goes (the Breadbug).
     if let Some(id) = t.held {

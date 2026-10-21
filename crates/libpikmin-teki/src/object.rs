@@ -240,6 +240,12 @@ pub struct Teki {
     pub coll_radius: f32,
     /// An animation speed a strategy forces (`setManualAnimation`).
     pub manual_speed: Option<f32>,
+    /// The beetle has a Pikmin in its nozzle.
+    pub held_piki: bool,
+    /// A strategy's choice of the state its action moves to (`mNextState` set while acting).
+    pub next_override: Option<i32>,
+    /// The velocity a thing was shot with (a Rolling Boulder).
+    pub spawn_vel: Vec3,
 }
 
 /// A flame stream (`CylinderTypeCallBack`): a cylinder from the mouth, `length` long and `radius` wide.
@@ -356,6 +362,9 @@ impl Teki {
             fire: None,
             coll_radius,
             manual_speed: None,
+            held_piki: false,
+            next_override: None,
+            spawn_vel: Vec3::ZERO,
         }
     }
 

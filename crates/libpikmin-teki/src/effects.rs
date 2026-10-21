@@ -8,6 +8,14 @@ pub const COLLEC_ST_B: usize = 96;
 pub const COLLEC_HM_A: usize = 97;
 pub const COLLEC_HM_B: usize = 98;
 
+pub const BEATLE_FLICK1: usize = 136;
+pub const BEATLE_SHOOT_ROCK_HALO: usize = 137;
+pub const BEATLE_FLICK3: usize = 140;
+pub const BEATLE_ROCK_BLAST: usize = 146;
+pub const BIG_DUST_RING: usize = 224;
+pub const SMOKE_RING_M: usize = 67;
+pub const SMOKE_RING_S: usize = 68;
+
 /// `BTeki::createDeadEffect`: wave, glow and smoke by `TPI_CarcassSize` (0 large, 1 medium, 2 small).
 pub fn death(carcass: i32) -> Vec<usize> {
     match carcass {

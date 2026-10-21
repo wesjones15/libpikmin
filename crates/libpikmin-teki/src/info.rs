@@ -56,9 +56,10 @@ pub const SMOKY_PROGG: u8 = 16;
 pub const WATER_DUMPLE: u8 = 17;
 pub const HONEYWISP: u8 = 18;
 pub const BREADBUG: u8 = 19;
+pub const IWAGON: u8 = 20;
 
 /// Every kind a host can draw, indexed by the constants above.
-pub const KIND_TABLE: [Kind; 20] = [
+pub const KIND_TABLE: [Kind; 21] = [
     Kind { name: "chappy", ints: 21, corpse: "tkch", sound_base: "SE_MINIC_WALK", motions: STANDARD },
     Kind { name: "swallow", ints: 20, corpse: "tksw", sound_base: "SE_CHAPPY_WALK", motions: BULBORB },
     Kind { name: "chappb", ints: 21, corpse: "tkcb", sound_base: "SE_MINIC_WALK", motions: STANDARD },
@@ -79,6 +80,7 @@ pub const KIND_TABLE: [Kind; 20] = [
     Kind { name: "namazu", ints: 21, corpse: "tknm", sound_base: "SE_NAMAZU_WALK", motions: STANDARD },
     Kind { name: "qurione", ints: 20, corpse: "tkqu", sound_base: "SE_KURIONE_HIT", motions: STANDARD },
     Kind { name: "collec", ints: 21, corpse: "tkco", sound_base: "SE_COLLEC_BREATH", motions: STANDARD },
+    Kind { name: "iwagon", ints: 20, corpse: "tkiw", sound_base: "SE_ROCK_ROLL", motions: STANDARD },
 ];
 pub const KINDS: usize = KIND_TABLE.len();
 

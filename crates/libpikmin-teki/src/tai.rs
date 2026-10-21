@@ -120,7 +120,8 @@ impl Strategy {
         let actions = self.states[id as usize].clone();
         for a in &actions {
             if a.act(t, w) && a.next != NO_TRANSIT {
-                self.transit(t, a.next);
+                let next = t.next_override.take().unwrap_or(a.next);
+                self.transit(t, next);
                 self.leave(id, t, w);
                 t.state_ready = true;
                 return;
@@ -134,7 +135,8 @@ impl Strategy {
         let actions = self.states[id as usize].clone();
         for a in &actions {
             if a.by_event(t, w, e) && a.next != NO_TRANSIT {
-                self.transit(t, a.next);
+                let next = t.next_override.take().unwrap_or(a.next);
+                self.transit(t, next);
                 self.leave(id, t, w);
                 t.state_ready = true;
                 return;
