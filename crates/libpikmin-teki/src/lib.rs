@@ -105,6 +105,10 @@ impl Tekis {
     /// A hit (the host damage, in the disc life units).
     pub fn damage(&mut self, id: TekiId, amount: f32, attacker: Option<Target>) {
         if let Some(t) = self.get_mut(id) {
+            // A killing blow (the host's body died) goes through whatever the enemy is doing.
+            if amount >= 1.0e5 {
+                t.clear_option(opt::INVINCIBLE);
+            }
             t.take_damage(amount);
             if attacker.is_some() {
                 t.targets[1] = attacker;
