@@ -9,6 +9,13 @@ pub const COLLEC_HM_A: usize = 97;
 pub const COLLEC_HM_B: usize = 98;
 
 pub const BUBBLES: usize = 15;
+pub const GROW_PELLET_A1: usize = 70;
+pub const GROW_PELLET_A2: usize = 71;
+pub const GROW_PELLET_B: usize = 72;
+pub const GROW_PELLET_C: usize = 73;
+pub const HIBA_FIRE: usize = 227;
+pub const SHELL_BOOM: usize = 91;
+pub const SHELL_TWINKLE: usize = 92;
 pub const DORORO_EYE: usize = 157;
 pub const DORORO_DEAD_FRAGMENTS: usize = 162;
 pub const DORORO_HOWL_ZIGZAGS: usize = 163;
@@ -54,6 +61,9 @@ pub fn keyed(kind: u8, index: u8) -> Vec<usize> {
     use crate::info::*;
     match (kind, index) {
         (SMOKY_PROGG, 0..=2) => vec![SMOKE_RING_M],
+        (PELLET_POSY, 0) => vec![GROW_PELLET_A1],
+        (PELLET_POSY, 1) => vec![GROW_PELLET_A2],
+        (PELLET_POSY, 2) => vec![GROW_PELLET_B, GROW_PELLET_C],
         (PUFFSTOOL, 0) => vec![KINOKO_SPORES_UP],
         (PUFFSTOOL, 1) => vec![KINOKO_ATTACK_SPORES, KINOKO_ATTACK_CLOUD],
         (PUFFSTOOL, 2) => vec![KINOKO_POST_ATTACK_SPORES, KINOKO_POST_ATTACK_CLOUD],

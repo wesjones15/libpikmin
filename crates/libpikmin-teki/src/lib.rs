@@ -12,6 +12,7 @@ pub mod bulborb;
 pub mod collec;
 pub mod object;
 pub mod dororo;
+pub mod hiba;
 pub mod effects;
 pub mod info;
 pub mod kabekui;
@@ -20,6 +21,7 @@ pub mod mar;
 pub mod mizinko;
 pub mod napkid;
 pub mod otama;
+pub mod palm;
 pub mod otimoti;
 pub mod tai;
 pub mod tank;
@@ -199,6 +201,8 @@ fn strategy_for(info: &TekiInfo) -> Option<Strategy> {
         PUFFSTOOL => kinoko::puffstool(info),
         SMOKY_PROGG => dororo::smoky_progg(info),
         GIANT_EGG => dororo::giant_egg(info),
+        FIRE_GEYSER => hiba::fire_geyser(info),
+        PELLET_POSY => palm::pellet_posy(info),
         PUFFY_BLOWHOG => mar::puffy_blowhog(info),
         SHEARGRUB_F => kabekui::female(info),
         SHEARGRUB_M => kabekui::male(info),
