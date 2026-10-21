@@ -799,3 +799,51 @@ fn every_enemy_kind_draws_and_sounds() {
         pik_view_free(view);
     }
 }
+
+#[test]
+fn teki_ai_structs_are_what_hosts_mirror() {
+    // ror2-olimar's TekiAiNative.Navi / State / Out.
+    let mut s = [0u32; 3];
+    unsafe { crate::teki_ai::pik_tekis_sizes(s.as_mut_ptr()) };
+    assert_eq!(s, [24, 60, 72]);
+}
+
+#[test]
+fn an_enemy_with_its_own_ai_runs_through_the_abi() {
+    use crate::teki_ai::*;
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else {
+        eprintln!("no extracted assets; skipping");
+        return;
+    };
+    if !assets.root.join("tekis/.all").exists() {
+        eprintln!("enemy files not all extracted; skipping");
+        return;
+    }
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        let sim = pik_sim_new(dir.as_ptr(), 1);
+        let t = pik_tekis_new(dir.as_ptr(), 3);
+        assert!(!t.is_null());
+        assert_eq!(pik_tekis_has_strategy(t, 0), 1, "Dwarf Bulborb");
+        assert_eq!(pik_tekis_has_strategy(t, 18), 1, "Honeywisp");
+        assert_eq!(pik_tekis_has_strategy(t, 19), 1, "Breadbug");
+        let at = PikVec3::default();
+        let id = pik_tekis_spawn(t, 0, 4242, &at, 0.0);
+        assert!(id > 0);
+        pik_tekis_damage(t, id as u32, 5.0, -1);
+        let navi = PikNavi { id: 1, pos: PikVec3 { x: 0.0, y: 0.0, z: 60.0 }, size: 10.0, alive: 1, _pad: [0; 3] };
+        for _ in 0..30 {
+            pik_tekis_update(t, sim, &navi, 1, 1);
+        }
+        let mut st = PikTekiState::default();
+        assert_eq!(pik_tekis_state(t, id as u32, &mut st), 1);
+        assert_eq!(st.flags & 2, 2, "alive");
+        assert!(st.hp > 0.0 && st.hp < 130.0 + 1.0);
+        assert_eq!(pik_tekis_state(t, 999, &mut st), 0);
+        pik_tekis_remove(t, id as u32);
+        assert_eq!(pik_tekis_state(t, id as u32, &mut st), 0);
+        pik_tekis_free(t);
+        pik_sim_free(sim);
+    }
+}

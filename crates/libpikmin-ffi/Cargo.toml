@@ -12,4 +12,5 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 libpikmin.workspace = true
 libpikmin-assets.workspace = true
 libpikmin-present.workspace = true
+libpikmin-teki.workspace = true
 glam.workspace = true

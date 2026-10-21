@@ -511,6 +511,7 @@ dependencies = [
  "libpikmin",
  "libpikmin-assets",
  "libpikmin-present",
+ "libpikmin-teki",
 ]
 
 [[package]]
