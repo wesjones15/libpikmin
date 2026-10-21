@@ -14,7 +14,9 @@ pub mod object;
 pub mod effects;
 pub mod info;
 pub mod kabekui;
+pub mod kinoko;
 pub mod mizinko;
+pub mod napkid;
 pub mod otama;
 pub mod otimoti;
 pub mod tai;
@@ -177,6 +179,8 @@ fn strategy_for(info: &TekiInfo) -> Option<Strategy> {
         WOGPOLE => otama::wogpole(info),
         WOLLYWOG | WOLLYWOG_YELLOW => otimoti::wollywog(info),
         FIERY_BLOWHOG => tank::tank(info),
+        SNITCHBUG => napkid::snitchbug(info),
+        PUFFSTOOL => kinoko::puffstool(info),
         SHEARGRUB_F => kabekui::female(info),
         SHEARGRUB_M => kabekui::male(info),
         SHEARWIG => kabekui::shearwig(info),

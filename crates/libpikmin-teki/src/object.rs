@@ -781,8 +781,13 @@ impl Teki {
 
     pub fn anim_events(&mut self, w: &mut World, ev: Vec<anim::Event>) {
         for e in ev {
-            if let anim::Event::Sound(i) = e {
-                w.out.push(Out::TableSound { teki: self.id, index: i });
+            match e {
+                anim::Event::Sound(i) => w.out.push(Out::TableSound { teki: self.id, index: i }),
+                anim::Event::Effect(i) => {
+                    for id in crate::effects::keyed(self.kind, i) {
+                        w.out.push(Out::Effect { id, pos: self.pos });
+                    }
+                }
             }
         }
     }
