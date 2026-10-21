@@ -367,12 +367,28 @@ fn rebase_pose(pose: &mut libpikmin_assets::pose::Pose, offset: Vec3) {
 pub struct TekiView {
     pub info: crate::teki::TekiInfo,
     anims: AnimSet,
+    base: &'static str,
+    /// Per motion: the frames where its animation plays a sound from the kind's table, and which one
+    /// (`PaniAnimator::checkEventKeys`, event 0).
+    sound_keys: Vec<Vec<(f32, u8)>>,
+}
+
+/// A creature id for the audio's table sounds and positions: the host's enemies are numbered apart from
+/// the sim's creatures.
+pub fn teki_creature_id(id: u32) -> libpikmin::host::CreatureId {
+    (1u64 << 40) | id as u64
 }
 
 pub struct View {
     /// Enemy kinds that loaded ([`set_teki_models`]), by [`crate::teki::TekiInfo::kind`] order.
     pub tekis: Vec<TekiView>,
     teki_input: Vec<crate::teki::TekiInstance>,
+    /// Each enemy's motion and frame at the last update, to find the sound keys it passed.
+    teki_played: HashMap<u32, (u32, f32)>,
+    /// Sounds from the enemies' animations this update: (creature id, table's first `SE_*`, index), and
+    /// where each enemy is, for [`libpikmin_present::audio::Creatures`]. Hosts hand them to the audio.
+    pub teki_sounds: Vec<(libpikmin::host::CreatureId, &'static str, u8)>,
+    pub teki_positions: Vec<(libpikmin::host::CreatureId, Vec3)>,
     /// Opt-in distant skinning budget; hosts must understand RETAIN_POSE first.
     pub pose_budget: Option<(Vec3, f32)>,
     render_frame: u64,
@@ -517,7 +533,11 @@ impl View {
                     let vm = ViewModel::load(assets, &model_path).ok()?;
                     let info = crate::teki::TekiInfo::load(assets, kind, models.len() as u32, &pellets).ok()?;
                     let anims = AnimSet::load(assets, &key, &anm).ok()?;
-                    Some((vm, TekiView { info, anims }))
+                    let sound_keys = anims.mgr.infos.iter()
+                        .map(|i| i.event_keys.iter().filter(|e| e.event == 0).map(|e| (e.frame as f32, e.value)).collect())
+                        .collect();
+                    let base = crate::teki::KIND_TABLE[kind as usize].sound_base;
+                    Some((vm, TekiView { info, anims, base, sound_keys }))
                 })();
                 if let Some((vm, teki)) = loaded {
                     models.push(vm);
@@ -579,6 +599,9 @@ impl View {
         Ok(View {
             tekis,
             teki_input: Vec::new(),
+            teki_played: HashMap::new(),
+            teki_sounds: Vec::new(),
+            teki_positions: Vec::new(),
             repair_mode: false,
             celebrating: false,
             models,
@@ -757,6 +780,13 @@ impl View {
     pub fn set_tekis(&mut self, list: &[crate::teki::TekiInstance]) {
         self.teki_input.clear();
         self.teki_input.extend_from_slice(list);
+    }
+
+    /// Plays `EffectMgr`'s effect `id` (`EFF_*`, [`libpikmin_assets::effect_table`]) once at `pos`: the
+    /// enemies' death smoke and souls, a host's attack effects. False if the effect or its files aren't there.
+    pub fn spawn_effect(&mut self, id: usize, pos: Vec3) -> bool {
+        let Some(def) = libpikmin_assets::effect_table::by_id(id) else { return false };
+        self.effects.as_mut().is_some_and(|e| e.spawn(def, pos).is_some())
     }
 
     /// The loaded kind `kind` ([`crate::teki::DWARF`]...), if its files were on the disc.
@@ -1286,8 +1316,33 @@ impl View {
 
         // The host's enemies, each in the pose it names (`PaniTekiAnimator` plays the `.key`
         // motions directly).
+        self.teki_positions.clear();
+        let mut heard = HashSet::new();
         for t in std::mem::take(&mut self.teki_input) {
             let Some(view) = self.tekis.iter().find(|v| v.info.kind == t.kind) else { continue };
+            // Sound keys passed since the last update: within the motion, or from its start when it changed
+            // or looped round.
+            let cid = teki_creature_id(t.id);
+            heard.insert(t.id);
+            self.teki_positions.push((cid, t.pos));
+            if let Some(keys) = view.sound_keys.get(t.motion as usize) {
+                let (from, to) = match self.teki_played.get(&t.id) {
+                    Some(&(m, f)) if m == t.motion && f <= t.frame => (f, t.frame),
+                    Some(&(m, f)) if m == t.motion => {
+                        // Looped: the rest of the old pass, then the start of the new.
+                        for &(_, i) in keys.iter().filter(|k| k.0 >= f) {
+                            self.teki_sounds.push((cid, view.base, i));
+                        }
+                        (0.0, t.frame)
+                    }
+                    Some(_) => (0.0, t.frame),
+                    None => (t.frame, t.frame),
+                };
+                for &(at, i) in keys {
+                    if at >= from && at < to { self.teki_sounds.push((cid, view.base, i)); }
+                }
+            }
+            self.teki_played.insert(t.id, (t.motion, t.frame));
             let model = view.info.model;
             let anim = view.anims.get(t.motion as usize)
                 .map(|(_, a)| (a, t.frame.clamp(0.0, a.frames.saturating_sub(1) as f32)));
@@ -1297,6 +1352,8 @@ impl View {
             let k = key(kinds::TEKI, t.id as u64);
             self.push(k, kinds::TEKI, model, t.pos, Quat::from_rotation_y(t.yaw), pose, &no_inputs, t.alpha.clamp(0.0, 1.0), flags);
         }
+
+        self.teki_played.retain(|id, _| heard.contains(id));
 
         // Sprouts and flying seeds, with the leaf, bud or flower on joint 3.
         let mut live_sprouts = Vec::new();

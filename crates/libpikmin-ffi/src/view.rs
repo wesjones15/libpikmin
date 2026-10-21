@@ -640,6 +640,12 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
             v.view.set_camera(right, up, fwd);
             let alpha = if f.lag.is_finite() { 1.0 - f.lag.clamp(0.0, 1.0) } else { 1.0 };
             v.view.update(&s.sim, alpha, dt);
+            // The host's enemies sound from where they are (creature ids apart from the sim's).
+            let mut positions = positions;
+            positions.extend(v.view.teki_positions.iter().copied());
+            // They wait for the sound system's next once-per-tick frame (or are dropped with no audio).
+            let table_sounds = if v.audio.is_none() || v.last_tick != Some(s.sim.tick()) { std::mem::take(&mut v.view.teki_sounds) } else { Vec::new() };
+            let creatures = Creatures { positions: &positions, table_sounds: &table_sounds };
             v.view.particles(right, up);
             v.particles.clear();
             v.particles.extend(v.view.particles.quads.iter().map(|q| PikParticle {
@@ -904,6 +910,8 @@ pub struct PikTekiInfo {
     pub corpse_seeds_matching: i32,
     pub corpse_seeds_other: i32,
     pub swallow_count: u32,
+    /// 0 large, 1 medium, 2 small, 3 none: which death and soul effects (`BTeki::createDeadEffect`).
+    pub carcass_size: i32,
     pub corpse_offset: PikVec3,
     pub lo: PikVec3,
     pub hi: PikVec3,
@@ -1065,9 +1073,24 @@ fn info_struct(kind: u32, i: &libpikmin_present::teki::TekiInfo) -> PikTekiInfo 
         corpse_seeds_matching: i.corpse_seeds_matching,
         corpse_seeds_other: i.corpse_seeds_other,
         swallow_count: i.swallow_count,
+        carcass_size: i.carcass_size,
         corpse_offset: i.corpse_offset.into(),
         lo: i.lo.into(),
         hi: i.hi.into(),
         motions: m,
     }
+}
+
+/// Plays `EffectMgr`'s effect `id` (`EFF_*`) once at `pos` (sim units): an enemy's death smoke, its soul,
+/// an attack. 0 if the effect isn't one with files on the disc, or the view has no effects.
+///
+/// # Safety
+/// `view` from [`pik_view_new`]; `pos` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_spawn_effect(view: *mut PikView, id: u32, pos: *const PikVec3) -> u8 {
+    // SAFETY: as documented.
+    let Some(at) = (unsafe { pos.as_ref() }) else { return 0 };
+    let at = Vec3::from(*at);
+    // SAFETY: as documented.
+    unsafe { with_view(view, 0, |v| v.view.spawn_effect(id as usize, at) as u8) }
 }

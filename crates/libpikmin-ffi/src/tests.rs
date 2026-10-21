@@ -668,7 +668,7 @@ fn teki_structs_are_what_hosts_mirror() {
     // ror2-olimar's Native.TekiInfo / TekiInstance.
     let mut s = [0u32; 2];
     unsafe { crate::view::pik_view_teki_sizes(s.as_mut_ptr()) };
-    assert_eq!(s, [4 * 21 + 12 * 3 + 28 * 10, 44]);
+    assert_eq!(s, [4 * 22 + 12 * 3 + 28 * 10, 44]);
 }
 
 #[test]
@@ -694,7 +694,7 @@ fn the_view_draws_a_hosts_enemies() {
         for k in 0..2 {
             assert_eq!(crate::view::pik_view_teki_info(view, k, &mut infos[k as usize]), 1);
         }
-        assert_eq!(crate::view::pik_view_teki_info(view, 7, &mut infos[0]), 0);
+        assert_eq!(crate::view::pik_view_teki_info(view, 99, &mut infos[0]), 0);
         assert!(infos[1].life > infos[0].life && infos[1].model != infos[0].model);
         let list = [
             crate::view::PikTekiInstance {
@@ -737,6 +737,64 @@ fn the_view_draws_a_hosts_enemies() {
         let mut draws = vec![PikDraw::default(); n as usize];
         pik_view_draws(view, draws.as_mut_ptr(), n);
         assert!(draws.iter().all(|d| d.kind != 12));
+        pik_sim_free(sim);
+        pik_view_free(view);
+    }
+}
+
+#[test]
+fn every_enemy_kind_draws_and_sounds() {
+    let _views = VIEWS.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else {
+        eprintln!("no extracted assets; skipping");
+        return;
+    };
+    if !assets.root.join("tekis/.all").exists() {
+        eprintln!("enemy models not all extracted; skipping");
+        return;
+    }
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    let kinds = libpikmin_present::teki::KINDS as u32;
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        crate::view::pik_view_set_teki_models(1);
+        let view = pik_view_new(dir.as_ptr(), 0);
+        crate::view::pik_view_set_teki_models(0);
+        assert!(!view.is_null());
+        let sim = pik_sim_new(dir.as_ptr(), 1);
+        let mut models = std::collections::HashSet::new();
+        let mut list = Vec::new();
+        for k in 0..kinds {
+            let mut info = crate::view::PikTekiInfo::default();
+            assert_eq!(crate::view::pik_view_teki_info(view, k, &mut info), 1, "kind {k} not loaded");
+            assert!(models.insert(info.model), "kind {k} shares a model");
+            assert!(info.life > 0.0 && info.hi.y > info.lo.y);
+            list.push(crate::view::PikTekiInstance {
+                id: k + 1, kind: k, motion: info.motions[2].index, frame: 5.0, scale: 1.0, alpha: 1.0,
+                pos: PikVec3 { x: k as f32 * 60.0, y: 0.0, z: 0.0 }, ..Default::default()
+            });
+        }
+        let frame = PikViewFrame {
+            dt: 1.0 / 30.0,
+            forward: PikVec3 { x: 0.0, y: 0.0, z: 1.0 },
+            up: PikVec3 { x: 0.0, y: 1.0, z: 0.0 },
+            listener: -1,
+            ..Default::default()
+        };
+        // Two frames a second apart: a looping walk passes its animation's sound keys, and the death smoke of a
+        // medium enemy (EFF_Teki_DeathSmokeM = 60) is a real effect.
+        for f in [5.0, 35.0] {
+            for t in list.iter_mut() { t.frame = f; }
+            crate::view::pik_view_set_tekis(view, list.as_ptr(), kinds);
+            pik_view_update(view, sim, &frame);
+        }
+        let n = pik_view_draws(view, std::ptr::null_mut(), 0);
+        let mut draws = vec![PikDraw::default(); n as usize];
+        pik_view_draws(view, draws.as_mut_ptr(), n);
+        assert_eq!(draws.iter().filter(|d| d.kind == 12).count() as u32, kinds);
+        let at = PikVec3::default();
+        assert_eq!(crate::view::pik_view_spawn_effect(view, 60, &at), 1);
+        assert_eq!(crate::view::pik_view_spawn_effect(view, 9999, &at), 0);
         pik_sim_free(sim);
         pik_view_free(view);
     }

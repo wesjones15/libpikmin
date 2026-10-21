@@ -13,8 +13,10 @@
 //! - `objects/pellets/`: the numbered pellets (1, 5, 10, 20)
 //! - `objects/pikihead/`: the sprout / flying seed
 //! - `objects/water/`, `objects/fl_water/`: nectar puddle and falling drop
-//! - `tekis/<name>/`, `tekikeys/`, `tekipara/`: enemy models, animation keys and parameters
-//!   (Dwarf Bulborb = chappy, Spotty Bulborb = swallow, Honeywisp = qurione)
+//! - `tekis/<name>/`, `tekikeys/`, `tekipara/`: every enemy's models, animations, animation keys and
+//!   parameters (`TekiMgr::typeNames`: Dwarf Bulborb = chappy, Spotty Bulborb = swallow, Honeywisp =
+//!   qurione, Wollywog = frow...). `tekis/.all` marks a full copy: an older extraction that has only
+//!   the first three is topped up from the disc ([`needs_teki_top_up`])
 //! - `SndData/`: sound banks, sequences and streamed music, plus `SndData/Seqs/pikiseq.hed`,
 //!   the sequence archive's index, which the game keeps inside `main.dol` (`HEAD_pikiseq`,
 //!   passed to `Jaf_InitSeqArchive2` in verysimple.c) and this extractor copies out.
@@ -31,7 +33,7 @@ use std::path::{Component, Path, PathBuf};
 use crate::{Disc, Error};
 
 /// Folders under `files/dataDir/` copied whole.
-pub const FOLDERS: [&str; 22] = [
+pub const FOLDERS: [&str; 20] = [
     "parms/",
     "pikis/",
     "objects/goal/",
@@ -39,9 +41,7 @@ pub const FOLDERS: [&str; 22] = [
     "objects/pikihead/",
     "objects/water/",
     "objects/fl_water/",
-    "tekis/chappy/",
-    "tekis/swallow/",
-    "tekis/qurione/",
+    "tekis/",
     "tekikeys/",
     "tekipara/",
     "SndData/",
@@ -119,9 +119,17 @@ pub const GAME_IDS: [(&str, &str); 3] = [
     ("GPIP01", "Europe (PAL)"),
 ];
 
+/// Written under `tekis/` once every enemy's files are copied.
+pub const TEKI_STAMP: &str = "tekis/.all";
+
 /// Is `dir` a complete extraction?
 pub fn is_complete(dir: &Path) -> bool {
     REQUIRED.iter().all(|r| dir.join(r).is_file())
+}
+
+/// A complete extraction that predates the other enemies: only the disc has them.
+pub fn needs_teki_top_up(dir: &Path) -> bool {
+    is_complete(dir) && !dir.join(TEKI_STAMP).is_file()
 }
 
 /// A destination built from disc-supplied names must stay under the output folder.
@@ -153,6 +161,19 @@ pub fn extract_assets(iso: &Path, out: &Path, log: &mut dyn FnMut(&str)) -> Resu
         )));
     };
     log(&format!("disc: {} {region}", disc.game_id));
+    if needs_teki_top_up(out) {
+        let files: Vec<&str> = disc.paths().filter(|p| p.to_ascii_lowercase().starts_with("datadir/tekis/")).collect();
+        for path in &files {
+            let dest = safe_join(out, &path["dataDir/".len()..])?;
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(dest, disc.read(path)?)?;
+        }
+        std::fs::write(out.join(TEKI_STAMP), b"")?;
+        log(&format!("dataDir/tekis/ topped up ({} files)", files.len()));
+        return Ok(Report { game_id: disc.game_id.clone(), files: files.len(), out: out.to_path_buf() });
+    }
     if is_complete(out) {
         log("assets already complete; nothing to do");
         return Ok(Report {
@@ -208,6 +229,7 @@ pub fn extract_assets(iso: &Path, out: &Path, log: &mut dyn FnMut(&str)) -> Resu
     ));
     total += 4;
 
+    std::fs::write(out.join(TEKI_STAMP), b"")?;
     if let Some(missing) = REQUIRED.iter().find(|r| !out.join(r).is_file()) {
         return Err(Error::NotFound(out.join(missing)));
     }

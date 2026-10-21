@@ -15,11 +15,68 @@ use libpikmin::pellet_config::{self, PelletConfig};
 use libpikmin_assets::teki::{TekiParams, teki_paths, tpf, tpi};
 use libpikmin_assets::{AnimMgr, AnimSet, Assets, Skeleton};
 
+/// One enemy kind: its files (`TekiMgr::typeNames`), how many int parameters its file has (`TPI_COUNT`
+/// plus the kind's own, e.g. `KINOKOPI_COUNT`), its corpse's config id (`TekiMgr::typeIds`), the first
+/// `SE_*` of its sound table, and which `.key` motion each behaviour plays ([`slot`] order).
+pub struct Kind {
+    pub name: &'static str,
+    pub ints: usize,
+    pub corpse: &'static str,
+    pub sound_base: &'static str,
+    pub motions: [usize; slot::COUNT],
+}
+
+/// Wait1, WaitAct1, Move1, Attack, WaitAct2, Flick, Dead, Damage, Wait1, Type2: `TekiMotion` indexes the
+/// `.key` file directly (`PaniTekiAnimator::createMotionTable`).
+const STANDARD: [usize; slot::COUNT] = [2, 4, 6, 8, 5, 9, 0, 1, 2, 11];
+/// The Spotty Bulborb sleeps on slot 9 and shakes off with Type1 (`TaiSwallowStrategy`).
+const BULBORB: [usize; slot::COUNT] = [3, 4, 7, 8, 5, 10, 0, 1, 9, 3];
+/// The Armored Cannon Beetle: its walk is slot 3, its turns the L/R turn motions, and Flick2 is its gulp.
+const BEETLE: [usize; slot::COUNT] = [2, 10, 3, 8, 12, 9, 0, 1, 2, 2];
+
 /// Dwarf Bulborb (`chappy`).
 pub const DWARF: u8 = 0;
 /// Spotty Bulborb (`swallow`).
 pub const SPOTTY: u8 = 1;
-pub const KINDS: usize = 2;
+pub const DWARF_ORANGE: u8 = 2;
+pub const SPOTTY_ORANGE: u8 = 3;
+pub const WOLLYWOG: u8 = 4;
+pub const WOLLYWOG_YELLOW: u8 = 5;
+pub const CANNON_BEETLE: u8 = 6;
+pub const FIERY_BLOWHOG: u8 = 7;
+pub const SNITCHBUG: u8 = 8;
+pub const SHEARGRUB_F: u8 = 9;
+pub const SHEARGRUB_M: u8 = 10;
+pub const SHEARWIG: u8 = 11;
+pub const WOGPOLE: u8 = 12;
+pub const PUFFSTOOL: u8 = 13;
+pub const PUFFY_BLOWHOG: u8 = 14;
+pub const MAMUTA: u8 = 15;
+pub const SMOKY_PROGG: u8 = 16;
+pub const WATER_DUMPLE: u8 = 17;
+
+/// Every kind a host can draw, indexed by the constants above.
+pub const KIND_TABLE: [Kind; 18] = [
+    Kind { name: "chappy", ints: 21, corpse: "tkch", sound_base: "SE_MINIC_WALK", motions: STANDARD },
+    Kind { name: "swallow", ints: 20, corpse: "tksw", sound_base: "SE_CHAPPY_WALK", motions: BULBORB },
+    Kind { name: "chappb", ints: 21, corpse: "tkcb", sound_base: "SE_MINIC_WALK", motions: STANDARD },
+    Kind { name: "swallob", ints: 20, corpse: "tksb", sound_base: "SE_CHAPPY_WALK", motions: BULBORB },
+    Kind { name: "frow", ints: 21, corpse: "tkfw", sound_base: "SE_FLOG_WALK", motions: STANDARD },
+    Kind { name: "frog", ints: 21, corpse: "tkfr", sound_base: "SE_FLOG_WALK", motions: STANDARD },
+    Kind { name: "beatle", ints: 20, corpse: "tkbe", sound_base: "SE_KABUTO_BREATH", motions: BEETLE },
+    Kind { name: "tank", ints: 20, corpse: "tkta", sound_base: "SE_TANK_FIRE", motions: STANDARD },
+    Kind { name: "napkid", ints: 21, corpse: "tkna", sound_base: "SE_SARAI_HOVER", motions: STANDARD },
+    Kind { name: "kabekuiA", ints: 20, corpse: "tkka", sound_base: "SE_WALLEAT_WALK", motions: STANDARD },
+    Kind { name: "kabekuiB", ints: 20, corpse: "tkkb", sound_base: "SE_WALLEAT_WALK", motions: STANDARD },
+    Kind { name: "kabekuiC", ints: 20, corpse: "tkkc", sound_base: "SE_WALLEAT_WALK", motions: STANDARD },
+    Kind { name: "otama", ints: 20, corpse: "tkot", sound_base: "SE_OTAMA_JUMP", motions: STANDARD },
+    Kind { name: "kinoko", ints: 22, corpse: "tkki", sound_base: "SE_MUSH_WALK", motions: STANDARD },
+    Kind { name: "mar", ints: 23, corpse: "tkma", sound_base: "SE_MAR_FLY", motions: STANDARD },
+    Kind { name: "miurin", ints: 23, corpse: "tkmu", sound_base: "SE_MIURIN_WALK", motions: STANDARD },
+    Kind { name: "dororo", ints: 21, corpse: "tkdo", sound_base: "SE_DORORO_WALK", motions: STANDARD },
+    Kind { name: "namazu", ints: 21, corpse: "tknm", sound_base: "SE_NAMAZU_WALK", motions: STANDARD },
+];
+pub const KINDS: usize = KIND_TABLE.len();
 
 /// What a behaviour plays, in the order of [`TekiInfo::motions`].
 pub mod slot {
@@ -38,32 +95,7 @@ pub mod slot {
 
 /// `TekiMgr::typeNames`.
 pub fn name(kind: u8) -> Option<&'static str> {
-    match kind {
-        DWARF => Some("chappy"),
-        SPOTTY => Some("swallow"),
-        _ => None,
-    }
-}
-
-/// The int parameters a kind has (`TPI_COUNT` plus its own).
-fn int_count(kind: u8) -> usize {
-    if kind == DWARF { 21 } else { 20 }
-}
-
-/// The corpse's pellet config id (`TekiMgr::getTypeId`).
-fn corpse_id(kind: u8) -> &'static str {
-    if kind == DWARF { "tkch" } else { "tksw" }
-}
-
-/// AnimMgr entries the strategies use (indices into `tekikeys/<name>.key`), by [`slot`].
-fn motion_indices(kind: u8) -> [usize; slot::COUNT] {
-    match kind {
-        // Wait1, WaitAct1, Move1, Attack, WaitAct2, Flick, Dead, Damage, Wait1, Type2 (cry).
-        DWARF => [2, 4, 6, 8, 5, 9, 0, 1, 2, 11],
-        // Sleeping plays slot 9 (`TaiMotionAction(.., Flick)` in the sleep state), shaking
-        // off is Type1 (`TaiSwallowFlickingAction`).
-        _ => [3, 4, 7, 8, 5, 10, 0, 1, 9, 3],
-    }
+    KIND_TABLE.get(kind as usize).map(|k| k.name)
 }
 
 /// Frame keys of one motion (`AnimInfo::keys` / `info_keys`), in animation frames (30 a second).
@@ -112,6 +144,8 @@ pub struct TekiInfo {
     pub corpse_seeds_other: i32,
     /// `TPI_SwallowCount`: how many Pikmin one bite takes.
     pub swallow_count: u32,
+    /// `TPI_CarcassSize`: 0 large, 1 medium, 2 small, 3 none (picks the death and soul effects).
+    pub carcass_size: i32,
     /// Where the body lies in the last frame of the death motion, in the local frame, scaled
     /// (`BTeki::dieSoon` puts the pellet on the body, not at the feet).
     pub corpse_offset: Vec3,
@@ -126,9 +160,9 @@ impl TekiInfo {
         let name = name(kind).ok_or("unknown teki kind")?;
         let [model_path, anm, key, para] = teki_paths(name);
         let e = |e: libpikmin_assets::Error| e.to_string();
-        let p = TekiParams::parse_any(&assets.read(&para).map_err(e)?, int_count(kind)).map_err(e)?;
+        let p = TekiParams::parse_any(&assets.read(&para).map_err(e)?, KIND_TABLE[kind as usize].ints).map_err(e)?;
         let mgr = AnimMgr::parse(&assets.read(&key).map_err(e)?).map_err(e)?;
-        let motions = motion_indices(kind).map(|index| {
+        let motions = KIND_TABLE[kind as usize].motions.map(|index| {
             let Some(i) = mgr.infos.get(index) else { return TekiMotion { index: index as u32, ..Default::default() } };
             let key_at = |n: i32| usize::try_from(n).ok().and_then(|n| i.keys.get(n)).map(|&f| f as f32);
             let of = |ty: u8| i.info_keys.iter().find(|(_, t)| *t == ty).and_then(|&(n, _)| key_at(n));
@@ -169,7 +203,7 @@ impl TekiInfo {
                 ((lo + hi) * 0.5).with_y(0.0) * scale
             })
             .unwrap_or_default();
-        let corpse = pellet_config::find(pellets, corpse_id(kind));
+        let corpse = pellet_config::find(pellets, KIND_TABLE[kind as usize].corpse);
         Ok(TekiInfo {
             kind,
             model: model_index,
@@ -192,6 +226,7 @@ impl TekiInfo {
             corpse_seeds_matching: corpse.map_or(4, |c| c.seeds_matching),
             corpse_seeds_other: corpse.map_or(4, |c| c.seeds_other),
             swallow_count: p.i(tpi::SWALLOW_COUNT).max(1) as u32,
+            carcass_size: p.i(tpi::CARCASS_SIZE),
             corpse_offset,
             lo: lo * scale,
             hi: hi * scale,
@@ -238,7 +273,7 @@ mod tests {
     fn both_bulborbs_load_from_the_disc() {
         let Some(a) = assets() else { eprintln!("SKIP: Pikmin assets absent"); return };
         let pellets = pellets(&a);
-        for kind in [DWARF, SPOTTY] {
+        for kind in 0..KINDS as u8 {
             let t = TekiInfo::load(&a, kind, 0, &pellets).unwrap();
             assert!(t.life > 0.0 && t.scale > 0.0, "{kind}: {t:?}");
             assert!(t.run_speed > 0.0 && t.turn_speed > 0.0);
@@ -262,5 +297,24 @@ mod tests {
         assert!(spotty.life > dwarf.life);
         assert!(spotty.corpse_min_carriers > dwarf.corpse_min_carriers);
         assert!(spotty.hi.y - spotty.lo.y > dwarf.hi.y - dwarf.lo.y);
+    }
+}
+
+#[cfg(test)]
+mod survey {
+    use super::*;
+    #[test]
+    #[ignore]
+    fn print_every_kind() {
+        let a = Assets { root: Assets::default_dir() };
+        let pellets = libpikmin::pellet_config::parse_pellet_configs(&a.read("parms/pelMgr.bin").unwrap()).unwrap();
+        for k in 0..KINDS as u8 {
+            match TekiInfo::load(&a, k, 0, &pellets) {
+                Ok(t) => println!("{:9} life={:6.0} scale={:.2} run={:4.0} turn={:.1} vis={:4.0}/{:3.0} atk={:4.0} carc={} corpse={}-{} H={:.0}",
+                    name(k).unwrap(), t.life, t.scale, t.run_speed, t.turn_speed, t.visible_range, t.visible_angle, t.attack_power, t.carcass_size,
+                    t.corpse_min_carriers, t.corpse_max_carriers, t.hi.y - t.lo.y),
+                Err(e) => println!("{} FAILED {e}", name(k).unwrap()),
+            }
+        }
     }
 }

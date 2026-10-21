@@ -8,6 +8,7 @@
 
 pub mod anim;
 pub mod disc;
+pub mod effect_table;
 pub mod extract;
 pub mod model;
 pub mod motion;

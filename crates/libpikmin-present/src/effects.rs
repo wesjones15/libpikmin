@@ -92,6 +92,8 @@ pub struct WhistleFrame {
 pub struct Effects {
     /// Every loaded effect: the whistle's beam (3), its circle, then the one-shots.
     defs: Vec<(EffectDef, Def)>,
+    /// Where to load effects not preloaded (a host's `EffectMgr` ids), when they are first asked for.
+    root: Option<Assets>,
     /// Running one-shots; each finishes on its own (`mMaxPasses`).
     oneshots: Vec<Generator>,
     /// Effects that follow something (`setEmitPosPtr`), by the host's key. They run until
@@ -248,6 +250,7 @@ impl Effects {
         );
         Some(Effects {
             defs,
+            root: Some(assets.clone()),
             oneshots: Vec::new(),
             attached: Vec::new(),
             whistles: HashMap::new(),
@@ -269,16 +272,27 @@ impl Effects {
 
     /// `EffectMgr::create` for a one-shot effect at `pos`; the generator, to set up further.
     pub fn spawn(&mut self, def: EffectDef, pos: Vec3) -> Option<&mut Generator> {
-        let pcr = self.defs[WHISTLE_DEFS..].iter().find(|(d, _)| *d == def).map(|(_, x)| x.pcr.clone())?;
+        let pcr = self.pcr_of(def)?;
         let g = self.generator(&pcr, pos);
         self.oneshots.push(g);
         self.oneshots.last_mut()
     }
 
+    /// The generator file of `def`, loading it (and its textures) the first time if it wasn't preloaded.
+    fn pcr_of(&mut self, def: EffectDef) -> Option<Arc<Pcr>> {
+        if let Some((_, x)) = self.defs[WHISTLE_DEFS..].iter().find(|(d, _)| *d == def) {
+            return Some(x.pcr.clone());
+        }
+        let loaded = Def::load(self.root.as_ref()?, def)?;
+        let pcr = loaded.pcr.clone();
+        self.defs.push((def, loaded));
+        Some(pcr)
+    }
+
     /// Starts an effect that follows something, replacing the one under `key`.
     pub fn attach(&mut self, key: u64, def: EffectDef, pos: Vec3) -> Option<&mut Generator> {
         self.detach(key);
-        let pcr = self.defs[WHISTLE_DEFS..].iter().find(|(d, _)| *d == def).map(|(_, x)| x.pcr.clone())?;
+        let pcr = self.pcr_of(def)?;
         let g = self.generator(&pcr, pos);
         self.attached.push((key, g));
         self.attached.last_mut().map(|(_, g)| g)
@@ -473,7 +487,7 @@ mod tests {
                 tex: Texture { image: Image { width: 1, height: 1, rgba: vec![255; 4] }, wrap: [false; 2] },
                 child_tex: None,
             })).collect();
-        Effects { defs, oneshots: Vec::new(), attached: Vec::new(), whistles: HashMap::new(), ring_angle: 0.0, acc: 0.0, seed: 1 }
+        Effects { defs, root: None, oneshots: Vec::new(), attached: Vec::new(), whistles: HashMap::new(), ring_angle: 0.0, acc: 0.0, seed: 1 }
     }
 
     fn frame(state: WhistleState) -> WhistleFrame {
