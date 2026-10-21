@@ -15,6 +15,7 @@ pub mod effects;
 pub mod info;
 pub mod kabekui;
 pub mod mizinko;
+pub mod otama;
 pub mod otimoti;
 pub mod tai;
 pub mod tank;
@@ -173,6 +174,7 @@ fn strategy_for(info: &TekiInfo) -> Option<Strategy> {
         WATER_DUMPLE => bulborb::chappy(info),
         HONEYWISP => mizinko::honeywisp(info),
         BREADBUG => collec::breadbug(info),
+        WOGPOLE => otama::wogpole(info),
         WOLLYWOG | WOLLYWOG_YELLOW => otimoti::wollywog(info),
         FIERY_BLOWHOG => tank::tank(info),
         SHEARGRUB_F => kabekui::female(info),

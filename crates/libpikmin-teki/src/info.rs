@@ -306,7 +306,8 @@ mod tests {
         for kind in 0..KINDS as u8 {
             let t = TekiInfo::load(&a, kind, 0, &pellets).unwrap();
             assert!(t.life > 0.0 && t.scale > 0.0, "{kind}: {t:?}");
-            assert!(t.run_speed > 0.0 && t.turn_speed > 0.0);
+            // The Honeywisp flies a path and the Rolling Boulder rolls; neither runs nor turns.
+            assert!(kind == HONEYWISP || kind == IWAGON || (t.run_speed > 0.0 && t.turn_speed > 0.0), "kind {kind}: run {} turn {}", t.run_speed, t.turn_speed);
             assert!(t.corpse_min_carriers >= 1 && t.corpse_max_carriers >= t.corpse_min_carriers);
             assert!(t.hi.y > t.lo.y);
             for m in &t.motions {

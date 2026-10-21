@@ -310,7 +310,7 @@ pub fn continuous_motion(next: i32, m: usize) -> Act {
 }
 /// `TaiFinishMotionAction`.
 pub fn finish_motion(next: i32) -> Act {
-    Action::new(next).on_start(|t, _| t.finish_motion()).build()
+    Action::new(next).on_start(|t, _| t.finish_motion()).on_act(|t, _| t.animation_finished()).build()
 }
 /// `TaiSwitchMotionAction`: a new motion from the same frame.
 pub fn switch_motion(next: i32, m: usize) -> Act {
