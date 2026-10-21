@@ -221,6 +221,12 @@ pub struct Teki {
     pub wander: Vec3,
     /// The way it faced at its nest.
     pub nest_yaw: f32,
+    /// `mActionVelocity`: its falling and jumping speed (gravity acts on it unless it is flying).
+    pub action_vel: Vec3,
+    /// The ground under it, from the host (a body that moves itself reports it each tick).
+    pub ground_y: Option<f32>,
+    /// Gravity, units a second squared (`AICONST.mGravity`).
+    pub gravity: f32,
 }
 
 /// A bobbing flight (`PeveHorizontalSinWaveEvent`): the position advances by `dir` a second while its
@@ -316,6 +322,9 @@ impl Teki {
             targets_lost: None,
             wander: pos,
             nest_yaw: yaw,
+            action_vel: Vec3::ZERO,
+            ground_y: None,
+            gravity: 550.0,
         }
     }
 
@@ -441,6 +450,16 @@ impl Teki {
     /// The way it faced when it was put at its nest.
     pub fn forward_at_nest(&self) -> Vec3 {
         dir_vec(self.nest_yaw)
+    }
+
+    /// `BTeki::getYFromSeaLevel`: height above the ground.
+    pub fn height(&self) -> f32 {
+        self.ground_y.map_or(0.0, |g| self.pos.y - g)
+    }
+
+    /// Whether it is off the ground (flying, jumping or falling).
+    pub fn airborne(&self) -> bool {
+        self.flying || self.height() > 0.5
     }
 
     pub fn territory_distance(&self) -> f32 {

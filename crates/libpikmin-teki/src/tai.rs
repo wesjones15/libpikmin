@@ -207,6 +207,51 @@ pub fn set_options(bits: u32, on: bool) -> Act {
     Action::new(NO_TRANSIT).on_start(move |t, _| if on { t.set_option(bits) } else { t.clear_option(bits) }).build()
 }
 
+/// `TaiAnimationKeyAction`: true when the key was passed this tick.
+pub fn animation_key_action(next: i32, bit: u8) -> Act {
+    Action::new(next).on_act(move |t, _| t.key(bit)).build()
+}
+
+/// `TaiSerialAction`: its actions one after another; true when the last is done.
+pub fn serial(next: i32, actions: Vec<Act>) -> Act {
+    let (a1, a2, a3, a4) = (actions.clone(), actions.clone(), actions.clone(), actions);
+    Action::new(next)
+        .on_start(move |t, w| {
+            t.queue = 0;
+            if let Some(a) = a1.first() {
+                a.start(t, w);
+            }
+        })
+        .on_finish(move |t, w| {
+            for a in &a2 {
+                a.finish(t, w);
+            }
+        })
+        .on_act(move |t, w| {
+            let Some(cur) = a3.get(t.queue).cloned() else { return true };
+            if cur.act(t, w) {
+                if t.queue + 1 >= a3.len() {
+                    return true;
+                }
+                t.queue += 1;
+                a3[t.queue].start(t, w);
+            }
+            false
+        })
+        .on_event(move |t, w, e| {
+            let Some(cur) = a4.get(t.queue).cloned() else { return false };
+            if cur.by_event(t, w, e) {
+                if t.queue + 1 >= a4.len() {
+                    return true;
+                }
+                t.queue += 1;
+                a4[t.queue].start(t, w);
+            }
+            false
+        })
+        .build()
+}
+
 // ---- basic
 
 /// `TaiActionStateAction`: true when the action-state register equals `state`.

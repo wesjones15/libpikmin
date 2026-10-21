@@ -13,6 +13,7 @@ pub mod object;
 pub mod effects;
 pub mod info;
 pub mod mizinko;
+pub mod otimoti;
 pub mod tai;
 
 use std::sync::Arc;
@@ -136,6 +137,7 @@ impl Tekis {
             let Some(strategy) = self.strategies[self.list[i].kind as usize].clone() else { continue };
             let t = &mut self.list[i];
             let mut w = World { sim, host, navis, others: &others, out: &mut out, rng: &mut self.rng, dt };
+            t.gravity = w.sim.params().ai.gravity;
             step(t, &strategy, &mut w, &mut events);
         }
         // Messages between enemies, and the enemies that finished.
@@ -167,6 +169,7 @@ fn strategy_for(info: &TekiInfo) -> Option<Strategy> {
         WATER_DUMPLE => bulborb::chappy(info),
         HONEYWISP => mizinko::honeywisp(info),
         BREADBUG => collec::breadbug(info),
+        WOLLYWOG | WOLLYWOG_YELLOW => otimoti::wollywog(info),
         _ => return None,
     })
 }
@@ -217,13 +220,24 @@ fn step(t: &mut Teki, strategy: &Strategy, w: &mut World, events: &mut Vec<(Teki
     strategy.act(t, w);
     t.anim.clear_keys();
 
-    // Movement: along its target velocity, on the ground the host says is there.
+    // Movement: along its target velocity, on the ground the host says is there; gravity pulls it down
+    // unless it is flying (`BTeki::gravitate`).
     if t.target_vel != Vec3::ZERO {
         t.pos += t.target_vel * dt;
     }
-    if !t.flying {
-        if let Some(h) = w.host.ground_height(t.pos + Vec3::Y * 20.0) {
-            t.pos.y = h;
+    let ground = w.host.ground_height(t.pos + Vec3::Y * 20.0).or(t.ground_y);
+    if let Some(g) = ground {
+        t.ground_y = Some(g);
+    }
+    if !t.flying && t.option(opt::GRAVITATABLE) {
+        t.action_vel.y -= t.gravity * dt;
+        t.pos += t.action_vel * dt;
+        if let Some(g) = ground
+            && t.pos.y <= g
+        {
+            t.pos.y = g;
+            t.action_vel = Vec3::ZERO;
+            strategy.event(t, w, &Event::Ground);
         }
     }
     let r = t.info.collision_radius;
