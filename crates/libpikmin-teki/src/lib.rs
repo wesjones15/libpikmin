@@ -15,6 +15,7 @@ pub mod effects;
 pub mod info;
 pub mod kabekui;
 pub mod kinoko;
+pub mod mar;
 pub mod mizinko;
 pub mod napkid;
 pub mod otama;
@@ -181,6 +182,7 @@ fn strategy_for(info: &TekiInfo) -> Option<Strategy> {
         FIERY_BLOWHOG => tank::tank(info),
         SNITCHBUG => napkid::snitchbug(info),
         PUFFSTOOL => kinoko::puffstool(info),
+        PUFFY_BLOWHOG => mar::puffy_blowhog(info),
         SHEARGRUB_F => kabekui::female(info),
         SHEARGRUB_M => kabekui::male(info),
         SHEARWIG => kabekui::shearwig(info),

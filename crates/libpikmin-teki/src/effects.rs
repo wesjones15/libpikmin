@@ -9,6 +9,10 @@ pub const COLLEC_HM_A: usize = 97;
 pub const COLLEC_HM_B: usize = 98;
 
 pub const BUBBLES: usize = 15;
+pub const MAR_WIND_JET: usize = 176;
+pub const MAR_DEAD_SMOKE: usize = 179;
+pub const MAR_DEAD_JET: usize = 180;
+pub const ONYON_BUBBLES: usize = 237;
 pub const KINOKO_DEATH_SPORES: usize = 148;
 pub const KINOKO_DEATH_SMOKE: usize = 149;
 pub const KINOKO_CHARGE_SPORES: usize = 150;
