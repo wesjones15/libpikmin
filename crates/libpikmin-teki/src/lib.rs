@@ -13,6 +13,7 @@ pub mod collec;
 pub mod object;
 pub mod effects;
 pub mod info;
+pub mod kabekui;
 pub mod mizinko;
 pub mod otimoti;
 pub mod tai;
@@ -174,6 +175,9 @@ fn strategy_for(info: &TekiInfo) -> Option<Strategy> {
         BREADBUG => collec::breadbug(info),
         WOLLYWOG | WOLLYWOG_YELLOW => otimoti::wollywog(info),
         FIERY_BLOWHOG => tank::tank(info),
+        SHEARGRUB_F => kabekui::female(info),
+        SHEARGRUB_M => kabekui::male(info),
+        SHEARWIG => kabekui::shearwig(info),
         CANNON_BEETLE => beatle::beatle(info),
         IWAGON => beatle::iwagon(info),
         _ => return None,

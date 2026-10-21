@@ -20,6 +20,8 @@ pub const ATTACK: usize = 8;
 pub const FLICK: usize = 9;
 pub const TYPE1: usize = 10;
 pub const TYPE2: usize = 11;
+pub const TYPE3: usize = 12;
+pub const TYPE4: usize = 13;
 
 /// `CHAPPYPI_SmashType` and `CHAPPYPF_*`.
 const CHAPPY_SMASH_TYPE: usize = 20;

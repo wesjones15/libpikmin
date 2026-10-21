@@ -489,3 +489,201 @@ pub fn burn(t: &mut Teki, w: &mut World) {
 }
 
 pub const PI_: f32 = PI;
+
+// ---- the actions the Sheargrubs, Wogpoles and the other burrowers share (TAIAmove.cpp, TAIAreaction.cpp)
+
+/// `TAIAsetMotionSpeed`: start `m` and hold the animation at `speed` frames a second.
+pub fn set_motion_speed(next: i32, m: usize, speed: f32) -> Act {
+    Action::new(next)
+        .on_start(move |t, _| {
+            t.start_motion(m);
+            t.manual_speed = Some(speed);
+        })
+        .build()
+}
+
+/// `TAIAsetTargetPointCircleRandom`: a random place within the danger territory around the nest.
+pub fn set_target_circle_random(next: i32) -> Act {
+    Action::new(next)
+        .on_start(|t, w| {
+            let angle = w.rng.range(0.0, TAU);
+            let dist = w.rng.range(0.0, t.f(tpf::DANGER_TERRITORY_RANGE));
+            let mut p = t.nest + Vec3::new(dist * angle.sin(), 0.0, dist * angle.cos());
+            p.y = t.ground_y.unwrap_or(t.nest.y);
+            t.target_pos = p;
+        })
+        .on_act(|_, _| true)
+        .build()
+}
+
+/// `TAIAgoTargetPriorityFaceDir`: walk to `target_pos`, facing the way it goes first.
+pub fn go_target_face(next: i32, m: usize) -> Act {
+    Action::new(next)
+        .on_start(move |t, _| reserve_start(t, m))
+        .on_act(move |t, w| {
+            if !reserve_act(t, m) {
+                return false;
+            }
+            let walk = t.f(tpf::WALK_VELOCITY);
+            if t.target_pos.distance(t.pos) <= walk {
+                return true;
+            }
+            let goal = t.target_pos;
+            t.move_toward_face_priority(goal, walk, w.dt);
+            false
+        })
+        .build()
+}
+
+/// `TAIAapproachTargetPriorityFaceDir`: close in on the creature targeted; true once it is gone.
+pub fn approach_target_face(next: i32, m: usize) -> Act {
+    Action::new(next)
+        .on_start(move |t, _| reserve_start(t, m))
+        .on_act(move |t, w| {
+            if !reserve_act(t, m) {
+                return false;
+            }
+            let Some(c) = t.target(0, w) else { return true };
+            let walk = t.f(tpf::WALK_VELOCITY);
+            t.move_toward_face_priority(c.pos, walk, w.dt);
+            false
+        })
+        .build()
+}
+
+/// `TAIAtimerReaction`: true once `secs` of the frame counter have run.
+pub fn timer_reaction(next: i32, secs: impl Fn(&Teki) -> f32 + Send + Sync + 'static) -> Act {
+    Action::new(next)
+        .on_start(|t, _| t.counter = 0.0)
+        .on_act(move |t, w| {
+            t.counter += w.dt;
+            t.counter > secs(t)
+        })
+        .build()
+}
+
+/// `TAIAhitCheckFlyingPiki`: a thrown Pikmin landed on it.
+pub fn hit_check_flying_piki(next: i32) -> Act {
+    Action::new(next).on_event(|_, _, e| matches!(e, Event::Entity { other: Target::Piki(_), flying: true } | Event::Pressed)).build()
+}
+
+/// `TAIAinWaterDamage`: water hurts it `damage` a second; a splash as it goes in or comes out.
+pub fn in_water_damage(damage: f32, splash: bool) -> Act {
+    Action::new(NO_TRANSIT)
+        .on_act(move |t, w| {
+            let wet = t.in_water;
+            if wet {
+                t.hp -= w.dt * damage;
+            }
+            if splash {
+                if wet != (t.reg[7] > 0.5) {
+                    w.out.push(Out::Effect { id: crate::effects::BUBBLES, pos: t.pos });
+                    w.out.push(Out::Sound { name: "SE_OTAMA_WATERJUMP", pos: t.pos });
+                }
+                t.reg[7] = if wet { 1.0 } else { 0.0 };
+            }
+            wet
+        })
+        .build()
+}
+
+/// `YTeki::killStickToMouthPiki`: what is in its mouth dies.
+pub fn kill_mouth_pikis(t: &mut Teki, w: &mut World) {
+    w.sim.chew(t.creature);
+    t.held_piki = false;
+}
+
+/// `TAIAdyingKabekui`: the dying motion, with a puff of dust where it lands.
+pub fn dying_with_dust(m: usize, effect: usize) -> Act {
+    let inner = yai_dying(m);
+    let (i1, i2) = (inner.clone(), inner);
+    Action::new(NO_TRANSIT)
+        .on_start(move |t, w| {
+            i1.start(t, w);
+            t.finish_flying();
+        })
+        .on_act(move |t, w| {
+            let on_ground = t.ground_y.is_none_or(|g| (g - t.pos.y).abs() < 1.0);
+            if on_ground && (t.action_vel.y < -2.0 * t.gravity * w.dt || t.key(key::ACTION0)) {
+                w.out.push(Out::Effect { id: effect, pos: t.pos });
+            }
+            i2.act(t, w)
+        })
+        .build()
+}
+
+/// `YTeki::flyingStay`: climb or sink toward the flight height, at most `speed`.
+pub fn flying_stay(t: &mut Teki, speed: f32, dt: f32) {
+    let mut h = t.f(tpf::FLIGHT_HEIGHT) - t.height();
+    let limit = 0.05 * speed;
+    if h.abs() > limit {
+        h = h.signum() * limit;
+    }
+    t.target_vel.y += h * 900.0 * dt * dt;
+    if t.target_vel.y.abs() > speed {
+        t.target_vel.y = t.target_vel.y.signum() * speed;
+    }
+}
+
+/// `TAIAflyingBase`: hold the flight height; `speed` is the climb rate allowed (it changes once it has risen).
+pub fn flying_base(speed: impl Fn(&Teki) -> f32 + Send + Sync + 'static) -> Act {
+    Action::new(NO_TRANSIT)
+        .on_start(|t, _| {
+            t.start_flying();
+            t.reg[6] = 0.0;
+        })
+        .on_act(move |t, w| {
+            let s = speed(t);
+            flying_stay(t, s, w.dt);
+            if t.height() > t.f(tpf::FLIGHT_HEIGHT) {
+                t.reg[6] = 1.0;
+            }
+            false
+        })
+        .build()
+}
+
+/// The turn toward where it flies (`mFaceDirAdjust`).
+pub fn face_velocity(t: &mut Teki, adjust: f32) {
+    let v = t.target_vel.with_y(0.0);
+    if v.length() > 1.0 {
+        let a = nearer_direction(t.direction(), v.x.atan2(v.z));
+        t.yaw += (a - t.direction()) * adjust;
+    }
+}
+
+/// `TAIAflyingInTerritory`: drift to random points around the nest at the flight height.
+pub fn flying_in_territory(face_adjust: f32) -> Act {
+    fn pick(t: &mut Teki, w: &mut World) {
+        let mut o = Vec3::new(w.rng.range(-1.0, 1.0), 0.0, w.rng.range(-1.0, 1.0));
+        o = o.normalize_or_zero() * t.f(tpf::SAFETY_TERRITORY_RANGE);
+        t.target_pos = Vec3::new(o.x + t.nest.x, t.f(tpf::FLIGHT_HEIGHT), o.z + t.nest.z);
+    }
+    Action::new(NO_TRANSIT)
+        .on_start(|t, w| {
+            t.start_flying();
+            pick(t, w);
+        })
+        .on_act(move |t, w| {
+            let speed = t.f(tpf::WALK_VELOCITY);
+            let y_speed = t.target_vel.y;
+            let here = Vec3::new(t.pos.x, t.height(), t.pos.z);
+            if t.target_pos.distance(here) <= speed {
+                pick(t, w);
+            }
+            let mut dir = (t.target_pos - t.pos).with_y(0.0);
+            let dist = dir.length();
+            if dist > speed * 0.1 {
+                dir = dir / dist * (0.1 * speed);
+            }
+            t.target_vel += dir * (w.dt * 900.0 * w.dt);
+            let len = t.target_vel.length();
+            if len > speed {
+                t.target_vel = t.target_vel / len * speed;
+            }
+            t.target_vel.y = y_speed;
+            face_velocity(t, face_adjust);
+            false
+        })
+        .build()
+}

@@ -246,6 +246,8 @@ pub struct Teki {
     pub next_override: Option<i32>,
     /// The velocity a thing was shot with (a Rolling Boulder).
     pub spawn_vel: Vec3,
+    /// The ground under it is water (`MapCode::getAttribute == ATTR_Water`), from the host.
+    pub in_water: bool,
 }
 
 /// A flame stream (`CylinderTypeCallBack`): a cylinder from the mouth, `length` long and `radius` wide.
@@ -365,6 +367,7 @@ impl Teki {
             held_piki: false,
             next_override: None,
             spawn_vel: Vec3::ZERO,
+            in_water: false,
         }
     }
 

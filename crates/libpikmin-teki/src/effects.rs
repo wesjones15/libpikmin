@@ -8,6 +8,11 @@ pub const COLLEC_ST_B: usize = 96;
 pub const COLLEC_HM_A: usize = 97;
 pub const COLLEC_HM_B: usize = 98;
 
+pub const BUBBLES: usize = 15;
+pub const DIRT_CLOUD: usize = 50;
+pub const DIRT_SPRAY: usize = 51;
+pub const KABEKUI_EAT_BRIDGE_A: usize = 79;
+pub const KABEKUI_EAT_BRIDGE_B: usize = 80;
 pub const BEATLE_FLICK1: usize = 136;
 pub const BEATLE_SHOOT_ROCK_HALO: usize = 137;
 pub const BEATLE_FLICK3: usize = 140;
