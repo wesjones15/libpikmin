@@ -293,6 +293,23 @@ impl Sim {
         true
     }
 
+    /// A host's creature eats the pellet (a Breadbug takes it into its nest): the Pikmin carrying it let go and
+    /// it is gone for good. False if it was already gone.
+    pub fn consume_pellet(&mut self, id: PelletId) -> bool {
+        let Some(p) = self.pellets.get(id.0 as usize) else { return false };
+        if p.state == PelletState::Gone { return false; }
+        let carriers = p.carriers.clone();
+        for carrier in carriers {
+            self.leave_current(carrier);
+            self.pikis[carrier.0 as usize].state = PikiState::Idle;
+        }
+        let p = &mut self.pellets[id.0 as usize];
+        p.slots.iter_mut().for_each(|s| *s = None);
+        p.carriers.clear();
+        p.state = PelletState::Gone;
+        true
+    }
+
     /// Puts a held pellet down at `pos`, where Pikmin can lift it again. False if it isn't held.
     pub fn release_pellet(&mut self, id: PelletId, pos: Vec3, yaw: f32) -> bool {
         if !pos.is_finite() || !yaw.is_finite() { return false; }

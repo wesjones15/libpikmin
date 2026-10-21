@@ -185,6 +185,28 @@ pub fn once(next: i32) -> Act {
     Action::new(next).on_act(|_, _| true).build()
 }
 
+/// `TaiDependenceAction`: when the primary acts, the dependent acts too and decides.
+pub fn dependence(next: i32, dependent: Act, primary: Act) -> Act {
+    let (d1, p1, d2, p2, d3, p3, d4, p4) = (dependent.clone(), primary.clone(), dependent.clone(), primary.clone(), dependent.clone(), primary.clone(), dependent, primary);
+    Action::new(next)
+        .on_start(move |t, w| {
+            d1.start(t, w);
+            p1.start(t, w);
+        })
+        .on_finish(move |t, w| {
+            d2.finish(t, w);
+            p2.finish(t, w);
+        })
+        .on_act(move |t, w| p3.act(t, w) && d3.act(t, w))
+        .on_event(move |t, w, e| p4.by_event(t, w, e) && d4.by_event(t, w, e))
+        .build()
+}
+
+/// `TaiSetOptionAction`.
+pub fn set_options(bits: u32, on: bool) -> Act {
+    Action::new(NO_TRANSIT).on_start(move |t, _| if on { t.set_option(bits) } else { t.clear_option(bits) }).build()
+}
+
 // ---- basic
 
 /// `TaiActionStateAction`: true when the action-state register equals `state`.

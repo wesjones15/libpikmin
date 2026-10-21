@@ -1,6 +1,13 @@
 //! `EffectMgr` ids the enemies use (EffectMgr.h `EFF_*`); the particle files are libpikmin-assets'
 //! `effect_table`.
 
+pub const COLLEC_ASHI: usize = 93;
+pub const COLLEC_HIKI: usize = 94;
+pub const COLLEC_ST_A: usize = 95;
+pub const COLLEC_ST_B: usize = 96;
+pub const COLLEC_HM_A: usize = 97;
+pub const COLLEC_HM_B: usize = 98;
+
 /// `BTeki::createDeadEffect`: wave, glow and smoke by `TPI_CarcassSize` (0 large, 1 medium, 2 small).
 pub fn death(carcass: i32) -> Vec<usize> {
     match carcass {

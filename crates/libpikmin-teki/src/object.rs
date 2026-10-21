@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use glam::Vec3;
 use libpikmin::host::{CreatureId, Host};
-use libpikmin::{PikiId, PikiState, Sim};
+use libpikmin::{PelletId, PelletState, PikiId, PikiState, Sim};
 
 use crate::anim::{self, Animator, key};
 use crate::info::TekiInfo;
@@ -25,6 +25,8 @@ pub enum Target {
     Piki(PikiId),
     /// A host-provided player (`Navi`).
     Navi(u32),
+    /// A pellet (what the Breadbug goes for).
+    Pellet(PelletId),
 }
 
 /// A player the host asks enemies to treat as a Navi.
@@ -137,6 +139,8 @@ pub struct Other {
     pub state: i32,
     pub pos: Vec3,
     pub alive: bool,
+    /// The pellet it carries.
+    pub holding: Option<PelletId>,
 }
 
 /// One candidate for targeting: a Pikmin or player as the conditions see it.
@@ -209,6 +213,14 @@ pub struct Teki {
     pub accel_on: bool,
     /// The position the events move (`mPositionIO`).
     pub wave_pos: Vec3,
+    /// The pellet it has hold of (`getCreaturePointer(2)` for the Breadbug).
+    pub held: Option<PelletId>,
+    /// `getCreaturePointer(3)`: what it gave up on for a while (the Breadbug).
+    pub targets_lost: Option<Target>,
+    /// Where it is ambling to (`mRouteWayPoints` stand-in).
+    pub wander: Vec3,
+    /// The way it faced at its nest.
+    pub nest_yaw: f32,
 }
 
 /// A bobbing flight (`PeveHorizontalSinWaveEvent`): the position advances by `dir` a second while its
@@ -300,6 +312,10 @@ impl Teki {
             accel3: Vec3::ZERO,
             accel_on: false,
             wave_pos: pos,
+            held: None,
+            targets_lost: None,
+            wander: pos,
+            nest_yaw: yaw,
         }
     }
 
@@ -422,6 +438,11 @@ impl Teki {
         self.yaw = round_angle(self.yaw) + speed * dt;
     }
 
+    /// The way it faced when it was put at its nest.
+    pub fn forward_at_nest(&self) -> Vec3 {
+        dir_vec(self.nest_yaw)
+    }
+
     pub fn territory_distance(&self) -> f32 {
         dist_xz(self.pos, self.nest)
     }
@@ -521,6 +542,13 @@ impl Teki {
                 sticking: false,
                 piki: None,
             }),
+            Target::Pellet(id) => {
+                let p = w.sim.pellets().get(id.0 as usize)?;
+                if p.state == PelletState::Gone {
+                    return None;
+                }
+                Some(Cand { target: t, pos: p.pos, size: p.desc.radius, sticks_to_me: self.held == Some(id), sticking: false, piki: None })
+            }
             Target::Piki(id) => {
                 let p = w.sim.pikis().get(id.0 as usize)?;
                 if !p.is_alive() || matches!(p.state, PikiState::Swallowed { .. } | PikiState::Held { .. } | PikiState::Pressed { .. }) {

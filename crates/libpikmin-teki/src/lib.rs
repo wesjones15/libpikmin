@@ -8,6 +8,7 @@
 
 pub mod anim;
 pub mod bulborb;
+pub mod collec;
 pub mod object;
 pub mod effects;
 pub mod info;
@@ -129,7 +130,7 @@ impl Tekis {
     pub fn update(&mut self, sim: &mut Sim, host: &dyn Host, navis: &[Navi], dt: f32) -> Vec<Out> {
         let mut out = Vec::new();
         let others: Vec<Other> =
-            self.list.iter().map(|t| Other { id: t.id, kind: t.kind, state: t.state, pos: t.pos, alive: t.alive() }).collect();
+            self.list.iter().map(|t| Other { id: t.id, kind: t.kind, state: t.state, pos: t.pos, alive: t.alive(), holding: t.held }).collect();
         let mut events: Vec<(TekiId, Event)> = std::mem::take(&mut self.pending);
         for i in 0..self.list.len() {
             let Some(strategy) = self.strategies[self.list[i].kind as usize].clone() else { continue };
@@ -165,6 +166,7 @@ fn strategy_for(info: &TekiInfo) -> Option<Strategy> {
         SPOTTY | SPOTTY_ORANGE => bulborb::swallow(info),
         WATER_DUMPLE => bulborb::chappy(info),
         HONEYWISP => mizinko::honeywisp(info),
+        BREADBUG => collec::breadbug(info),
         _ => return None,
     })
 }
@@ -226,4 +228,13 @@ fn step(t: &mut Teki, strategy: &Strategy, w: &mut World, events: &mut Vec<(Teki
     }
     let r = t.info.collision_radius;
     t.pos = w.host.walls(t.pos + Vec3::Y * r, r) - Vec3::Y * r;
+
+    // A pellet in its mouth goes where it goes (the Breadbug).
+    if let Some(id) = t.held {
+        let size = w.sim.pellet(id).desc.radius;
+        let at = t.pos + t.forward() * (t.info.collision_radius + size * 0.8);
+        if !w.sim.hold_pellet(id, at, t.yaw) {
+            t.held = None;
+        }
+    }
 }
