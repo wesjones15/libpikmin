@@ -141,6 +141,8 @@ pub struct PikView {
     particles: Vec<PikParticle>,
     last_tick: Option<u64>,
     poisoned: bool,
+    /// Sounds the host asked for by name this frame (`pik_view_teki_named_sound`), with where.
+    named: Vec<(&'static str, Vec3)>,
 }
 
 /// Loads the disc's models (and with `sound` non-zero, opens the default output device for
@@ -177,6 +179,7 @@ pub unsafe extern "C" fn pik_view_new(assets_dir: *const c_char, sound: u8) -> *
             particles: Vec::new(),
             last_tick: None,
             poisoned: false,
+            named: Vec::new(),
         })
     });
     match made {
@@ -644,7 +647,13 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
             let mut positions = positions;
             positions.extend(v.view.teki_positions.iter().copied());
             // They wait for the sound system's next once-per-tick frame (or are dropped with no audio).
-            let table_sounds = if v.audio.is_none() || v.last_tick != Some(s.sim.tick()) { std::mem::take(&mut v.view.teki_sounds) } else { Vec::new() };
+            let mut table_sounds = if v.audio.is_none() || v.last_tick != Some(s.sim.tick()) { std::mem::take(&mut v.view.teki_sounds) } else { Vec::new() };
+            // Named sounds sound from stand-in creatures where they were asked for.
+            for (i, (name, at)) in std::mem::take(&mut v.named).into_iter().enumerate() {
+                let id = 0xFFFF_0000_0000u64 + i as u64;
+                positions.push((id, at));
+                table_sounds.push((id, name, 0));
+            }
             let creatures = Creatures { positions: &positions, table_sounds: &table_sounds };
             v.view.particles(right, up);
             v.particles.clear();
@@ -1079,6 +1088,48 @@ fn info_struct(kind: u32, i: &libpikmin_present::teki::TekiInfo) -> PikTekiInfo 
         hi: i.hi.into(),
         motions: m,
     }
+}
+
+/// As [`pik_view_spawn_effect`], emitting along `dir` (a flame out of a mouth, a gust).
+///
+/// # Safety
+/// `view` from [`pik_view_new`]; `pos` and `dir` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_spawn_effect_dir(view: *mut PikView, id: u32, pos: *const PikVec3, dir: *const PikVec3) -> u8 {
+    // SAFETY: as documented.
+    let (Some(at), Some(dir)) = (unsafe { pos.as_ref() }, unsafe { dir.as_ref() }) else { return 0 };
+    let (at, dir) = (Vec3::from(*at), Vec3::from(*dir));
+    // SAFETY: as documented.
+    unsafe { with_view(view, 0, |v| v.view.spawn_effect_dir(id as usize, at, dir) as u8) }
+}
+
+/// A sound effect the game's tables know by name (`SE_*`), from `pos` (sim units): an enemy's stamp, a shell
+/// closing. Heard with the next frame.
+///
+/// # Safety
+/// `view` from [`pik_view_new`]; `name` a nul-terminated UTF-8 string; `pos` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_teki_named_sound(view: *mut PikView, name: *const c_char, pos: *const PikVec3) {
+    // SAFETY: as documented.
+    let (Some(at), false) = (unsafe { pos.as_ref() }, name.is_null()) else { return };
+    // SAFETY: as documented.
+    let Ok(name) = (unsafe { std::ffi::CStr::from_ptr(name) }).to_str() else { return };
+    let at = Vec3::from(*at);
+    // Names are interned: the audio takes them as `'static`, and only the game's own few dozen ever come.
+    static NAMES: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let name: &'static str = {
+        let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+        match names.iter().find(|n| **n == name) {
+            Some(n) => n,
+            None => {
+                let leaked: &'static str = Box::leak(name.to_string().into_boxed_str());
+                names.push(leaked);
+                leaked
+            }
+        }
+    };
+    // SAFETY: as documented.
+    unsafe { with_view(view, (), |v| if v.named.len() < 64 { v.named.push((name, at)) }) }
 }
 
 /// Plays `EffectMgr`'s effect `id` (`EFF_*`) once at `pos` (sim units): an enemy's death smoke, its soul,

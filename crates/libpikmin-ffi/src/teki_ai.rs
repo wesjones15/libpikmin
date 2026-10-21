@@ -48,7 +48,8 @@ pub struct PikTekiState {
     /// 0..1 how solid it is (the Honeywisp fades at the ends of its trips).
     pub fade: f32,
     pub state: i32,
-    /// Bit 0 visible, 1 alive, 2 flying, 3 collidable, 4 holding a pellet.
+    /// Bit 0 visible, 1 alive, 2 flying, 3 collidable, 4 holding a pellet, 5 off the ground (flying, jumping or
+    /// falling: the body follows it up and down).
     pub flags: u32,
     pub held_pellet: i32,
     pub hp: f32,
@@ -199,6 +200,55 @@ pub unsafe extern "C" fn pik_tekis_set_territory(t: *mut PikTekis, id: u32, terr
     }
 }
 
+/// The ground under an enemy's body (its height, sim units) and whether it is water.
+///
+/// # Safety
+/// `t` from [`pik_tekis_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_tekis_set_ground(t: *mut PikTekis, id: u32, ground: f32, water: u8) {
+    // SAFETY: as documented.
+    if let Some(t) = unsafe { t.as_mut() } {
+        t.tekis.set_ground(id, ground, water != 0);
+    }
+}
+
+/// Where an enemy that heads for a place goes (a Smoky Progg's Onion); null for none.
+///
+/// # Safety
+/// `t` from [`pik_tekis_new`]; `goal` null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_tekis_set_goal(t: *mut PikTekis, id: u32, goal: *const PikVec3) {
+    // SAFETY: as documented.
+    if let Some(t) = unsafe { t.as_mut() } {
+        t.tekis.set_goal(id, unsafe { goal.as_ref() }.map(|g| Vec3::from(*g)));
+    }
+}
+
+/// A counter the enemy starts with: index 0 a Pellet Posy's size (0..2) or 1 for a Clamclamp whose pearl
+/// is a ship part, 1 a Posy's color, 2 = 1 to hold it.
+///
+/// # Safety
+/// `t` from [`pik_tekis_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_tekis_set_count(t: *mut PikTekis, id: u32, index: u32, value: i32) {
+    // SAFETY: as documented.
+    if let Some(t) = unsafe { t.as_mut() } {
+        t.tekis.set_count(id, index as usize, value);
+    }
+}
+
+/// The velocity an enemy was shot with (a Rolling Boulder), before its first update.
+///
+/// # Safety
+/// `t` from [`pik_tekis_new`]; `v` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_tekis_set_spawn_velocity(t: *mut PikTekis, id: u32, v: *const PikVec3) {
+    // SAFETY: as documented.
+    if let (Some(t), Some(v)) = (unsafe { t.as_mut() }, unsafe { v.as_ref() }) {
+        t.tekis.set_spawn_velocity(id, Vec3::from(*v));
+    }
+}
+
 /// Squashed by something.
 ///
 /// # Safety
@@ -303,6 +353,7 @@ pub unsafe extern "C" fn pik_tekis_state(t: *const PikTekis, id: u32, out: *mut 
     flags |= (e.flying as u32) << 2;
     flags |= (e.option(opt::ATARI) as u32) << 3;
     flags |= (e.held.is_some() as u32) << 4;
+    flags |= (e.airborne() as u32) << 5;
     // SAFETY: as documented.
     unsafe {
         out.write(PikTekiState {

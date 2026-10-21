@@ -789,6 +789,21 @@ impl View {
         self.effects.as_mut().is_some_and(|e| e.spawn(def, pos).is_some())
     }
 
+    /// As [`View::spawn_effect`], with the direction it emits in (a flame from a mouth, wind).
+    pub fn spawn_effect_dir(&mut self, id: usize, pos: Vec3, dir: Vec3) -> bool {
+        let Some(def) = libpikmin_assets::effect_table::by_id(id) else { return false };
+        let Some(e) = self.effects.as_mut() else { return false };
+        match e.spawn(def, pos) {
+            Some(g) => {
+                if dir.length() > 1e-4 {
+                    g.emit_dir = dir.normalize();
+                }
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The loaded kind `kind` ([`crate::teki::DWARF`]...), if its files were on the disc.
     pub fn teki(&self, kind: u8) -> Option<&TekiView> {
         self.tekis.iter().find(|t| t.info.kind == kind)

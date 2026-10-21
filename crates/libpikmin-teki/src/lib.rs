@@ -120,6 +120,32 @@ impl Tekis {
         }
     }
 
+    /// A scratch counter a host sets before the enemy starts (the Pellet Posy's size, whether a Clamclamp's pearl holds
+    /// a ship part).
+    pub fn set_count(&mut self, id: TekiId, index: usize, value: i32) {
+        if let Some(t) = self.get_mut(id)
+            && let Some(c) = t.count.get_mut(index)
+        {
+            *c = value;
+        }
+    }
+
+    /// The velocity a thing was shot with (a Rolling Boulder).
+    pub fn set_spawn_velocity(&mut self, id: TekiId, v: Vec3) {
+        if let Some(t) = self.get_mut(id) {
+            t.spawn_vel = v;
+        }
+    }
+
+    /// The ground under an enemy's body: its height, and whether it is water. The strategies fall, land and fly
+    /// relative to it.
+    pub fn set_ground(&mut self, id: TekiId, ground: f32, water: bool) {
+        if let Some(t) = self.get_mut(id) {
+            t.ground_y = Some(ground);
+            t.in_water = water;
+        }
+    }
+
     /// The ground under an enemy is water, or not (a body that moves itself tells it each tick).
     pub fn set_water(&mut self, id: TekiId, water: bool) {
         if let Some(t) = self.get_mut(id) {
