@@ -197,6 +197,30 @@ pub struct Teki {
     /// A tick counter for the host's hit-reaction shake (`startDamageMotion`).
     pub shake: f32,
     pub age: f32,
+    /// How far this enemy roams from its nest, set by whoever placed it (`FLT_TerritoryRange`).
+    pub territory: f32,
+    /// 0..1, how solid it is drawn (`FLT_Size` for the Honeywisp's fade).
+    pub fade: f32,
+    /// `PeveHorizontalSinWaveEvent`: a bobbing flight along a line.
+    pub wave: Wave,
+    /// `PeveAccelerationEvent`: velocity and acceleration for a flight.
+    pub vel3: Vec3,
+    pub accel3: Vec3,
+    pub accel_on: bool,
+    /// The position the events move (`mPositionIO`).
+    pub wave_pos: Vec3,
+}
+
+/// A bobbing flight (`PeveHorizontalSinWaveEvent`): the position advances by `dir` a second while its
+/// height follows `amp * sin(theta) + offset`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Wave {
+    pub on: bool,
+    pub dir: Vec3,
+    pub offset: f32,
+    pub amp: f32,
+    pub theta: f32,
+    pub omega: f32,
 }
 
 fn round_angle(a: f32) -> f32 {
@@ -269,6 +293,13 @@ impl Teki {
             flash: 0.0,
             shake: 0.0,
             age: 0.0,
+            territory: 0.0,
+            fade: 1.0,
+            wave: Wave::default(),
+            vel3: Vec3::ZERO,
+            accel3: Vec3::ZERO,
+            accel_on: false,
+            wave_pos: pos,
         }
     }
 

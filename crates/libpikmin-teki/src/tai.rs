@@ -71,11 +71,13 @@ impl Action {
 pub struct Strategy {
     pub states: Vec<Vec<Act>>,
     pub initial: i32,
+    /// What the strategy does when an enemy first starts it (`TaiStrategy::start` overrides).
+    pub on_start: Option<Arc<dyn Fn(&mut Teki) + Send + Sync>>,
 }
 
 impl Strategy {
     pub fn new(count: usize, initial: i32) -> Self {
-        Strategy { states: vec![Vec::new(); count], initial }
+        Strategy { states: vec![Vec::new(); count], initial, on_start: None }
     }
     pub fn set(&mut self, state: i32, actions: Vec<Act>) {
         self.states[state as usize] = actions;
@@ -85,6 +87,9 @@ impl Strategy {
     pub fn start(&self, t: &mut Teki) {
         t.state = self.initial;
         t.state_ready = true;
+        if let Some(f) = &self.on_start {
+            f(t);
+        }
     }
 
     fn enter(&self, t: &mut Teki, w: &mut World) {

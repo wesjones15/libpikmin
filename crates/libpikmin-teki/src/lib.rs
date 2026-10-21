@@ -11,6 +11,7 @@ pub mod bulborb;
 pub mod object;
 pub mod effects;
 pub mod info;
+pub mod mizinko;
 pub mod tai;
 
 use std::sync::Arc;
@@ -163,6 +164,7 @@ fn strategy_for(info: &TekiInfo) -> Option<Strategy> {
         DWARF | DWARF_ORANGE => bulborb::chappy(info),
         SPOTTY | SPOTTY_ORANGE => bulborb::swallow(info),
         WATER_DUMPLE => bulborb::chappy(info),
+        HONEYWISP => mizinko::honeywisp(info),
         _ => return None,
     })
 }
