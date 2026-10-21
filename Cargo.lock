@@ -522,6 +522,16 @@ dependencies = [
  "libpikmin",
  "libpikmin-assets",
  "libpikmin-audio",
+ "libpikmin-teki",
+]
+
+[[package]]
+name = "libpikmin-teki"
+version = "0.1.0"
+dependencies = [
+ "glam 0.30.10",
+ "libpikmin",
+ "libpikmin-assets",
 ]
 
 [[package]]
