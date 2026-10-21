@@ -15,6 +15,8 @@ pub mod info;
 pub mod mizinko;
 pub mod otimoti;
 pub mod tai;
+pub mod tank;
+pub mod yai;
 
 use std::sync::Arc;
 
@@ -121,7 +123,7 @@ impl Tekis {
         out.clear();
         for t in self.list.iter().filter(|t| t.alive()) {
             let h = (t.info.hi.y - t.info.lo.y).max(1.0);
-            let r = t.info.collision_radius.max(h * 0.4);
+            let r = t.coll_radius.max(h * 0.4);
             let part = CreaturePart { centre: t.pos + Vec3::Y * (h * 0.4), radius: r, stickable: true };
             out.push(t.creature, t.pos, t.yaw, true, t.flying, &[part]);
         }
@@ -170,6 +172,7 @@ fn strategy_for(info: &TekiInfo) -> Option<Strategy> {
         HONEYWISP => mizinko::honeywisp(info),
         BREADBUG => collec::breadbug(info),
         WOLLYWOG | WOLLYWOG_YELLOW => otimoti::wollywog(info),
+        FIERY_BLOWHOG => tank::tank(info),
         _ => return None,
     })
 }
@@ -189,7 +192,9 @@ fn step(t: &mut Teki, strategy: &Strategy, w: &mut World, events: &mut Vec<(Teki
     // doAnimation: the speed follows the creature for walking motions.
     let data = t.info.clone();
     if let Some(m) = usize::try_from(t.anim.motion).ok().and_then(|i| data.motion_data.get(i)) {
-        t.anim_speed = if t.option(opt::STOPPING_MOVE) {
+        t.anim_speed = if let Some(s) = t.manual_speed {
+            s
+        } else if t.option(opt::STOPPING_MOVE) {
             t.pre_stop_speed
         } else if m.dynamic_speed {
             let rate = m.speed / 30.0;
@@ -218,6 +223,9 @@ fn step(t: &mut Teki, strategy: &Strategy, w: &mut World, events: &mut Vec<(Teki
     }
 
     strategy.act(t, w);
+    if t.fire.is_some() {
+        yai::burn(t, w);
+    }
     t.anim.clear_keys();
 
     // Movement: along its target velocity, on the ground the host says is there; gravity pulls it down
@@ -240,13 +248,13 @@ fn step(t: &mut Teki, strategy: &Strategy, w: &mut World, events: &mut Vec<(Teki
             strategy.event(t, w, &Event::Ground);
         }
     }
-    let r = t.info.collision_radius;
+    let r = t.coll_radius;
     t.pos = w.host.walls(t.pos + Vec3::Y * r, r) - Vec3::Y * r;
 
     // A pellet in its mouth goes where it goes (the Breadbug).
     if let Some(id) = t.held {
         let size = w.sim.pellet(id).desc.radius;
-        let at = t.pos + t.forward() * (t.info.collision_radius + size * 0.8);
+        let at = t.pos + t.forward() * (t.coll_radius + size * 0.8);
         if !w.sim.hold_pellet(id, at, t.yaw) {
             t.held = None;
         }

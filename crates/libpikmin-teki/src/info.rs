@@ -12,7 +12,8 @@
 use glam::Vec3;
 use libpikmin::pellet_config::{self, PelletConfig};
 use libpikmin_assets::teki::{TekiParams, teki_paths, tpf, tpi};
-use libpikmin_assets::{AnimMgr, AnimSet, Assets, Skeleton};
+use libpikmin_assets::{AnimMgr, AnimSet, Assets, Model, Skeleton};
+use std::sync::Arc;
 
 /// One enemy kind: its files (`TekiMgr::typeNames`), how many int parameters its file has (`TPI_COUNT`
 /// plus the kind's own, e.g. `KINOKOPI_COUNT`), its corpse's config id (`TekiMgr::typeIds`), the first
@@ -175,6 +176,10 @@ pub struct TekiInfo {
     pub motions: [TekiMotion; slot::COUNT],
     /// Every `.key` motion, by AnimMgr index.
     pub motion_data: Vec<MotionData>,
+    /// The model and animations, for where its parts are in a motion (`CollInfo::getSphere`).
+    pub shape: Arc<Model>,
+    pub skeleton: Arc<Skeleton>,
+    pub anims: Arc<AnimSet>,
     /// The kind's `TPF_*` / `TPI_*` parameters by index, for the strategies' own.
     pub floats: Vec<f32>,
     pub ints: Vec<i32>,
@@ -270,6 +275,9 @@ impl TekiInfo {
             hi: hi * scale,
             motions,
             motion_data,
+            skeleton: Arc::new(skel),
+            shape: Arc::new(model),
+            anims: Arc::new(set),
             floats: p.floats.clone(),
             ints: p.ints.clone(),
         })

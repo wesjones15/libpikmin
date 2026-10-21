@@ -77,6 +77,8 @@ pub enum Out {
     Dying { teki: TekiId },
     /// `BTeki::sendMessage`: sleepers within `range` of `pos` wake up (`TekiEventType::WakeUpCall`).
     Message { from: TekiId, pos: Vec3, range: f32 },
+    /// An effect pointing along `dir` (a flame from a mouth).
+    EffectDir { id: usize, pos: Vec3, dir: Vec3 },
     /// A shake of the camera/rumble (`cameraMgr->startVibrationEvent`).
     Shake { pos: Vec3, strength: f32 },
 }
@@ -227,6 +229,27 @@ pub struct Teki {
     pub ground_y: Option<f32>,
     /// Gravity, units a second squared (`AICONST.mGravity`).
     pub gravity: f32,
+    /// `getStatus`, `getFrameCounter`, `getTableIndex` and `getSpeed` of the Yamashita enemies.
+    pub status: i32,
+    pub counter: f32,
+    pub index: i32,
+    pub speed: f32,
+    /// A flame it is breathing: where from, which way, and for how long yet.
+    pub fire: Option<Fire>,
+    /// The collision circle (`mCollisionRadius`), which a strategy may widen.
+    pub coll_radius: f32,
+    /// An animation speed a strategy forces (`setManualAnimation`).
+    pub manual_speed: Option<f32>,
+}
+
+/// A flame stream (`CylinderTypeCallBack`): a cylinder from the mouth, `length` long and `radius` wide.
+#[derive(Debug, Clone, Copy)]
+pub struct Fire {
+    pub from: Vec3,
+    pub dir: Vec3,
+    pub length: f32,
+    pub radius: f32,
+    pub damage: f32,
 }
 
 /// A bobbing flight (`PeveHorizontalSinWaveEvent`): the position advances by `dir` a second while its
@@ -277,6 +300,7 @@ pub fn dist_xz(a: Vec3, b: Vec3) -> f32 {
 impl Teki {
     pub fn new(id: TekiId, info: Arc<TekiInfo>, creature: CreatureId, pos: Vec3, yaw: f32) -> Self {
         let hp = info.life;
+        let coll_radius = info.collision_radius;
         Teki {
             id,
             kind: info.kind,
@@ -325,6 +349,13 @@ impl Teki {
             action_vel: Vec3::ZERO,
             ground_y: None,
             gravity: 550.0,
+            status: 0,
+            counter: 0.0,
+            index: 0,
+            speed: 0.0,
+            fire: None,
+            coll_radius,
+            manual_speed: None,
         }
     }
 
@@ -462,6 +493,17 @@ impl Teki {
         self.flying || self.height() > 0.5
     }
 
+    /// Where the collision sphere `id` ('kuti' the mouth, 'slot', 'cent'...) is now, and its radius
+    /// (`CollInfo::getSphere`): in the motion and frame it is in, scaled, turned to face where it faces.
+    pub fn part(&self, id: &str) -> Option<(Vec3, f32)> {
+        let c = self.info.shape.coll.iter().find(|c| c.id == id)?;
+        let anim = usize::try_from(self.anim.motion).ok().and_then(|m| self.info.anims.get(m)).map(|(_, a)| (a, self.anim.counter.clamp(0.0, a.frames.saturating_sub(1) as f32)));
+        let pose = self.info.skeleton.pose(glam::Mat4::IDENTITY, anim);
+        let local = pose.joints.get(c.joint)?.transform_point3(c.centre) * self.info.scale;
+        let (s, co) = self.yaw.sin_cos();
+        Some((self.pos + Vec3::new(local.x * co + local.z * s, local.y, -local.x * s + local.z * co), c.radius * self.info.scale))
+    }
+
     pub fn territory_distance(&self) -> f32 {
         dist_xz(self.pos, self.nest)
     }
@@ -484,7 +526,7 @@ impl Teki {
 
     /// The sphere distance to a candidate along the ground (`calcCollisionDistance`).
     pub fn collision_distance(&self, c: &Cand) -> f32 {
-        dist_xz(self.pos, c.pos) - c.size - self.info.collision_radius
+        dist_xz(self.pos, c.pos) - c.size - self.coll_radius
     }
 
     /// `BTeki::visibleCreature`.
@@ -622,7 +664,7 @@ impl Teki {
         w.sim
             .pikis()
             .iter()
-            .filter(|p| p.is_alive() && dist_xz(self.pos, p.pos) - p.size - self.info.collision_radius <= range)
+            .filter(|p| p.is_alive() && dist_xz(self.pos, p.pos) - p.size - self.coll_radius <= range)
             .count() as i32
     }
 
@@ -650,7 +692,7 @@ impl Teki {
 
     /// `BTeki::flickLower`: knock away what is close underneath it.
     pub fn flick_lower(&mut self, w: &mut World) {
-        let range = self.f(tpf::LOWER_RANGE) + self.info.collision_radius;
+        let range = self.f(tpf::LOWER_RANGE) + self.coll_radius;
         w.sim.flick_pikis_in_sphere(self.pos, range, self.f(tpf::LOWER_ATTACK_POWER), self.pos);
         for n in w.navis.iter().filter(|n| n.alive && dist_xz(self.pos, n.pos) - n.size <= range) {
             w.out.push(Out::HitNavi { teki: self.id, navi: n.id, damage: self.f(tpf::LOWER_ATTACK_POWER), from: self.pos, knock: self.f(tpf::LOWER_FLICK_POWER) });
@@ -664,7 +706,7 @@ impl Teki {
 
     /// `BTeki::outputHitCenter`: where its attack lands, ahead of it.
     pub fn hit_center(&self) -> Vec3 {
-        self.pos + self.forward() * (self.info.collision_radius + self.f(tpf::ATTACK_RANGE))
+        self.pos + self.forward() * (self.coll_radius + self.f(tpf::ATTACK_RANGE))
     }
 
     /// `BTeki::createDeadEffect`.
@@ -677,7 +719,7 @@ impl Teki {
 
     /// `BTeki::spawnTeki`.
     pub fn spawn_teki(&self, kind: u8, w: &mut World) {
-        let pos = self.pos + self.forward() * (self.info.collision_radius + 10.0);
+        let pos = self.pos + self.forward() * (self.coll_radius + 10.0);
         w.out.push(Out::Spawn { kind, pos, yaw: self.yaw, parent: self.id, velocity: Vec3::ZERO });
     }
 
@@ -698,6 +740,17 @@ impl Teki {
         }
         self.stored_damage += amount;
         self.flash = 0.08;
+    }
+
+    /// `BTeki::moveTowardPriorityFaceDir`: walks at `target` while turning to it; the straighter it faces,
+    /// the faster it goes.
+    pub fn move_toward_face_priority(&mut self, target: Vec3, speed: f32, dt: f32) {
+        let a = self.calc_target_direction(target);
+        self.target_angle = a;
+        let turn = self.f(tpf::TURN_VELOCITY);
+        self.turn_toward(a, turn, dt);
+        let align = (self.calc_target_angle(target)).cos().max(0.0);
+        self.target_vel = self.forward() * speed * align;
     }
 
     /// `BTeki::makeDamaged`.

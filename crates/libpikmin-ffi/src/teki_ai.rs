@@ -279,6 +279,7 @@ pub unsafe extern "C" fn pik_tekis_outs(t: *const PikTekis, out: *mut PikTekiOut
             Out::Shake { pos, strength } => (r.kind, r.pos, r.x) = (7, (*pos).into(), *strength),
             Out::SpawnPellets { pos, number, color, count } => (r.kind, r.pos, r.a, r.y, r.b) = (8, (*pos).into(), *number, *color as f32, *count),
             Out::SpawnNectar { pos, count } => (r.kind, r.pos, r.b) = (9, (*pos).into(), *count),
+            Out::EffectDir { id, pos, dir } => (r.kind, r.a, r.pos, r.vel) = (10, *id as u32, (*pos).into(), (*dir).into()),
             Out::TableSound { .. } | Out::Message { .. } => continue,
         }
         // SAFETY: `i < max`.
