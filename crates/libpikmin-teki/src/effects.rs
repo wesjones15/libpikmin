@@ -9,6 +9,9 @@ pub const COLLEC_HM_A: usize = 97;
 pub const COLLEC_HM_B: usize = 98;
 
 pub const BUBBLES: usize = 15;
+pub const MIURIN_ATTACK: usize = 76;
+pub const MIURIN_A01: usize = 77;
+pub const MIURIN_A02: usize = 78;
 pub const GROW_PELLET_A1: usize = 70;
 pub const GROW_PELLET_A2: usize = 71;
 pub const GROW_PELLET_B: usize = 72;

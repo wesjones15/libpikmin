@@ -18,6 +18,7 @@ pub mod info;
 pub mod kabekui;
 pub mod kinoko;
 pub mod mar;
+pub mod miurin;
 pub mod mizinko;
 pub mod napkid;
 pub mod otama;
@@ -208,6 +209,7 @@ fn strategy_for(info: &TekiInfo) -> Option<Strategy> {
         ROCPE => shell::rocpe(info),
         PELLET_POSY => palm::pellet_posy(info),
         PUFFY_BLOWHOG => mar::puffy_blowhog(info),
+        MAMUTA => miurin::mamuta(info),
         SHEARGRUB_F => kabekui::female(info),
         SHEARGRUB_M => kabekui::male(info),
         SHEARWIG => kabekui::shearwig(info),
