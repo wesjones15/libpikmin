@@ -1,0 +1,10 @@
+[package]
+name = "libpikmin-teki"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+libpikmin.workspace = true
+libpikmin-assets.workspace = true
+glam.workspace = true

@@ -45,20 +45,36 @@ pub mod tpf {
     pub const ATTACK_HIT_RANGE: usize = 11;
     pub const ATTACK_POWER: usize = 12;
     pub const ATTACK_WAIT_PERIOD: usize = 13;
+    pub const UNGUARDED_PERIOD: usize = 14;
     pub const DANGER_TERRITORY_RANGE: usize = 15;
     pub const SAFETY_TERRITORY_RANGE: usize = 16;
     pub const LIFE_GAUGE_OFFSET: usize = 17;
+    pub const SHADOW_SIZE: usize = 18;
+    pub const RIPPLE_SCALE: usize = 19;
     pub const CORPSE_SIZE: usize = 20;
     pub const CORPSE_HEIGHT: usize = 21;
+    pub const SPAWN_DISTANCE: usize = 22;
+    pub const SPAWN_HEIGHT: usize = 23;
+    pub const SPAWN_VELOCITY: usize = 24;
+    pub const LIFE_PERIOD: usize = 25;
     pub const MESSAGE_RANGE: usize = 26;
     pub const WARN_PERIOD: usize = 27;
     pub const VISIBLE_HEIGHT: usize = 28;
     pub const FLIGHT_HEIGHT: usize = 29;
+    pub const DAMAGE_MOTION_PERIOD: usize = 30;
+    pub const DAMAGE_MOTION_AMPLITUDE: usize = 31;
     pub const FLICK_PROBABILITY: usize = 32;
     pub const UPPER_FLICK_POWER: usize = 33;
     pub const LOWER_FLICK_POWER: usize = 34;
+    pub const UPPER_ATTACK_POWER: usize = 35;
+    pub const LOWER_ATTACK_POWER: usize = 36;
     pub const LIFE_RECOVER_RATE: usize = 37;
     pub const TRACE_ANGLE: usize = 38;
+    pub const SPAWN_PELLET_VELOCITY_HORIZ: usize = 39;
+    pub const SPAWN_PELLET_VELOCITY_VERT: usize = 40;
+    pub const CORPSE_VELOCITY_HORIZ: usize = 41;
+    pub const CORPSE_VELOCITY_VERT: usize = 42;
+    pub const BOMB_DAMAGE_RATE: usize = 43;
     pub const COLLISION_RADIUS: usize = 44;
     pub const LOWER_RANGE: usize = 45;
     /// First teki-specific float (`SWALLOWPF_*`, `CHAPPYPF_*`, ...).
@@ -68,7 +84,14 @@ pub mod tpf {
 /// Int parameter indices (`TPI_*`).
 pub mod tpi {
     pub const CORPSE_TYPE: usize = 0;
+    pub const SHADOW_TYPE: usize = 1;
+    pub const CULLING_TYPE: usize = 2;
+    pub const SPAWN_TYPE: usize = 3;
+    pub const SPAWN_COUNT: usize = 4;
+    pub const ANIMATION_TYPE: usize = 5;
     pub const CARCASS_SIZE: usize = 6;
+    pub const MODEL_TYPE: usize = 7;
+    pub const LIGHT_TYPE: usize = 8;
     pub const SWALLOW_COUNT: usize = 9;
     pub const FLICK_PIKI_COUNT1: usize = 10;
     pub const FLICK_PIKI_COUNT2: usize = 11;
@@ -77,6 +100,8 @@ pub mod tpi {
     pub const FLICK_DAMAGE_COUNT2: usize = 14;
     pub const FLICK_DAMAGE_COUNT3: usize = 15;
     pub const FLICK_DAMAGE_COUNT4: usize = 16;
+    pub const SPAWN_PELLET_SCALE_OFF: usize = 17;
+    pub const SPAWN_PELLET_FORWARD: usize = 18;
     /// First teki-specific int.
     pub const SPECIFIC: usize = 20;
 }

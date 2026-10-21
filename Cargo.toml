@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/libpikmin", "crates/libpikmin-assets", "crates/libpikmin-audio", "crates/libpikmin-present", "crates/libpikmin-ffi", "crates/viewer"]
-default-members = ["crates/libpikmin", "crates/libpikmin-assets", "crates/libpikmin-audio", "crates/libpikmin-present", "crates/libpikmin-ffi"]
+members = ["crates/libpikmin", "crates/libpikmin-teki", "crates/libpikmin-assets", "crates/libpikmin-audio", "crates/libpikmin-present", "crates/libpikmin-ffi", "crates/viewer"]
+default-members = ["crates/libpikmin", "crates/libpikmin-teki", "crates/libpikmin-teki", "crates/libpikmin-assets", "crates/libpikmin-audio", "crates/libpikmin-present", "crates/libpikmin-ffi"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,4 +13,5 @@ libpikmin = { path = "crates/libpikmin" }
 libpikmin-assets = { path = "crates/libpikmin-assets" }
 libpikmin-audio = { path = "crates/libpikmin-audio" }
 libpikmin-present = { path = "crates/libpikmin-present" }
+libpikmin-teki = { path = "crates/libpikmin-teki" }
 glam = "0.30"

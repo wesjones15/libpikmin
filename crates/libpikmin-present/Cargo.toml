@@ -8,5 +8,6 @@ publish.workspace = true
 libpikmin.workspace = true
 libpikmin-assets.workspace = true
 libpikmin-audio.workspace = true
+libpikmin-teki.workspace = true
 glam.workspace = true
 cpal = "0.15"
