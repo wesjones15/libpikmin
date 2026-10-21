@@ -49,6 +49,8 @@ pub struct Tekis {
     rng: Rng,
     /// Events the enemies raised for each other (a cry waking sleepers), delivered next tick.
     pending: Vec<(TekiId, Event)>,
+    /// Players buried now: the host sets them before each update.
+    pub buried: Vec<u32>,
 }
 
 impl Tekis {
@@ -67,7 +69,7 @@ impl Tekis {
             infos.push(info);
             strategies.push(strategy);
         }
-        Tekis { infos, strategies, list: Vec::new(), next_id: 0, rng: Rng(0x9E37_79B9_7F4A_7C15), pending: Vec::new() }
+        Tekis { infos, strategies, list: Vec::new(), next_id: 0, rng: Rng(0x9E37_79B9_7F4A_7C15), pending: Vec::new(), buried: Vec::new() }
     }
 
     pub fn seed(&mut self, seed: u64) {
@@ -187,13 +189,14 @@ impl Tekis {
     /// One 30 Hz tick: animation, then each strategy, then movement. What they did is returned.
     pub fn update(&mut self, sim: &mut Sim, host: &dyn Host, navis: &[Navi], dt: f32) -> Vec<Out> {
         let mut out = Vec::new();
+        let buried = self.buried.clone();
         let others: Vec<Other> =
             self.list.iter().map(|t| Other { id: t.id, kind: t.kind, state: t.state, pos: t.pos, alive: t.alive(), holding: t.held }).collect();
         let mut events: Vec<(TekiId, Event)> = std::mem::take(&mut self.pending);
         for i in 0..self.list.len() {
             let Some(strategy) = self.strategies[self.list[i].kind as usize].clone() else { continue };
             let t = &mut self.list[i];
-            let mut w = World { sim, host, navis, others: &others, out: &mut out, rng: &mut self.rng, dt };
+            let mut w = World { sim, host, navis, buried: &buried, others: &others, out: &mut out, rng: &mut self.rng, dt };
             t.gravity = w.sim.params().ai.gravity;
             step(t, &strategy, &mut w, &mut events);
         }

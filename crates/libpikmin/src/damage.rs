@@ -263,6 +263,31 @@ impl Sim {
         n
     }
 
+    /// `InteractBury::actPiki` / `PikiBuryState::exec`: every Pikmin within `radius` of `centre` is pushed into the ground
+    /// and comes back up as a sprout, thrown a little way (220 sideways, 540 up) and landing to take root; with
+    /// `make_flower` a leaf or bud is a flower. Returns where each was buried.
+    pub fn bury_pikis_in_sphere(&mut self, centre: Vec3, radius: f32, make_flower: bool) -> Vec<Vec3> {
+        let mut at = Vec::new();
+        for id in self.ids_in_sphere(centre, radius) {
+            let pi = id.0 as usize;
+            if !self.hittable(pi) || matches!(self.pikis[pi].state, PikiState::Pressed { .. }) {
+                continue;
+            }
+            self.leave_current(id);
+            let (color, happa, pos) = {
+                let p = &self.pikis[pi];
+                (p.color, p.happa, p.pos)
+            };
+            self.pikis[pi].state = PikiState::Dead;
+            let angle = self.rng.f32() * std::f32::consts::TAU;
+            let vel = Vec3::new(220.0 * angle.sin(), 540.0, 220.0 * angle.cos());
+            let sprout = self.launch_sprout(color, if make_flower { crate::Happa::Flower } else { happa }, pos, vel);
+            let _ = sprout;
+            at.push(pos);
+        }
+        at
+    }
+
     /// `InteractKill`: dies on the spot (no death animation).
     pub fn kill_piki(&mut self, id: PikiId) {
         let pi = id.0 as usize;

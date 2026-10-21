@@ -27,6 +27,9 @@ const MAX_STICK_PIKI: usize = 20;
 const SHAKE_OFF_HIT_COUNT: usize = 21;
 const RELAXING_FLOWER_NUM: usize = 22;
 
+/// The knock `Out::HitNavi` carries for `InteractBury`.
+pub const BURY: f32 = -2.0;
+
 // TAImiurinStateID
 const DEAD_STATE: i32 = 0;
 const INIT: i32 = 1;
@@ -101,11 +104,24 @@ fn watch_navi(next: i32) -> Act {
             let nuking = nearest_navi(t, w).is_some_and(|n| t.visible(&Cand { target: Target::Navi(n.id), pos: n.pos, size: n.size, sticks_to_me: false, sticking: false, piki: None }) && dist_xz(n.pos, t.pos) < t.f(tpf::SAFETY_TERRITORY_RANGE));
             if t.damage_count > 0.0 || nuking {
                 t.targets[0] = nearest_navi(t, w).map(|n| Target::Navi(n.id));
+                if any_buried(w) {
+                    t.next_override = Some(SHAKE);
+                }
                 return true;
             }
             false
         })
         .build()
+}
+
+/// `Navi::isBuried`.
+fn any_buried(w: &World) -> bool {
+    w.navis.iter().any(|n| n.alive && w.buried.contains(&n.id))
+}
+
+/// `TAIAcheckSatisfyMiurin`: a player is buried: it has had its fill.
+fn check_satisfy(next: i32) -> Act {
+    Action::new(next).on_act(|_, w| any_buried(w)).build()
 }
 
 /// `TAIAcheckNaviMiurin`: now and then, a player in the territory draws its eye.
@@ -231,10 +247,18 @@ fn punch(next: i32, left_motion: usize, right_motion: usize, straight_motion: us
         let at = Vec3::new(p.x, t.ground_y.unwrap_or(p.y), p.z);
         w.out.push(Out::Effect { id: effects::SMOKE_RING_M, pos: at });
         w.out.push(Out::Effect { id: effects::MIURIN_ATTACK, pos: p });
+        // `InteractBury`: a player is buried to the neck (a knock of -2 tells the host), Pikmin to sprouts.
         for n in w.navis.iter().filter(|n| n.alive && p.distance(n.pos) < r) {
-            w.out.push(Out::HitNavi { teki: t.id, navi: n.id, damage: 20.0, from: p, knock: 0.0 });
+            w.out.push(Out::HitNavi { teki: t.id, navi: n.id, damage: 20.0, from: p, knock: BURY });
+            for id in [effects::DIRT_CLOUD, effects::DIRT_SPRAY] {
+                w.out.push(Out::Effect { id, pos: Vec3::new(n.pos.x, t.ground_y.unwrap_or(n.pos.y), n.pos.z) });
+            }
         }
-        w.sim.crush_pikis_in_sphere(p, r, 10.0);
+        for at in w.sim.bury_pikis_in_sphere(p, r, true) {
+            for id in [effects::DIRT_CLOUD, effects::DIRT_SPRAY] {
+                w.out.push(Out::Effect { id, pos: Vec3::new(at.x, t.ground_y.unwrap_or(at.y), at.z) });
+            }
+        }
         w.out.push(Out::Sound { name: "SE_MIURIN_PUNCH", pos: p });
         w.out.push(Out::Shake { pos: t.pos, strength: 3.0 });
     }
@@ -283,7 +307,12 @@ fn punch(next: i32, left_motion: usize, right_motion: usize, straight_motion: us
 
 /// `TAIAattackableTargetMiurin`: in range and angle of the target.
 fn attackable(next: i32) -> Act {
-    attackable_target(next, true)
+    let inner = attackable_target(next, true);
+    Action::new(next)
+        .on_act(move |t, w| {
+            inner.act(t, w) && !t.target(0, w).is_some_and(|c| matches!(c.target, Target::Navi(id) if w.buried.contains(&id)))
+        })
+        .build()
 }
 
 /// `TAIAoutsideTerritoryMiurin`: it, and its target, are outside.
@@ -453,8 +482,8 @@ pub fn mamuta(_info: &TekiInfo) -> Strategy {
     let watch = watch_navi(ANGRY);
     let sticking = sticking(SHAKE);
     let flick_check = flick_check_hits(SHAKE);
-    let satisfied1 = Action::new(IDLE).on_act(|_, _| false).build();
-    let satisfied2 = Action::new(SATISFIED).on_act(|_, _| false).build();
+    let satisfied1 = check_satisfy(IDLE);
+    let satisfied2 = check_satisfy(SATISFIED);
     let attackable1 = attackable(POSTURE);
     let attackable3 = attackable(POSTURE_2);
 
@@ -535,7 +564,7 @@ pub fn mamuta(_info: &TekiInfo) -> Strategy {
         dust_big.clone(),
         damage.clone(),
         dead_check.clone(),
-        punch(AFTER_PUNCH, TYPE3, TYPE1, TYPE2),
+        punch(AFTER_PUNCH, TYPE3, TYPE2, TYPE1),
         stop.clone(),
     ]);
     s.set(AFTER_PUNCH, vec![attackable(PUNCH), no_reaction(CALM_CHECK)]);
@@ -578,7 +607,7 @@ pub fn mamuta(_info: &TekiInfo) -> Strategy {
         dust_big.clone(),
         damage.clone(),
         dead_check.clone(),
-        punch(AFTER_PUNCH_2, TYPE3, TYPE1, TYPE2),
+        punch(AFTER_PUNCH_2, TYPE3, TYPE2, TYPE1),
         stop.clone(),
     ]);
     s.set(AFTER_PUNCH_2, vec![attackable(PUNCH_2), no_reaction(CALM_CHECK_2)]);
@@ -587,7 +616,7 @@ pub fn mamuta(_info: &TekiInfo) -> Strategy {
         dust_big.clone(),
         damage.clone(),
         dead_check.clone(),
-        Action::new(SATISFIED).on_act(|_, _| false).build(),
+        satisfied2,
         check_flowers(SATISFIED),
         reserve_motion(IDLE, TYPE4),
         stop.clone(),

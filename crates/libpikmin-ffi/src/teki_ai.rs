@@ -28,7 +28,9 @@ pub struct PikNavi {
     /// Body radius, sim units.
     pub size: f32,
     pub alive: u8,
-    pub _pad: [u8; 3],
+    /// 1 while the player is buried (a Mamuta's punch): the enemies see `Navi::isBuried`.
+    pub buried: u8,
+    pub _pad: [u8; 2],
 }
 
 /// An enemy as the host moves and draws it.
@@ -281,6 +283,12 @@ pub unsafe extern "C" fn pik_tekis_update(t: *mut PikTekis, sim: *mut PikSim, na
             .iter()
             .map(|n| Navi { id: n.id, pos: Vec3::from(n.pos), size: n.size, alive: n.alive != 0 })
             .collect()
+    };
+    // SAFETY: as documented.
+    t.tekis.buried = if navis.is_null() || count == 0 {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(navis, count as usize) }.iter().filter(|n| n.buried != 0).map(|n| n.id).collect()
     };
     let done = catch_unwind(AssertUnwindSafe(|| {
         t.outs.clear();

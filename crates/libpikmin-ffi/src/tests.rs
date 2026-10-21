@@ -832,7 +832,7 @@ fn an_enemy_with_its_own_ai_runs_through_the_abi() {
         let id = pik_tekis_spawn(t, 0, 4242, &at, 0.0);
         assert!(id > 0);
         pik_tekis_damage(t, id as u32, 5.0, -1);
-        let navi = PikNavi { id: 1, pos: PikVec3 { x: 0.0, y: 0.0, z: 60.0 }, size: 10.0, alive: 1, _pad: [0; 3] };
+        let navi = PikNavi { id: 1, pos: PikVec3 { x: 0.0, y: 0.0, z: 60.0 }, size: 10.0, alive: 1, buried: 0, _pad: [0; 2] };
         for _ in 0..30 {
             pik_tekis_update(t, sim, &navi, 1, 1);
         }

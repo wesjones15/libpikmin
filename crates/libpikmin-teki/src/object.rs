@@ -125,6 +125,8 @@ pub struct World<'a> {
     pub sim: &'a mut Sim,
     pub host: &'a dyn Host,
     pub navis: &'a [Navi],
+    /// The players who are buried right now (`Navi::isBuried`), by id.
+    pub buried: &'a [u32],
     /// Other enemies' kind, state and place (`tekiMgr->findClosest` conditions).
     pub others: &'a [Other],
     pub out: &'a mut Vec<Out>,

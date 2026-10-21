@@ -402,6 +402,16 @@ impl Sim {
         }
     }
 
+    /// A sprout thrown from where a Pikmin was buried (`PikiBuryState`): it flies, lands and takes root at the flower
+    /// stage it had.
+    pub(crate) fn launch_sprout(&mut self, color: PikiColor, happa: Happa, pos: Vec3, vel: Vec3) -> SproutId {
+        let id = self.insert_sprout(color, pos, vel, 0.0, SproutState::Flying, None);
+        if let Some(Some(s)) = self.sprouts.get_mut(id.0 as usize) {
+            s.happa = happa;
+        }
+        id
+    }
+
     /// Plants a ready-to-pluck sprout directly (handy for hosts and tests).
     pub fn plant_sprout(&mut self, color: PikiColor, pos: Vec3) -> SproutId {
         let timer = self.sprout_stage.unwrap_or(self.params.piki.grow_up_time);
