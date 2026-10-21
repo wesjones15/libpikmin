@@ -61,6 +61,7 @@ pub fn keyed(kind: u8, index: u8) -> Vec<usize> {
     use crate::info::*;
     match (kind, index) {
         (SMOKY_PROGG, 0..=2) => vec![SMOKE_RING_M],
+        (CLAMCLAMP, 0) => vec![BIG_DUST_RING],
         (PELLET_POSY, 0) => vec![GROW_PELLET_A1],
         (PELLET_POSY, 1) => vec![GROW_PELLET_A2],
         (PELLET_POSY, 2) => vec![GROW_PELLET_B, GROW_PELLET_C],

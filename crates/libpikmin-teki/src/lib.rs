@@ -23,6 +23,7 @@ pub mod napkid;
 pub mod otama;
 pub mod palm;
 pub mod otimoti;
+pub mod shell;
 pub mod tai;
 pub mod tank;
 pub mod yai;
@@ -202,6 +203,9 @@ fn strategy_for(info: &TekiInfo) -> Option<Strategy> {
         SMOKY_PROGG => dororo::smoky_progg(info),
         GIANT_EGG => dororo::giant_egg(info),
         FIRE_GEYSER => hiba::fire_geyser(info),
+        CLAMCLAMP => shell::clamclamp(info),
+        PEARL => shell::pearl(info),
+        ROCPE => shell::rocpe(info),
         PELLET_POSY => palm::pellet_posy(info),
         PUFFY_BLOWHOG => mar::puffy_blowhog(info),
         SHEARGRUB_F => kabekui::female(info),
