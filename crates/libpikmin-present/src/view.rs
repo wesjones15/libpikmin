@@ -500,6 +500,8 @@ pub struct View {
     healing_active: HashSet<u32>,
     /// Onions whose beacon rings are on (`GoalItem::setSpotActive`).
     spots: HashSet<u32>,
+    /// Ships whose goal spot rings are on (`UfoItem::setSpotActive`).
+    ship_spots: HashSet<u32>,
     /// Onions a pellet just reached, for their `GoalEffect`.
     arrivals: Vec<libpikmin::onion::OnionId>,
     /// Growth and deflowering seen in events, for their effects once the sim's positions are
@@ -696,6 +698,7 @@ impl View {
             healing: HashMap::new(),
             healing_active: HashSet::new(),
             spots: HashSet::new(),
+            ship_spots: HashSet::new(),
             arrivals: Vec::new(),
             grown: Vec::new(),
             sparkled: HashMap::new(),
@@ -1151,6 +1154,23 @@ impl View {
                     }
                 }
                 flight.trouble = wrecked;
+                // `UfoItem::setSpotActive`: the rings and sparkles on the goal spot in front of the ship, which is
+                // where it receives its parts, for as long as it stands landed.
+                let spot_key = (10u64 << 48) | ((o.id.0 as u64) << 8);
+                let goal = o.goal_pos();
+                let lit = o.grounded() && o.flight_motion.is_none() && !animator.landing() && !animator.taking_off();
+                if let Some(e) = self.effects.as_mut() {
+                    if lit && self.ship_spots.insert(o.id.0) {
+                        e.attach(spot_key, fx_defs::NAVI_RINGS, goal);
+                        e.attach(spot_key | 1, fx_defs::NAVI_SPARKLE, goal);
+                    } else if !lit && self.ship_spots.remove(&o.id.0) {
+                        e.detach_where(|k| k & !255 == spot_key);
+                    }
+                    if lit {
+                        e.move_attached(spot_key, goal);
+                        e.move_attached(spot_key | 1, goal);
+                    }
+                }
                 for cue in cues {
                     match cue {
                         ShipCue::Sound(name) => self.ship_sounds.push((o.id, name, true)),
