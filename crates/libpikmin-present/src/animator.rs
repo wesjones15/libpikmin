@@ -202,8 +202,17 @@ pub fn piki_look(params: &Params, p: &Piki) -> Option<PikiLook> {
         },
         PikiState::Carry(c) => match c.phase {
             libpikmin::carry::CarryPhase::Lift { frame, .. } => (Motion::PickLoop, Clock::Sim(frame)),
-            // `ActTransport::doLift`: PICK from frame 11, looping while it moves.
-            libpikmin::carry::CarryPhase::Move => (Motion::Pick, Clock::LoopFrom(30.0, 11.0)),
+            // `ActTransport::doLift`: PICK from frame 11, looping while it moves. Host extension: at the
+            // cadence the walk cycle has at the speed they really go (the original plays it at a fixed 30
+            // frames a second, which at a carrier's slow pace left the feet behind the ground).
+            libpikmin::carry::CarryPhase::Move => {
+                let speed = p.vel.with_y(0.0).length();
+                let ramp = |lo: f32, hi: f32, a: f32, b: f32| a + (b - a) * ((speed - lo) / (hi - lo)).clamp(0.0, 1.0);
+                let fps = if speed < th[1] { 30.0 }
+                    else if speed < th[2] { ramp(th[1], th[2], rate[0], rate[1]) }
+                    else { ramp(th[2], th[3], rate[2], rate[3]) };
+                (Motion::Pick, Clock::LoopFrom(fps, 11.0))
+            }
             _ => walk,
         },
         PikiState::Pressed { .. } => {
