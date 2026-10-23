@@ -134,6 +134,10 @@ pub struct Captain {
     pub throw_color: Option<PikiColor>,
     /// Optional host lock-on. Vanilla throws remain unchanged when absent.
     pub lock_target: Option<crate::host::CreatureId>,
+    /// Host extension: locked onto something to carry (a pellet, a corpse, a ship part) instead of an
+    /// enemy. Throws go to it the way they go to a creature, and the Pikmin start carrying it where they land.
+    /// A creature lock takes precedence while both are set.
+    pub lock_pellet: Option<crate::carry::PelletId>,
     /// Multiplies his run speed: the host's own speed stat over its base (items, buffs).
     /// 1 in Pikmin.
     pub speed_scale: f32,
@@ -230,6 +234,7 @@ impl Captain {
             down: false,
             throw_color: None,
             lock_target: None,
+            lock_pellet: None,
             speed_scale: 1.0,
             reach_scale: 1.0,
             attack_rate: 1.0,
@@ -343,6 +348,18 @@ impl Sim {
 
     pub fn set_lock_target(&mut self, captain: CaptainId, target: Option<crate::host::CreatureId>) {
         if let Some(c) = self.captains.get_mut(captain.0 as usize) { c.lock_target = target; }
+    }
+
+    /// Locks onto a pellet, corpse or ship part (see [`Captain::lock_pellet`]); `None` lets go. It lapses by
+    /// itself once the thing is delivered or gone.
+    pub fn set_lock_pellet(&mut self, captain: CaptainId, pellet: Option<crate::carry::PelletId>) {
+        if let Some(c) = self.captains.get_mut(captain.0 as usize) { c.lock_pellet = pellet; }
+    }
+
+    /// Whether he is locked onto an enemy or onto something to carry.
+    fn locked_on(&self, ci: usize) -> bool {
+        let c = &self.captains[ci];
+        c.lock_target.is_some() || c.lock_view.is_some() && c.lock_pellet.is_some()
     }
     pub(crate) fn update_captain(&mut self, ci: usize, host: &mut dyn Host, dt: f32) {
         let input = self.captains[ci].input;
@@ -570,6 +587,19 @@ impl Sim {
             let eye = c.pos + Vec3::Y * LOCK_EYE_HEIGHT;
             let pos = lock_marker(self.creatures.parts_of(target), eye);
             c.lock_view = Some(LockView { pos, eye });
+        } else if c.lock_target.is_none()
+            && let Some(id) = c.lock_pellet
+            && let Some(pel) = self.pellets.iter().find(|p| p.id == id).filter(|p| {
+                matches!(p.state, crate::carry::PelletState::Idle | crate::carry::PelletState::Carried { .. })
+            })
+        {
+            // The middle of the thing, with the cursor stood up in front of it like an enemy's.
+            let middle = pel.pos + Vec3::Y * pel.desc.height * 0.5;
+            let body = crate::CreaturePart { centre: middle, radius: pel.desc.radius.max(pel.desc.height * 0.5), stickable: true };
+            c.cursor_world = middle;
+            c.cursor = Vec3::new(middle.x - c.pos.x, 0., middle.z - c.pos.z);
+            let eye = c.pos + Vec3::Y * LOCK_EYE_HEIGHT;
+            c.lock_view = Some(LockView { pos: lock_marker(&[body], eye), eye });
         }
     }
 
@@ -897,12 +927,12 @@ impl Sim {
     fn start_throw_wait(&mut self, ci: usize) -> bool {
         // Host extension: locked onto an enemy, the nearest Pikmin goes whatever colour is picked,
         // and the pick is left as it was.
-        let want = if self.captains[ci].lock_target.is_some() { None } else { self.captains[ci].throw_color };
+        let locked = self.locked_on(ci);
+        let want = if locked { None } else { self.captains[ci].throw_color };
         let grab = self.params.navi.pluck_grab_range;
         let nearest = want.is_none();
         // Locked on, any Pikmin of his squad is called, however far (it runs to the captain); Any alone 120;
         // a colour 80.
-        let locked = self.captains[ci].lock_target.is_some();
         let reach = if locked { f32::INFINITY } else if nearest { 120.0 } else { 80.0 };
         let c = &self.captains[ci];
         let fwd = dir_of(c.face);
@@ -1071,7 +1101,9 @@ impl Sim {
         p.state = PikiState::Flying { ground_frames: 0 };
         // A lock-on is followed; without one, a host that asks for it has the throw home on
         // the cursor point (which also makes up for the captain's own speed).
-        let (creature, point) = (c.lock_target, self.cursor_homing.then_some(c.cursor_world));
+        // A thing to carry is a point: where it lies when thrown, or where it is carried to in the flight.
+        let on_pellet = c.lock_pellet.is_some() && c.lock_view.is_some();
+        let (creature, point) = (c.lock_target, (self.cursor_homing || on_pellet).then_some(c.cursor_world));
         p.guided_throw = (creature.is_some() || point.is_some()).then(|| crate::piki::GuidedThrow {
             creature,
             point: point.or(creature.map(|_| c.cursor_world)),

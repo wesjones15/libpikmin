@@ -31,7 +31,7 @@ use crate::strike::Strike;
 use crate::{CaptainId, PikiId};
 
 /// Bumped when the encoding changes.
-pub const SNAPSHOT_VERSION: u8 = 5;
+pub const SNAPSHOT_VERSION: u8 = 6;
 
 // Far more than any real sim has; a corrupt length can't make decoding allocate wildly.
 const MAX_ENTITIES: usize = 4096;
@@ -952,6 +952,7 @@ fn w_captain(w: &mut Writer, c: &Captain) {
     w.bool(c.down);
     w.opt(c.throw_color.as_ref(), |w, k| w_color(w, *k));
     w.opt(c.lock_target.as_ref(), |w, t| w.u64(*t));
+    w.opt(c.lock_pellet.as_ref(), |w, t| w.u32(t.0));
     w.f32(c.speed_scale);
     w.f32(c.reach_scale);
     w.f32(c.attack_rate);
@@ -1025,6 +1026,7 @@ fn r_captain(r: &mut Reader) -> Option<Captain> {
     let down = r.bool()?;
     let throw_color = r.opt(r_color)?;
     let lock_target = r.opt(|r| r.u64())?;
+    let lock_pellet = r.opt(|r| r.u32().map(crate::carry::PelletId))?;
     let speed_scale = r.f32()?;
     let reach_scale = r.f32()?;
     let attack_rate = r.f32()?;
@@ -1074,6 +1076,7 @@ fn r_captain(r: &mut Reader) -> Option<Captain> {
         down,
         throw_color,
         lock_target,
+        lock_pellet,
         speed_scale,
         reach_scale,
         attack_rate,

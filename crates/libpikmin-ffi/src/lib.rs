@@ -42,7 +42,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 44;
+pub const PIK_ABI_VERSION: u32 = 45;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
@@ -62,6 +62,16 @@ pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_lock_target(sim: *mut PikSim, captain: u32, target: u64, enabled: u8) {
     unsafe { with(sim, (), |s| s.sim.set_lock_target(CaptainId(captain), (enabled != 0).then_some(target))) }
+}
+
+/// Locks the captain onto a pellet, corpse or ship part (its `PikPellet::id`); `enabled` 0 lets go. Call it
+/// every tick, as `pik_sim_set_lock_target`: the lock lapses once the thing is delivered.
+///
+/// # Safety
+/// `sim` from `pik_sim_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_lock_pellet(sim: *mut PikSim, captain: u32, pellet: u32, enabled: u8) {
+    unsafe { with(sim, (), |s| s.sim.set_lock_pellet(CaptainId(captain), (enabled != 0).then_some(libpikmin::carry::PelletId(pellet)))) }
 }
 
 #[unsafe(no_mangle)]
