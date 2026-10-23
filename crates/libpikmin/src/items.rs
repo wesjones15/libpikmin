@@ -27,6 +27,10 @@ const RECOVERY_COLOURS: [PikiColor; 3] = [PikiColor::Red, PikiColor::Yellow, Pik
 /// How far below every captain, over a void, a Pikmin has to be before it is brought back
 /// (see `Sim::rescue_fallen`): 200 units, about 8 m at the RoR2 host's scale.
 pub const VOID_RESCUE_DROP: f32 = 200.0;
+/// How far below every captain a loose Pikmin has to be to be brought back even with floor
+/// under it (a drop onto far lower ground): 1000 units, about 40 m, the captain's own
+/// "fell too long" distance in the RoR2 host.
+pub const FAR_RESCUE_DROP: f32 = 1000.0;
 /// Seconds a Pikmin whistled off a pellet will not auto-carry that same pellet again, so a squad
 /// called away from a load too heavy for it is not drawn straight back (host extension to
 /// `Sim::set_auto_carry_range`).
@@ -182,29 +186,50 @@ impl Sim {
 
     /// Host extension: a Pikmin that has dropped more than [`VOID_RESCUE_DROP`] below every
     /// captain with no floor under it (a pit the map has nothing in, which the original's
-    /// maps never had) comes back to the nearest captain, set down beside him, unharmed. Only
-    /// those standing about, following, flying or knocked about: carriers, latched and
-    /// Onion-bound Pikmin keep to their jobs. Run every tick; most Pikmin fail the first test.
+    /// maps never had) comes back to the nearest captain, set down beside him, unharmed, as
+    /// the captain himself does. A Pikmin that carries, is latched to an enemy or pressed,
+    /// swallowed, drinking or blooming lets go of that job first (a carried load or an enemy
+    /// that fell with it is not coming back); one in the captain's hand or on an Onion's leg
+    /// is already on its way somewhere safe and stays. Standing, following, flying and
+    /// knocked-about Pikmin also come back from more than [`FAR_RESCUE_DROP`] below every
+    /// captain onto floor, the way a captain's "fell too long" rescue does. Run every tick;
+    /// most Pikmin fail the first test.
     pub(crate) fn rescue_fallen(&mut self, host: &mut dyn Host) {
         if self.captains.is_empty() {
             return;
         }
+        let lowest = self.captains.iter().map(|c| c.pos.y).fold(f32::INFINITY, f32::min);
         for pi in 0..self.pikis.len() {
             let p = &self.pikis[pi];
-            if !matches!(
+            let loose = matches!(
                 p.state,
                 PikiState::Idle
                     | PikiState::Squad { .. }
                     | PikiState::GoHang { .. }
                     | PikiState::Flying { .. }
                     | PikiState::Knocked { .. }
-            ) {
+            );
+            let busy = matches!(
+                p.state,
+                PikiState::Attack(_)
+                    | PikiState::Carry(_)
+                    | PikiState::Pressed { .. }
+                    | PikiState::Swallowed { .. }
+                    | PikiState::Absorb { .. }
+                    | PikiState::GrowUp { .. }
+            );
+            if !(loose || busy) || !(p.pos.y < lowest - VOID_RESCUE_DROP) {
                 continue;
             }
-            let lowest = self.captains.iter().map(|c| c.pos.y).fold(f32::INFINITY, f32::min);
-            if !(p.pos.y < lowest - VOID_RESCUE_DROP) || host.ground_height(p.pos + Vec3::Y * 20.0).is_some() {
+            let over_floor = host.ground_height(p.pos + Vec3::Y * 20.0).is_some();
+            if over_floor && !(loose && p.pos.y < lowest - FAR_RESCUE_DROP) {
                 continue;
             }
+            let id = p.id;
+            if busy {
+                self.leave_current(id);
+            }
+            let p = &self.pikis[pi];
             // The captain it follows, else the nearest.
             let own = p.captain.filter(|c| (c.0 as usize) < self.captains.len());
             let at = own
