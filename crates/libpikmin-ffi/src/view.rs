@@ -306,6 +306,17 @@ pub unsafe extern "C" fn pik_view_set_onion_ground(view: *mut PikView, onion: u3
     }
 }
 
+/// The host has opened or closed a hovering Onion's menu beam.
+/// # Safety
+/// `view` is a live view handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_onion_menu_beam(view: *mut PikView, onion: u32, active: u8) {
+    if let Some(v) = unsafe { view.as_mut() } {
+        if active != 0 { v.view.onion_menu_beams.insert(onion); }
+        else { v.view.onion_menu_beams.remove(&onion); }
+    }
+}
+
 /// # Safety
 /// `view` is a live view handle.
 #[unsafe(no_mangle)]

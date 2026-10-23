@@ -458,6 +458,8 @@ pub struct View {
     parts: Vec<Option<PartView>>,
     ships: HashMap<u32, ShipFlight>,
     pub onion_ground: HashMap<u32, f32>,
+    /// Host-controlled hovering Onion menu beams (pellet suction supplies its own beam).
+    pub onion_menu_beams: HashSet<u32>,
     onion_lift_smoke: HashSet<u32>,
     pub ship_sounds: Vec<(libpikmin::onion::OnionId, &'static str, bool)>,
     pub demo_sounds: Vec<Option<(u16, u16)>>,
@@ -669,6 +671,7 @@ impl View {
             parts,
             ships: HashMap::new(),
             onion_ground: HashMap::new(),
+            onion_menu_beams: HashSet::new(),
             onion_lift_smoke: HashSet::new(),
             ship_sounds: Vec::new(),
             demo_sounds: Vec::new(),
@@ -777,7 +780,7 @@ impl View {
         // PelletGoalState::init uses the Onion beam while an airborne Onion ingests a pellet.
         let ingesting = sim.pellets().iter().any(|p| matches!(p.state,
             libpikmin::PelletState::Sucking { onion, .. } if onion == o.id));
-        let beam_active = grounded || ingesting;
+        let beam_active = grounded || ingesting || self.onion_menu_beams.contains(&o.id.0);
         let cone = self.cones.entry(o.id.0).or_insert(if beam_active { 1.0 } else { 0.0 });
         let step = dt / CONE_TIME;
         *cone = if beam_active { (*cone + step).min(1.0) } else { (*cone - step).max(0.0) };
