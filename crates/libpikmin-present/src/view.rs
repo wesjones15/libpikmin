@@ -105,8 +105,13 @@ pub mod blend {
 /// Blended materials at least this opaque everywhere draw opaque (the pellets are 78%).
 const OPAQUE_ENOUGH: f32 = 0.7;
 
-/// Most material variants baked (pellet colours, ...) before new ones reuse the default.
-const MAX_TEXTURES: usize = 256;
+/// Most material variants (a pellet's colour, a light's blink frame, ...) one model bakes before its new ones
+/// reuse its default. Per model, so the Dolphin's blinking lights (hundreds of frames) and the cursor's pulse
+/// cannot use up the room a pellet's colour needs; a model's own materials are not counted either (the Ship
+/// Repair view loads the ship's 30 parts and every enemy beside the usual models).
+const MAX_VARIANTS_PER_MODEL: u32 = 128;
+/// Most variants of every model together, against runaway growth.
+const MAX_VARIANTS: usize = 2048;
 
 /// A loaded model.
 pub struct ViewModel {
@@ -185,6 +190,10 @@ pub struct Textures {
     pub list: Vec<tev::Baked>,
     ids: HashMap<(u32, usize, [u8; 16]), i32>,
     versions: HashMap<i32, u32>,
+    /// Textures baked with per-draw inputs (not a material's own), per model, against
+    /// [`MAX_VARIANTS_PER_MODEL`] and, together, [`MAX_VARIANTS`].
+    variants: HashMap<u32, u32>,
+    variant_total: usize,
 }
 
 impl Textures {
@@ -212,11 +221,20 @@ impl Textures {
         if let Some(&id) = self.ids.get(&k) {
             return id;
         }
-        if self.list.len() >= MAX_TEXTURES {
+        // With the table full a variant is the material's own texture, which is always baked (counting every
+        // texture here recursed without end once the models' own passed the cap).
+        let variant = k.2 != tev::key(&vm.model, material, Inputs::default());
+        if variant && (self.variants.get(&model).copied().unwrap_or(0) >= MAX_VARIANTS_PER_MODEL
+            || self.variant_total >= MAX_VARIANTS)
+        {
             return self.get(model, vm, material, Inputs::default());
         }
         let id = match tev::bake(&vm.model, material, inputs, &vm.images) {
             Some(b) => {
+                if variant {
+                    *self.variants.entry(model).or_insert(0) += 1;
+                    self.variant_total += 1;
+                }
                 self.list.push(b);
                 let id = self.list.len() as i32 - 1;
                 if models::BEAMS.contains(&model) && vm.model.materials[material].tex_datas.iter().any(|t| t.frames > 0 && t.anim_factor != 255) {
@@ -234,6 +252,35 @@ impl Textures {
 #[cfg(test)]
 mod texture_motion_tests {
     use super::*;
+
+    /// The Dolphin's lights and the cursor bake hundreds of variants as they animate; a pellet's colour
+    /// is still its own texture after that (once it was the default's, so every pellet was blue).
+    #[test]
+    fn a_models_flood_of_variants_does_not_take_the_room_of_another_models() {
+        let assets = Assets { root: Assets::default_dir() };
+        if !assets.root.join(paths::ONION_BEAMS[0]).exists() { eprintln!("SKIP: Pikmin assets absent"); return; }
+        let view = View::load(&assets).unwrap();
+        let mut textures = Textures::default();
+        let ship = &view.models[models::SHIP as usize];
+        for f in 0..3000 {
+            for m in 0..ship.model.materials.len() {
+                textures.get(models::SHIP, ship, m, Inputs { frame: Some(f as f32 * 0.5), ..Default::default() });
+            }
+        }
+        let cursor = &view.models[models::CURSOR as usize];
+        for f in 0..3000 {
+            textures.get(models::CURSOR, cursor, 0, Inputs { frame: Some(f as f32 * 0.5), ..Default::default() });
+        }
+        let pellet = &view.models[models::PELLETS[0] as usize];
+        let own = textures.get(models::PELLETS[0], pellet, 0, Inputs::default());
+        for colour in libpikmin::PikiColor::ALL {
+            let tinted = textures.get(models::PELLETS[0], pellet, 0, Inputs { reg0: Some(piki_rgb(colour)), ..Default::default() });
+            if colour != libpikmin::PikiColor::Blue {
+                assert_ne!(tinted, own, "{colour:?} pellet fell back to the default texture");
+            }
+        }
+    }
+
     #[test]
     fn onion_layers_move_at_disc_speeds_without_new_texture_slots() {
         let assets = Assets { root: Assets::default_dir() };

@@ -742,6 +742,40 @@ fn the_view_draws_a_hosts_enemies() {
     }
 }
 
+/// Ship Repair's view: the ship's parts and every enemy beside the usual models bake more textures than the
+/// variant cap, which once sent the cache into endless recursion (a stack overflow when the view loaded).
+#[test]
+fn the_ship_repair_view_loads_the_parts_and_every_enemy() {
+    let _views = VIEWS.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else {
+        eprintln!("no extracted assets; skipping");
+        return;
+    };
+    if !assets.root.join("tekis/.all").exists() {
+        eprintln!("enemy models not all extracted; skipping");
+        return;
+    }
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    // A thread with Unity's main-thread stack.
+    let made = std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(move || {
+            // SAFETY: the pointer is live for the call.
+            unsafe {
+                crate::view::pik_view_set_repaired_ship(1);
+                crate::view::pik_view_set_teki_models(1);
+                let view = pik_view_new(dir.as_ptr(), 0);
+                crate::view::pik_view_set_teki_models(0);
+                crate::view::pik_view_set_repaired_ship(0);
+                !view.is_null()
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    assert!(made, "the Ship Repair view did not load");
+}
+
 #[test]
 fn every_enemy_kind_draws_and_sounds() {
     let _views = VIEWS.lock().unwrap_or_else(|e| e.into_inner());
