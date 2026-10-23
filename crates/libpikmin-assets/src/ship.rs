@@ -24,6 +24,16 @@ pub const PART_IDS: [&str; 30] = [
     "un09", "un10", "un11", "un12", "un13", "un14",
 ];
 
+/// The parts' in-game names, by index in [`PART_IDS`] (the `UfoPartID` list in Pellet.h).
+pub const PART_NAMES: [&str; 30] = [
+    "Bowsprit", "Gluon Drive", "Anti-Dioxin Filter", "Eternal Fuel Dynamo", "Main Engine",
+    "Whimsical Radar", "Interstellar Radio", "Guard Satellite", "Chronos Reactor", "Radiation Canopy",
+    "Geiger Counter", "Sagittarius", "Libra", "Omega Stabilizer", "Ionium Jet #1", "Ionium Jet #2",
+    "Shock Absorber", "Gravity Jumper", "Pilot Seat", "Nova Blaster", "Automatic Gear",
+    "Zirconium Rotor", "Extraordinary Bolt", "Repair-type Bolt", "Space Float", "Massage Machine",
+    "Secret Safe", "Positron Generator", "Analog Computer", "UV Lamp",
+];
+
 /// The Main Engine (`UFOID_MainEngine`), the first part in the story.
 pub const MAIN_ENGINE: usize = 4;
 

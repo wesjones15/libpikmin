@@ -1017,9 +1017,13 @@ pub unsafe extern "C" fn pik_sim_ship_part_name(sim: *mut PikSim, part: u32, out
     if out.is_null() || cap == 0 { return 0; }
     unsafe { with(sim, 0, |s| {
         let Some(id) = libpikmin_assets::ship::PART_IDS.get(part as usize) else { return 0 };
-        let Some(c) = s.sim.params().pellets.iter().find(|c| c.kind == 3 && (c.model_id == *id || c.pellet_id == *id)) else { return 0 };
-        let n = c.name.len().min(cap as usize - 1);
-        std::ptr::copy_nonoverlapping(c.name.as_ptr(), out, n);
+        // The part's name in the game (`UfoPartID`), not its config's file name.
+        let name = libpikmin_assets::ship::PART_NAMES.get(part as usize).copied().or_else(|| {
+            s.sim.params().pellets.iter().find(|c| c.kind == 3 && (c.model_id == *id || c.pellet_id == *id)).map(|c| c.name.as_str())
+        });
+        let Some(name) = name else { return 0 };
+        let n = name.len().min(cap as usize - 1);
+        std::ptr::copy_nonoverlapping(name.as_ptr(), out, n);
         *out.add(n) = 0;
         n as u32
     }) }
