@@ -220,6 +220,8 @@ fn every_pikmin_state_round_trips() {
         PikiState::Attack(Attack { target: 77, mode: AttackMode::Approach }),
         PikiState::Attack(Attack { target: 77, mode: AttackMode::JumpPrep }),
         PikiState::Attack(Attack { target: 77, mode: AttackMode::Jumping }),
+        PikiState::Attack(Attack { target: 77, mode: AttackMode::StrikeRush }),
+        PikiState::Attack(Attack { target: 77, mode: AttackMode::StrikeJump { remaining: 0.2 } }),
         PikiState::Attack(Attack { target: 77, mode: AttackMode::Swing { frame: 3.0, hit: true } }),
         PikiState::Attack(Attack {
             target: 78,

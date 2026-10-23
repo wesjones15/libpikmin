@@ -36,8 +36,8 @@ pub struct CreatureView {
     /// Facing, decomp convention (`(sin yaw, 0, cos yaw)` is forward).
     pub yaw: f32,
     pub alive: bool,
-    /// Flying creatures can be latched by thrown Pikmin, but not targeted from the ground
-    /// (`ActAttack::exec` drops targets that start flying).
+    /// Flying creatures can be latched by thrown Pikmin or a dismiss strike's guided jump;
+    /// ordinary ground attacks still drop targets that start flying (`ActAttack::exec`).
     pub flying: bool,
     /// Slice of [`CreatureFrame::parts`]. Must be non-empty for the creature to be attackable.
     pub parts_start: u32,

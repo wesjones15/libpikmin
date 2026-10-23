@@ -30,7 +30,7 @@ use crate::strike::Strike;
 use crate::{CaptainId, PikiId};
 
 /// Bumped when the encoding changes.
-pub const SNAPSHOT_VERSION: u8 = 7;
+pub const SNAPSHOT_VERSION: u8 = 8;
 
 // Far more than any real sim has; a corrupt length can't make decoding allocate wildly.
 const MAX_ENTITIES: usize = 4096;
@@ -527,6 +527,8 @@ fn w_attack_mode(w: &mut Writer, m: &AttackMode) {
         AttackMode::Approach => w.u8(0),
         AttackMode::JumpPrep => w.u8(1),
         AttackMode::Jumping => w.u8(2),
+        AttackMode::StrikeRush => w.u8(5),
+        AttackMode::StrikeJump { remaining } => { w.u8(6); w.f32(remaining); }
         AttackMode::Swing { frame, hit } => {
             w.u8(3);
             w.f32(frame);
@@ -547,6 +549,8 @@ fn r_attack_mode(r: &mut Reader) -> Option<AttackMode> {
         0 => AttackMode::Approach,
         1 => AttackMode::JumpPrep,
         2 => AttackMode::Jumping,
+        5 => AttackMode::StrikeRush,
+        6 => AttackMode::StrikeJump { remaining: r.f32()? },
         3 => AttackMode::Swing { frame: r.f32()?, hit: r.bool()? },
         4 => AttackMode::Latched { part: r.u32()?, offset: r.vec3()?, frame: r.f32()?, hit: r.bool()? },
         _ => return None,

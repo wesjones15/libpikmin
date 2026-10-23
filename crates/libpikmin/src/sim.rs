@@ -352,7 +352,7 @@ impl Sim {
             | PikiState::GoHang { .. }
             | PikiState::Knocked { .. } => true,
             PikiState::Attack(a) => {
-                !matches!(a.mode, AttackMode::Latched { .. } | AttackMode::Jumping)
+                !matches!(a.mode, AttackMode::Latched { .. } | AttackMode::Jumping | AttackMode::StrikeJump { .. })
             }
             PikiState::Carry(c) => matches!(c.phase, crate::carry::CarryPhase::Go { .. }),
             _ => false,

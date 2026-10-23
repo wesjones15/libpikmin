@@ -187,9 +187,9 @@ pub fn piki_look(params: &Params, p: &Piki) -> Option<PikiLook> {
         PikiState::Held { .. } => (Motion::Hang, Clock::Loop(30.0)),
         PikiState::Flying { .. } => (Motion::RollJmp, Clock::Loop(30.0)),
         PikiState::Attack(a) => match a.mode {
-            AttackMode::Approach => walk,
+            AttackMode::Approach | AttackMode::StrikeRush => walk,
             AttackMode::JumpPrep => (Motion::StillJump, Clock::Once(30.0)),
-            AttackMode::Jumping => (Motion::Jump, Clock::Once(30.0)),
+            AttackMode::Jumping | AttackMode::StrikeJump { .. } => (Motion::Jump, Clock::Once(30.0)),
             AttackMode::Swing { frame, .. } => (Motion::Attack, Clock::Sim(frame)),
             AttackMode::Latched { frame, .. } => (Motion::Kuttuku, Clock::Sim(frame)),
         },

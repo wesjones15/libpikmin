@@ -43,6 +43,10 @@ pub enum Happa {
 pub enum AttackMode {
     /// `ActJumpAttack` state 0: run at the nearest part.
     Approach,
+    /// Host extension: a dismiss strike sent this Pikmin at a chosen enemy.
+    StrikeRush,
+    /// Host extension: steer the strike's jump toward the enemy's moving stickable part.
+    StrikeJump { remaining: f32 },
     /// State 2: line up for a jump.
     JumpPrep,
     /// State 1: in the air after jumping at the target.
@@ -750,7 +754,7 @@ impl Sim {
         let Some(c) = self.creatures.get(a.target).copied() else {
             return self.finish_attack(pi);
         };
-        if !c.alive || (c.flying && !matches!(a.mode, AttackMode::Latched { .. })) {
+        if !c.alive || (c.flying && !matches!(a.mode, AttackMode::Latched { .. } | AttackMode::StrikeRush | AttackMode::StrikeJump { .. })) {
             return self.finish_attack(pi);
         }
 
@@ -843,6 +847,30 @@ impl Sim {
 
         let mut mode = a.mode;
         match a.mode {
+            AttackMode::StrikeRush => {
+                if !self.creatures.parts_of(&c).iter().any(|part| part.stickable) {
+                    return self.finish_attack(pi);
+                }
+                p.face = round_ang(p.face + 0.2 * angle);
+                if dist2d <= size + 35.0 && p.on_ground {
+                    p.target_vel = Vec3::ZERO;
+                    let t = 0.35;
+                    p.vel = to / t + Vec3::Y * (self.params.ai.gravity * (t + dt) * 0.5);
+                    p.target_vel = p.vel;
+                    p.on_ground = false;
+                    mode = AttackMode::StrikeJump { remaining: t - dt };
+                } else {
+                    p.target_vel = flat * full;
+                }
+            }
+            AttackMode::StrikeJump { remaining } => {
+                if remaining > 0.0 {
+                    let t = remaining.max(dt);
+                    p.vel = to / t + Vec3::Y * (self.params.ai.gravity * (t + dt) * 0.5);
+                }
+                p.target_vel = p.vel;
+                mode = AttackMode::StrikeJump { remaining: (remaining - dt).max(0.0) };
+            }
             AttackMode::Approach => {
                 if angle.abs() < PI / 10.0 && dist3d < size + 10.0 {
                     p.target_vel = Vec3::ZERO;
@@ -917,7 +945,7 @@ impl Sim {
         self.pikis[pi].state = PikiState::Attack(Attack { mode, ..a });
         self.physics(pi, host, dt);
 
-        if mode == AttackMode::Jumping {
+        if mode == AttackMode::Jumping || matches!(mode, AttackMode::StrikeJump { .. }) {
             if let Some((target, part, surface)) = self.touching_part(pi, Some(a.target))
                 && self.creatures.parts[part as usize].stickable
             {
@@ -926,7 +954,7 @@ impl Sim {
             }
             if self.pikis[pi].on_ground {
                 self.pikis[pi].state = PikiState::Attack(Attack {
-                    mode: AttackMode::Approach,
+                    mode: if matches!(mode, AttackMode::StrikeJump { .. }) { AttackMode::StrikeRush } else { AttackMode::Approach },
                     ..a
                 });
             }

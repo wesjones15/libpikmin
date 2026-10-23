@@ -9,6 +9,7 @@
 use crate::captain::ThrowState;
 use crate::event::Event;
 use crate::math::dist_xz;
+use crate::piki::{Attack, AttackMode, PikiState};
 use crate::{Host, Sim};
 
 /// Frames (30 per second) into the motion the blow lands, and when it ends.
@@ -23,7 +24,7 @@ pub struct StrikeSpec {
     pub reach: f32,
     /// Seconds before the next strike.
     pub cooldown: f32,
-    /// Seconds the squad charges out the way he struck (a swarm), 0 for none.
+    /// Seconds of forward swarm when there is no target; also enables jump targeting. 0 disables both.
     pub charge: f32,
 }
 
@@ -38,8 +39,8 @@ impl Sim {
     /// Makes the dismiss button strike instead of dismissing: `damage_scale` times a punch's
     /// damage to every creature within `reach` units of its edge, then `cooldown` seconds
     /// before the next. A scale of 0 or less puts the dismissal back. The strike also sends the
-    /// squad charging for `charge` seconds, as a swarm toward what he struck at (the creature he
-    /// is locked onto, else the way he faces).
+    /// squad charging for `charge` seconds. Nearby enemies in the strike direction become
+    /// individual jump-and-latch targets; without one, the squad swarms forward as before.
     pub fn set_dismiss_strike(&mut self, damage_scale: f32, reach: f32, cooldown: f32, charge: f32) {
         self.dismiss_strike = (damage_scale.is_finite() && damage_scale > 0.0 && reach.is_finite() && cooldown.is_finite())
             .then(|| StrikeSpec {
@@ -62,18 +63,61 @@ impl Sim {
     /// The dismiss button was pressed with strikes on.
     pub(crate) fn start_strike(&mut self, ci: usize) {
         let Some(spec) = self.dismiss_strike else { return };
-        let c = &mut self.captains[ci];
+        let c = &self.captains[ci];
         if c.strike.is_some() || c.strike_cooldown > 0.0 || c.punch.is_some() || !matches!(c.throw, ThrowState::Idle) {
             return;
         }
-        c.strike = Some(Strike { frame: 0.0, hit: false });
-        c.strike_cooldown = spec.cooldown;
         // Toward the locked creature if there is one, else the way he faces.
         let aim = c.lock_target.and_then(|id| self.creatures.get(id)).map(|t| t.pos - c.pos);
         let dir = aim.filter(|d| d.x.hypot(d.z) > 1.0).map_or(crate::math::dir_of(c.face), |d| d.normalize_or_zero());
-        c.charge = (spec.charge > 0.0).then(|| (crate::Vec2::new(dir.x, dir.z), spec.charge));
+        let (cpos, locked) = (c.pos, c.lock_target);
         let captain = c.id;
+        let c = &mut self.captains[ci];
+        c.strike = Some(Strike { frame: 0.0, hit: false });
+        c.strike_cooldown = spec.cooldown;
+        c.charge = (spec.charge > 0.0).then(|| (crate::Vec2::new(dir.x, dir.z), spec.charge));
+        if spec.charge > 0.0 {
+            self.strike_targets(ci, cpos, dir, locked, spec.charge);
+        }
         self.events.push(Event::StrikeStarted { captain });
+    }
+
+    /// Assign only Pikmin actually in the formation. A forward cone keeps enemies beside or
+    /// behind Olimar out of the command; distance is bounded by what a charging Pikmin can reach.
+    fn strike_targets(&mut self, ci: usize, origin: crate::Vec3, dir: crate::Vec3, locked: Option<crate::CreatureId>, seconds: f32) {
+        let reach = (self.params.navi.run_speed * seconds).clamp(200.0, 700.0);
+        let forward = crate::Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero();
+        let candidates: Vec<_> = self.creatures.creatures.iter().filter_map(|c| {
+            if !c.alive || !self.creatures.parts_of(c).iter().any(|p| p.stickable) {
+                return None;
+            }
+            let (centre, radius) = self.creatures.bounds(c);
+            let offset = crate::Vec3::new(centre.x - origin.x, 0.0, centre.z - origin.z);
+            let distance = offset.length();
+            (distance <= reach + radius && (distance <= radius || offset.dot(forward) >= distance * 0.5)
+                && (centre.y - origin.y).abs() <= radius + 300.0).then_some((c.id, centre))
+        }).collect();
+        if candidates.is_empty() { return; }
+
+        let members = self.captains[ci].plate.members.clone();
+        let mut assigned = vec![0usize; candidates.len()];
+        for id in members {
+            let pi = id.0 as usize;
+            if !matches!(self.pikis[pi].state, PikiState::Squad { .. }) { continue; }
+            let pos = self.pikis[pi].pos;
+            let chosen = candidates.iter().enumerate().min_by(|(ai, a), (bi, b)| {
+                let score = |index: usize, target: &(crate::CreatureId, crate::Vec3)| {
+                    // The lock-on wins if it is a valid forward target. Otherwise spread the
+                    // squad among nearby enemies without sending anyone far across the arena.
+                    if Some(target.0) == locked { -10000.0 }
+                    else { dist_xz(pos, target.1) + assigned[index] as f32 * 35.0 }
+                };
+                score(*ai, a).total_cmp(&score(*bi, b))
+            }).map(|(index, _)| index).unwrap();
+            assigned[chosen] += 1;
+            self.leave_current(id);
+            self.pikis[pi].state = PikiState::Attack(Attack { target: candidates[chosen].0, mode: AttackMode::StrikeRush });
+        }
     }
 
     /// Runs a strike in progress; true while it holds the captain's hands.
