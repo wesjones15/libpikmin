@@ -97,6 +97,27 @@ fn a_round_trip_reproduces_every_entity() {
 }
 
 #[test]
+fn hundred_pikmin_snapshot_stays_small() {
+    let mut sim = Sim::new(Params::default(), 42);
+    let captain = sim.add_captain(Vec3::ZERO);
+    for i in 0..100 {
+        let at = Vec3::new((i % 10) as f32 * 13.0, 0.0, (i / 10) as f32 * 13.0);
+        sim.spawn_piki_in_squad(PikiColor::from_index(i), at, captain);
+    }
+    let mut host = Arena;
+    for _ in 0..60 {
+        sim.set_input(captain, CaptainInput { stick: Vec2::new(0.5, 0.3), ..Default::default() });
+        sim.step(&mut host);
+        sim.drain_events().for_each(drop);
+    }
+    let snap = Snapshot::of(&sim, &[]);
+    let wire = snap.encode_replica();
+    println!("100 Pikmin: {} wire bytes", wire.len());
+    assert!(wire.len() < 4_000, "100 Pikmin need {} wire bytes", wire.len());
+    assert!(Snapshot::decode(&wire).is_some());
+}
+
+#[test]
 fn many_moments_round_trip() {
     // Not just the end state: states mid-throw, mid-carry and so on, every so often.
     let mut sim = Sim::new(Params::default(), 3);
@@ -293,4 +314,16 @@ fn every_pikmin_state_round_trips() {
     let back = Snapshot::decode(&bytes).expect("decodes");
     assert_eq!(back.events, snap.events);
     assert_eq!(format!("{:#?}", back.pikis), format!("{:#?}", snap.pikis));
+    let replica = Snapshot::decode(&snap.encode_replica()).expect("replica wire decodes");
+    assert_eq!(replica.events, snap.events);
+    for (actual, expected) in replica.pikis.iter().zip(&snap.pikis) {
+        assert_eq!((actual.id, actual.generation, actual.color, actual.happa),
+            (expected.id, expected.generation, expected.color, expected.happa));
+        assert_eq!((actual.pos, actual.vel, actual.face, actual.size),
+            (expected.pos, expected.vel, expected.face, expected.size));
+        assert_eq!((actual.captain, actual.state, actual.on_ground),
+            (expected.captain, expected.state, expected.on_ground));
+        assert_eq!(format!("{:?}", actual.jump), format!("{:?}", expected.jump));
+        assert_eq!((actual.health, actual.frozen), (expected.health, expected.frozen));
+    }
 }

@@ -2,15 +2,14 @@
 //!
 //! The server runs the one real [`Sim`]. Each network tick it takes a [`Snapshot`] of every
 //! entity (captains, Pikmin, pellets, Onions, sprouts, nectar) plus the events since the last one,
-//! and sends [`Snapshot::encode`]'s bytes. A client decodes it and lays it over a replica `Sim`
+//! and sends [`Snapshot::encode_replica`]'s bytes. A client decodes it and lays it over a replica `Sim`
 //! with [`Sim::apply_snapshot`] (or blends two with [`Sim::apply_snapshot_blend`] for smooth
 //! motion between network ticks); the presentation layer then draws and sounds the replica as it
 //! would the real thing, since it only reads the sim's entities and the events.
 //!
-//! Every field of every entity goes over (the AI's bookkeeping too), so a replica is exactly what
-//! the server had: `tests` check that a round trip leaves the `Debug` output of every entity
-//! unchanged. The format is for machines running the same build (the host checks the ABI
-//! version); decoding refuses anything malformed rather than trusting it.
+//! [`Snapshot::encode`] retains every field for exact simulation-state round trips. The replica
+//! wire form drops AI bookkeeping that clients never step, then compresses the repeated fields.
+//! The format is for machines running the same build; decoding refuses malformed input.
 
 use std::collections::VecDeque;
 
@@ -31,11 +30,13 @@ use crate::strike::Strike;
 use crate::{CaptainId, PikiId};
 
 /// Bumped when the encoding changes.
-pub const SNAPSHOT_VERSION: u8 = 6;
+pub const SNAPSHOT_VERSION: u8 = 7;
 
 // Far more than any real sim has; a corrupt length can't make decoding allocate wildly.
 const MAX_ENTITIES: usize = 4096;
 const MAX_PATH: usize = 512;
+// A malformed compressed packet must not expand into an unbounded allocation.
+const MAX_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 
 /// Everything about a sim that a replica needs, at one moment.
 #[derive(Debug, Clone, Default)]
@@ -77,8 +78,48 @@ impl Snapshot {
     }
 
     pub fn encode(&self) -> Vec<u8> {
+        let raw = self.encode_raw();
+        let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&raw, 6);
+        let mut wire = Vec::with_capacity(6 + compressed.len().min(raw.len()));
+        wire.push(SNAPSHOT_VERSION);
+        if compressed.len() < raw.len() {
+            wire.push(1);
+            wire.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+            wire.extend_from_slice(&compressed);
+        } else {
+            wire.push(0);
+            wire.extend_from_slice(&(raw.len() as u32).to_le_bytes());
+            wire.extend_from_slice(&raw);
+        }
+        wire
+    }
+
+    /// Wire form for a replica, which never steps its AI. Keep what presentation and host
+    /// queries read, while discarding server-only decisions and formation bookkeeping before
+    /// compression. The ordinary `encode` still round-trips the complete simulation state.
+    pub fn encode_replica(&self) -> Vec<u8> {
+        let mut visible = self.clone();
+        for c in &mut visible.captains {
+            c.plate.members.clear();
+            c.plate.slot_offsets.clear();
+        }
+        for p in &mut visible.pikis {
+            p.target_vel = Vec3::ZERO;
+            p.jump_queue.clear();
+            p.blooms = 0;
+            p.dismissed = false;
+            p.idle_time = 0.0;
+            p.latched_at = 0;
+            p.guided_throw = None;
+            p.hit_log.fill(None);
+            p.hit_next = 0;
+            p.kill_credit = 0;
+        }
+        visible.encode()
+    }
+
+    fn encode_raw(&self) -> Vec<u8> {
         let mut w = Writer::default();
-        w.u8(SNAPSHOT_VERSION);
         w.u64(self.tick);
         w.u64(self.piki_deaths);
         w.u32(self.next_nectar);
@@ -125,10 +166,24 @@ impl Snapshot {
 
     /// None if the bytes aren't a snapshot of this version, or are cut short or inconsistent.
     pub fn decode(bytes: &[u8]) -> Option<Snapshot> {
-        let mut r = Reader { data: bytes, pos: 0 };
-        if r.u8()? != SNAPSHOT_VERSION {
+        if bytes.first().copied()? != SNAPSHOT_VERSION || bytes.len() > MAX_SNAPSHOT_BYTES {
             return None;
         }
+        let body_len = u32::from_le_bytes(bytes.get(2..6)?.try_into().ok()?) as usize;
+        let body = bytes.get(6..)?;
+        if body.len() != body_len {
+            return None;
+        }
+        let raw = match bytes.get(1).copied()? {
+            0 => body.to_vec(),
+            1 => miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(body, MAX_SNAPSHOT_BYTES).ok()?,
+            _ => return None,
+        };
+        Self::decode_raw(&raw)
+    }
+
+    fn decode_raw(bytes: &[u8]) -> Option<Snapshot> {
+        let mut r = Reader { data: bytes, pos: 0 };
         let tick = r.u64()?;
         let piki_deaths = r.u64()?;
         let next_nectar = r.u32()?;

@@ -6,3 +6,4 @@ publish.workspace = true
 
 [dependencies]
 glam.workspace = true
+miniz_oxide = "0.8.9"

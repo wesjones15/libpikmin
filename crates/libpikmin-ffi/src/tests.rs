@@ -650,13 +650,13 @@ fn burst_snapshots_do_not_play_old_spatial_cues_on_a_recycled_pikmin() {
         let id = source.spawn_piki(PikiColor::Red, Vec3::ZERO).unwrap();
         source.set_tick(1);
         let ghost = Event::PikiGone { piki: id, pos: Vec3::X * 10.0 };
-        let bytes = Snapshot::of(&source, &[Event::Landed { piki: id }, ghost]).encode();
+        let bytes = Snapshot::of(&source, &[Event::Landed { piki: id }, ghost]).encode_replica();
         assert_eq!(pik_replica_apply(replica, bytes.as_ptr(), bytes.len() as u32), 1);
         source.piki_mut(id).state = PikiState::Dead;
         source.reclaim_dead_pikis(std::iter::empty());
         source.spawn_piki(PikiColor::Blue, Vec3::X * 30.0).unwrap();
         source.set_tick(2);
-        let bytes = Snapshot::of(&source, &[]).encode();
+        let bytes = Snapshot::of(&source, &[]).encode_replica();
         assert_eq!(pik_replica_apply(replica, bytes.as_ptr(), bytes.len() as u32), 1);
         assert_eq!((*replica).view_log, vec![ghost]);
         pik_sim_free(replica);

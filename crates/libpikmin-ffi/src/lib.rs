@@ -1568,7 +1568,7 @@ pub unsafe extern "C" fn pik_sim_snapshot(sim: *mut PikSim, out: *mut u8, cap: u
     // SAFETY: as documented.
     unsafe {
         with(sim, 0, |s| {
-            let bytes = Snapshot::of(&s.sim, &s.net_log).encode();
+            let bytes = Snapshot::of(&s.sim, &s.net_log).encode_replica();
             if bytes.len() > cap as usize {
                 return 0;
             }
