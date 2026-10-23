@@ -497,6 +497,13 @@ impl ShipAnimator {
         cues.push(ShipCue::DemoSound { demo: TAKEOFF_DEMO, cmd: TAKEOFF_DEMO_SOUNDS[0].1 });
     }
 
+    /// The wreck's resting pose (context 0's motion and frame once it stands, `stand`'s `WAIT_TUTORIAL`), for a
+    /// host that crash-lands the broken ship in it.
+    pub fn wreck_context(&self) -> (usize, f32) {
+        let frame = self.ship.get(motion::WAIT_TUTORIAL).and_then(|i| i.keys.first()).map_or(0.0, |&k| k as f32);
+        (motion::WAIT_TUTORIAL, frame)
+    }
+
     /// Whether the ship is landing.
     pub fn landing(&self) -> bool {
         self.landing.is_some()

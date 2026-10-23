@@ -1065,16 +1065,21 @@ impl View {
                         .map(|v| rest.skin(v).0.y).fold(f32::INFINITY, f32::min);
                     rest.joints[2].w_axis.truncate() - Vec3::Y * bottom
                 });
+                // Host extension: the bare wreck (no part on board: Ship Repair's first stage) comes down already in
+                // the pose it crashes in, nose down, not upright to be turned over on touching the ground.
+                let crash = self.repair_mode && on_board.is_empty() && animator.landing();
                 let mut pose = vm.skel.pose_by(Mat4::IDENTITY, |j| {
                     let ctx = self.ship_contexts.get(j).copied().unwrap_or(0);
-                    let (motion, frame) = if ctx == 0 && (!self.repair_mode || on_board.len() == 30) && !animator.landing() && !animator.taking_off() && flight.repair.is_none() && !sucking {
+                    let (motion, frame) = if ctx == 0 && crash {
+                        animator.wreck_context()
+                    } else if ctx == 0 && (!self.repair_mode || on_board.len() == 30) && !animator.landing() && !animator.taking_off() && flight.repair.is_none() && !sucking {
                         (11, 0.0)
                     } else { animator.context(ctx) };
                     let (_, anim) = self.ship_anims.get(motion)?;
                     Some((anim, frame.clamp(0.0, anim.frames.saturating_sub(1) as f32)))
                 });
                 let mut offset = ground_anchor - pose.joints[2].w_axis.truncate();
-                if self.repair_mode && on_board.len() < 30 && !animator.landing() && !animator.taking_off() {
+                if self.repair_mode && on_board.len() < 30 && (crash || !animator.landing() && !animator.taking_off()) {
                     // The original bare wreck lies on its side. Keep that original pose,
                     // and place its actual hull on the host's ground instead of forcing
                     // the fully repaired upright rocket pose onto every repair state.
