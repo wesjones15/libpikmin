@@ -1519,6 +1519,32 @@ mod tests {
         );
     }
 
+    /// A coloured pellet carried to an Onion of its own colour gives the disc's matching seeds (a red 1
+    /// pellet: 2 red), and to another colour's the disc's other seeds (1 blue).
+    #[test]
+    fn a_pellet_gives_the_discs_matching_seeds_to_its_colour_and_the_other_seeds_to_another() {
+        for (pellet, onion, expect) in [
+            (PikiColor::Red, PikiColor::Red, 2),
+            (PikiColor::Red, PikiColor::Blue, 1),
+            (PikiColor::Yellow, PikiColor::Yellow, 2),
+        ] {
+            let mut sim = Sim::new(Params::default(), 3);
+            let mut host = FlatHost;
+            let o = sim.add_onion(Vec3::new(600.0, 0.0, 0.0), &[onion]);
+            sim.set_onion_pose(o, Vec3::new(600.0, 120.0, 0.0), true);
+            let desc = PelletDesc::numbered(sim.params(), 1, pellet, Vec3::ZERO, 0.0);
+            let pel = sim.spawn_pellet(desc);
+            attach(&mut sim, onion, pel);
+            let before = sim.onions()[0].stored_total();
+            for _ in 0..30 * 40 {
+                sim.set_onion_pose(o, Vec3::new(600.0, 60.0, 0.0), true);
+                sim.step(&mut host);
+            }
+            assert_eq!(sim.pellet(pel).state, PelletState::Gone, "{pellet:?} pellet to {onion:?}: taken in");
+            assert_eq!(sim.onions()[0].stored_total(), before + expect, "{pellet:?} pellet to {onion:?}");
+        }
+    }
+
     #[test]
     fn a_hovering_onion_takes_pellets_and_keeps_the_new_pikmin_inside() {
         let mut sim = Sim::new(Params::default(), 3);

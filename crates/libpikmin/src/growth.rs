@@ -44,6 +44,19 @@ impl Sim {
         p.hit_next = p.hit_next.wrapping_add(1);
     }
 
+    /// How many living Pikmin of each colour ([`PikiColor`] order) attacked `creature` and have not been
+    /// credited for it yet: the ones that fought it, for the host to colour its corpse by. Ask before
+    /// [`Sim::credit_kill`], which forgets them.
+    pub fn attackers_by_colour(&self, creature: CreatureId) -> [u32; 3] {
+        let mut by_colour = [0; 3];
+        for p in &self.pikis {
+            if p.is_alive() && p.hit_log.contains(&Some(creature)) {
+                by_colour[p.color as usize] += 1;
+            }
+        }
+        by_colour
+    }
+
     /// `creature` died, to anything. Each living Pikmin that attacked it gets a credit (once
     /// per creature, whatever its hits), and grows a stage on every
     /// [`Sim::set_kill_growth`] credits. Returns how many Pikmin grew.
@@ -107,6 +120,24 @@ mod tests {
         assert_eq!(happa, [Happa::Bud, Happa::Leaf, Happa::Leaf]);
         let grew = sim.drain_events().filter(|e| matches!(e, Event::PikiGrew { .. })).count();
         assert_eq!(grew, 1);
+    }
+
+    #[test]
+    fn the_attackers_are_counted_by_colour_until_the_kill_is_credited() {
+        let mut sim = sim_with(1);
+        let c = sim.captains()[0].id;
+        sim.spawn_piki_in_squad(PikiColor::Blue, Vec3::new(40.0, 0.0, 0.0), c);
+        sim.spawn_piki_in_squad(PikiColor::Blue, Vec3::new(50.0, 0.0, 0.0), c);
+        sim.step(&mut FlatHost);
+        assert_eq!(sim.attackers_by_colour(7), [0, 0, 0]);
+        sim.note_attack(0, 7);
+        sim.note_attack(1, 7);
+        sim.note_attack(2, 7);
+        sim.note_attack(1, 8);
+        assert_eq!(sim.attackers_by_colour(7), [2, 1, 0], "blue, red, yellow");
+        assert_eq!(sim.attackers_by_colour(8), [1, 0, 0]);
+        sim.credit_kill(7);
+        assert_eq!(sim.attackers_by_colour(7), [0, 0, 0], "credited: forgotten");
     }
 
     #[test]

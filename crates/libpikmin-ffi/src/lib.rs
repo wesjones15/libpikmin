@@ -328,7 +328,9 @@ pub struct PikPellet {
     pub has_creature: u8,
     /// Ship parts never participate in a host's automatic Onion ground pickup.
     pub has_ship_part: u8,
-    pub _pad: [u8; 5],
+    /// A numbered pellet's [`PikiColor`] index (0 blue, 1 red, 2 yellow), or 255.
+    pub color: u8,
+    pub _pad: [u8; 4],
 }
 
 #[repr(C)]
@@ -2071,7 +2073,8 @@ pub unsafe extern "C" fn pik_sim_pellets(sim: *mut PikSim, out: *mut PikPellet, 
                     state,
                     has_creature: p.desc.creature.is_some() as u8,
                     has_ship_part: p.desc.ship_part.is_some() as u8,
-                    _pad: [0; 5],
+                    color: p.desc.color.map_or(255, |c| c as u8),
+                    _pad: [0; 4],
                 };
                 // SAFETY: `i < max`, which the caller promised is writable.
                 out.add(i).write(v);
@@ -2464,6 +2467,22 @@ pub unsafe extern "C" fn pik_sim_set_kill_growth(sim: *mut PikSim, kills: u32) {
 pub unsafe extern "C" fn pik_sim_credit_kill(sim: *mut PikSim, creature: u64) -> u32 {
     // SAFETY: as documented.
     unsafe { with(sim, 0, |s| s.sim.credit_kill(creature)) }
+}
+
+/// [`Sim::attackers_by_colour`]: how many living Pikmin of each colour (blue, red, yellow, written to
+/// `out[0..3]`) attacked `creature`. Returns their total. Ask before [`pik_sim_credit_kill`].
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`]; `out` is null or has room for 3 values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_attackers(sim: *mut PikSim, creature: u64, out: *mut u32) -> u32 {
+    // SAFETY: as documented.
+    let by_colour = unsafe { with(sim, [0; 3], |s| s.sim.attackers_by_colour(creature)) };
+    if !out.is_null() {
+        // SAFETY: the caller promised room for 3.
+        unsafe { std::ptr::copy_nonoverlapping(by_colour.as_ptr(), out, 3) };
+    }
+    by_colour.iter().sum()
 }
 
 /// [`Sim::set_dismiss_strike`]: the dismiss button strikes (0 or less for `damage_scale`: dismisses).
