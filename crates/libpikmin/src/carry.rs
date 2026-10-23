@@ -21,6 +21,60 @@ use crate::{Host, PikiId};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PelletId(pub u32);
 
+/// How far the Dolphin's body reaches from its origin across the ground, its landing legs at the edge
+/// (host extension, measured off the ship model; the decomp's `UfoItem::getSize` is only its 10-unit
+/// creature size). Grounded Pikmin and carried things go around it instead of through it.
+pub const SHIP_HULL_RADIUS: f32 = 36.0;
+/// How far above its origin the body is solid to something walking.
+pub const SHIP_HULL_HEIGHT: f32 = 118.0;
+
+/// The origins of the ships that sit on the ground.
+pub(crate) fn ship_hulls(onions: &[crate::onion::Onion]) -> Vec<Vec3> {
+    onions.iter().filter(|o| o.ship.is_some() && o.grounded()).map(|o| o.pos).collect()
+}
+
+/// Bends `path` (a route from `from`, as [`Host::carry_path`] gives it, whose hosts know nothing of the
+/// ship) around each hull: a leg that would cross the circle of `radius` about an origin in `hulls` is
+/// replaced by the arc round the shorter side. A leg that starts or ends inside a circle is left as it is.
+pub(crate) fn detour_hulls(hulls: &[Vec3], radius: f32, from: Vec3, path: &mut Vec<Vec3>) {
+    const STEP: f32 = std::f32::consts::PI / 6.0;
+    for &c in hulls {
+        let mut out = Vec::with_capacity(path.len() + 4);
+        let mut prev = from;
+        for &next in path.iter() {
+            let (a, b) = (prev - c, next - c);
+            let (d_x, d_z) = (b.x - a.x, b.z - a.z);
+            let len2 = d_x * d_x + d_z * d_z;
+            let outside = a.x * a.x + a.z * a.z > radius * radius && b.x * b.x + b.z * b.z > radius * radius;
+            if outside && len2 > 1e-6 {
+                let (bq, cq) = (2.0 * (a.x * d_x + a.z * d_z), a.x * a.x + a.z * a.z - radius * radius);
+                let disc = bq * bq - 4.0 * len2 * cq;
+                if disc > 0.0 {
+                    let root = disc.sqrt();
+                    let (t1, t2) = ((-bq - root) / (2.0 * len2), (-bq + root) / (2.0 * len2));
+                    if t1 > 0.0 && t2 < 1.0 {
+                        let angle = |t: f32| (a.z + d_z * t).atan2(a.x + d_x * t);
+                        let (a1, a2) = (angle(t1), angle(t2));
+                        let mut delta = (a2 - a1).rem_euclid(TAU);
+                        if delta > std::f32::consts::PI { delta -= TAU; }
+                        let steps = (delta.abs() / STEP).ceil().max(1.0) as usize;
+                        // Corners far enough out that the straight legs between them clear the circle.
+                        let reach = radius / (delta.abs() / steps as f32 / 2.0).cos();
+                        let y = prev.y + (next.y - prev.y) * (t1 + t2) * 0.5;
+                        for k in 0..=steps {
+                            let th = a1 + delta * k as f32 / steps as f32;
+                            out.push(c + Vec3::new(th.cos() * reach, y - c.y, th.sin() * reach));
+                        }
+                    }
+                }
+            }
+            out.push(next);
+            prev = next;
+        }
+        *path = out;
+    }
+}
+
 /// What a host provides when spawning something carryable.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PelletDesc {
@@ -556,6 +610,8 @@ impl Sim {
                         let from = self.pellets[i].pos;
                         let to = self.onions[onion.0 as usize].goal_pos();
                         if host.carry_path(from, to, &mut path) && !path.is_empty() {
+                            let reach = SHIP_HULL_RADIUS + self.pellets[i].desc.radius + 8.0;
+                            detour_hulls(&ship_hulls(&self.onions), reach, from, &mut path);
                             let p = &mut self.pellets[i];
                             p.state = PelletState::Carried {
                                 onion,
@@ -590,6 +646,8 @@ impl Sim {
                         let mut route = Vec::new();
                         let to = self.onions[o.0 as usize].goal_pos();
                         if host.carry_path(self.pellets[i].pos, to, &mut route) && !route.is_empty() {
+                            let reach = SHIP_HULL_RADIUS + self.pellets[i].desc.radius + 8.0;
+                            detour_hulls(&ship_hulls(&self.onions), reach, self.pellets[i].pos, &mut route);
                             (onion, color, path, next) = (o, c, route, 0);
                             self.pellets[i].state = PelletState::Carried {
                                 onion,
@@ -663,6 +721,7 @@ impl Sim {
         if let PelletState::Carried { onion, path, next, .. } = &mut p.state {
             let mut route = Vec::new();
             if host.carry_path(p.pos, self.onions[onion.0 as usize].goal_pos(), &mut route) && !route.is_empty() {
+                detour_hulls(&ship_hulls(&self.onions), SHIP_HULL_RADIUS + p.desc.radius + 8.0, p.pos, &mut route);
                 *path = route;
                 *next = 0;
             }
@@ -1471,6 +1530,66 @@ mod tests {
         assert_eq!(got, Some((4, 1, ship)));
         assert_eq!(sim.onions()[ship.0 as usize].ship.as_ref().unwrap().parts, vec![4]);
         assert!(sim.sprouts().next().is_none(), "no seeds from a ship part");
+    }
+
+    #[test]
+    fn a_route_across_the_ship_goes_round_it() {
+        let hull = [Vec3::new(300.0, 0.0, 0.0)];
+        let mut path = vec![Vec3::new(400.0, 0.0, 0.0)];
+        detour_hulls(&hull, 50.0, Vec3::ZERO, &mut path);
+        assert!(path.len() > 2, "{path:?}");
+        assert_eq!(*path.last().unwrap(), Vec3::new(400.0, 0.0, 0.0));
+        let mut prev = Vec3::ZERO;
+        for p in &path {
+            // Every leg stays out of the circle, not just its corners.
+            for k in 0..=20 {
+                let at = prev.lerp(*p, k as f32 / 20.0);
+                assert!(dist_xz(at, hull[0]) > 49.0, "{at:?} is in the ship");
+            }
+            prev = *p;
+        }
+        // A clear route is left alone, and so is one that starts inside.
+        let mut clear = vec![Vec3::new(0.0, 0.0, 200.0)];
+        detour_hulls(&hull, 50.0, Vec3::ZERO, &mut clear);
+        assert_eq!(clear, vec![Vec3::new(0.0, 0.0, 200.0)]);
+        let mut inside = vec![Vec3::new(500.0, 0.0, 0.0)];
+        detour_hulls(&hull, 50.0, Vec3::new(310.0, 0.0, 0.0), &mut inside);
+        assert_eq!(inside, vec![Vec3::new(500.0, 0.0, 0.0)]);
+    }
+
+    #[test]
+    fn a_part_is_carried_round_the_ship_not_through_it() {
+        let mut sim = Sim::new(Params::default(), 5);
+        let mut host = FlatHost;
+        // The part lies behind the ship, which sits right across the way to its goal.
+        let ship = sim.add_ship(Vec3::new(300.0, 0.0, 0.0), Vec3::new(400.0, 0.0, 0.0), Vec3::new(300.0, 74.0, 0.0));
+        let pel = sim.spawn_pellet(PelletDesc {
+            pos: Vec3::ZERO,
+            yaw: 0.0,
+            radius: 10.0,
+            height: 10.0,
+            min_carriers: 1,
+            max_carriers: 4,
+            seeds_matching: 1,
+            seeds_other: 1,
+            color: None,
+            creature: None,
+            ship_part: Some(4),
+        });
+        attach(&mut sim, PikiColor::Red, pel);
+        let mut nearest = f32::MAX;
+        let mut got = false;
+        for _ in 0..30 * 40 {
+            sim.step(&mut host);
+            // On its way, not once it is being pulled up into the ship.
+            if matches!(sim.pellet(pel).state, PelletState::Carried { .. }) {
+                nearest = nearest.min(dist_xz(sim.pellet(pel).pos, sim.onions()[ship.0 as usize].pos));
+            }
+            got |= sim.drain_events().any(|e| matches!(e, Event::ShipPartCollected { .. }));
+            if got { break; }
+        }
+        assert!(got, "the part never reached the ship");
+        assert!(nearest >= SHIP_HULL_RADIUS, "the part went {nearest:.0} from the ship's middle");
     }
 
     #[test]

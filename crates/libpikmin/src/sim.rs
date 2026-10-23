@@ -379,6 +379,7 @@ impl Sim {
             }
         }
 
+        let hulls = crate::carry::ship_hulls(&self.onions);
         for i in 0..n {
             if !grounded(&self.pikis[i]) {
                 continue;
@@ -400,6 +401,15 @@ impl Sim {
                 for part in self.creatures.parts_of(c) {
                     if (p.pos.y - part.centre.y).abs() < part.radius + p.size {
                         push_out(&mut p.pos, part.centre, part.radius + p.size);
+                    }
+                }
+            }
+            // So is a landed Dolphin (a Pikmin on its way to the captain's hand may cut through).
+            if !matches!(p.state, PikiState::GoHang { .. }) {
+                for &hull in &hulls {
+                    let up = p.pos.y - hull.y;
+                    if (-p.size..crate::carry::SHIP_HULL_HEIGHT).contains(&up) {
+                        push_out(&mut p.pos, hull, crate::carry::SHIP_HULL_RADIUS + p.size);
                     }
                 }
             }
