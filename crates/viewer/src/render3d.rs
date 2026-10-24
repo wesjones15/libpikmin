@@ -630,7 +630,11 @@ impl Scene3d {
             sim.captain(focus).pos - GVec3::Y * 3.0
         } else if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("throw") {
             sim.pikis().iter().find(|p| matches!(p.state, PikiState::Flying { .. }))
-                .map_or(GVec3::ZERO, |p| p.pos + GVec3::Y * 4.0)
+                .map_or(GVec3::ZERO, |p| {
+                    // Keep the original toss pose, with room for its leaf at the left.
+                    let right = GVec3::new(-self.yaw.cos(), 0.0, self.yaw.sin());
+                    p.pos + GVec3::Y - right * 3.0
+                })
         } else { std::env::var("PIKMIN_FOCUS")
             .ok()
             .and_then(|v| {
