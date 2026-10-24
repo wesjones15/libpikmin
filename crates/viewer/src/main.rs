@@ -870,7 +870,9 @@ async fn main() {
             clear_background(if clean {
                 if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("strike") { Color::from_rgba(58, 115, 30, 255) }
                 else if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("throw") { Color::from_rgba(140, 207, 242, 255) }
-                else if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("onion") { Color::from_rgba(38, 104, 173, 255) }
+                else if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("onion") { Color::from_rgba(31, 88, 150, 255) }
+                else if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("pluckers") { Color::from_rgba(105, 57, 144, 255) }
+                else if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("whistle") { Color::from_rgba(20, 26, 43, 255) }
                 else { Color::from_rgba(9, 11, 17, 255) }
             } else {
                 Color::from_rgba(150, 190, 225, 255)

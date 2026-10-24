@@ -986,8 +986,17 @@ impl Scene3d {
         let mut live = Vec::new();
         for sp in sim.sprouts() {
             if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("pluckers") {
-                // A small soil bed; the sprout and leaf are the exact PikiHeadItem meshes.
-                macroquad::models::draw_sphere(mq(sp.pos - GVec3::Y * 15.0), 12.0, None, Color::from_rgba(64, 41, 24, 255));
+                // Soil occludes the underground half of the native bulb. A shallow
+                // mound avoids displaying the old soil sphere like a second subject.
+                let mut vertices = vec![Vertex::new(sp.pos.x, sp.pos.y + 2.5, sp.pos.z, 0.5, 0.5, Color::from_rgba(79, 51, 29, 255))];
+                let mut indices = Vec::new();
+                for i in 0..=48 {
+                    let a = i as f32 * std::f32::consts::TAU / 48.0;
+                    vertices.push(Vertex::new(sp.pos.x + a.cos() * 14.0, sp.pos.y - 1.0, sp.pos.z + a.sin() * 14.0,
+                        a.cos() * 0.5 + 0.5, a.sin() * 0.5 + 0.5, Color::from_rgba(50, 32, 19, 255)));
+                    if i > 0 { indices.extend([0, i as u16, i as u16 + 1]); }
+                }
+                draw_mesh(&Mesh { vertices, indices, texture: None });
             }
             live.push(sp.id);
             let anim = if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("pluckers") {
