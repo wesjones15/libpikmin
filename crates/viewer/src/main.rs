@@ -175,6 +175,39 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
     let (params, params_source) = load_params(assets);
     let mut sim = Sim::new(params, 0x5eed);
     let olimar = sim.add_captain(Vec3::ZERO);
+    // Isolated native assets for skill artwork. No Onions or cursor can wander into
+    // a sprout/throw composition. Source: PikiHeadItem, PikiFlyingState, NaviGatherState.
+    if let Ok(portrait) = std::env::var("PIKMIN_PORTRAIT") {
+        match portrait.as_str() {
+            "pluckers" => { sim.plant_sprout(PikiColor::Red, Vec3::ZERO); }
+            "throw" => { sim.spawn_piki_in_squad(PikiColor::Red, Vec3::new(0.0, 0.0, 12.0), olimar); }
+            "onion" => {
+                let onion = sim.add_onion(Vec3::new(0.0, 100.0, 0.0), &[PikiColor::Red]);
+                sim.set_onion_pose(onion, Vec3::new(0.0, 100.0, 0.0), true);
+                sim.set_onion_flight_motion(onion, false, 0.0);
+            }
+            "strike" => {
+                sim.set_dismiss_strike(1.0, 150.0, 0.0, 1.0);
+                for i in 0..12 {
+                    let pos = Vec3::new((i % 4) as f32 * 10.0 - 15.0, 0.0, -38.0 - (i / 4) as f32 * 9.0);
+                    let color = [PikiColor::Red, PikiColor::Yellow, PikiColor::Blue][i % 3];
+                    sim.spawn_piki_in_squad(color, pos, olimar);
+                }
+            }
+            _ => {}
+        }
+        let mut world = World { tekis: teki::Tekis::new(load_specs(assets, sim.params())) };
+        if portrait == "strike" {
+            // An off-camera target lets the real strike command select StrikeRush;
+            // the capture renderer omits enemies, retaining the actual charging motion.
+            world.tekis.spawn(teki::TekiKind::Dwarf, Vec3::new(150.0, 0.0, 150.0), 0.0);
+        }
+        return Game {
+            world,
+            sim, captains: vec![olimar], active: 0, hits: 0, stolen: 0,
+            params_source, notice: None, found: Vec::new(), onions_take_off_in: None,
+        };
+    }
     // `PIKMIN_FEW=1`: a portrait scene, with only the captain, a few Pikmin and the Onions.
     let few = std::env::var_os("PIKMIN_FEW").is_some();
     let louie = if few {
@@ -294,8 +327,8 @@ fn piki_color(c: PikiColor) -> Color {
 fn window_conf() -> Conf {
     Conf {
         window_title: "libpikmin viewer".into(),
-        window_width: 1280,
-        window_height: 800,
+        window_width: if std::env::var_os("PIKMIN_PORTRAIT").is_some() { 720 } else { 1280 },
+        window_height: if std::env::var_os("PIKMIN_PORTRAIT").is_some() { 720 } else { 800 },
         ..Default::default()
     }
 }
@@ -366,7 +399,7 @@ async fn main() {
     }
 
     loop {
-        let dt = get_frame_time();
+        let dt = if std::env::var_os("PIKMIN_PORTRAIT").is_some() { 1.0 / 30.0 } else { get_frame_time() };
         if is_key_pressed(KeyCode::R) {
             g = new_game(&assets);
         }
@@ -583,21 +616,21 @@ async fn main() {
             let input = if i == g.active && !paused {
                 CaptainInput {
                     stick,
-                    whistle: is_key_down(KeyCode::LeftShift)
+                    whistle: std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("whistle") || is_key_down(KeyCode::LeftShift)
                         || is_mouse_button_down(MouseButton::Right)
                         || std::env::var_os("PIKMIN_WHISTLE").is_some(),
-                    throw: (is_key_down(KeyCode::Space) && !space_held_for_menu)
+                    throw: (std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("throw") && frames == 5) || (is_key_down(KeyCode::Space) && !space_held_for_menu)
                         || auto_throw
                         || std::env::var_os("PIKMIN_THROW").is_some()
                         || std::env::var("PIKMIN_THROW_FRAME")
                             .ok()
                             .and_then(|v| v.parse::<u32>().ok())
                             == Some(frames),
-                    dismiss: is_key_down(KeyCode::X)
+                    dismiss: (std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("strike") && frames == 2) || is_key_down(KeyCode::X)
                         || (frames == 40 && std::env::var_os("PIKMIN_STRIKE").is_some()),
                     swarm,
                     pose: None,
-                    cursor: None,
+                    cursor: if std::env::var_os("PIKMIN_PORTRAIT").is_some() { Some(Vec3::new(0.0, 0.0, 45.0)) } else { None },
                     cycle: is_key_down(KeyCode::Z),
                     jump: is_key_down(KeyCode::J),
                     jump_blocked: false,
@@ -757,6 +790,9 @@ async fn main() {
             }
         }
         g.sim.advance(&mut g.world, sim_dt);
+        if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("onion") {
+            g.sim.set_onion_flight_motion(libpikmin::onion::OnionId(0), false, frames as f32 / 60.0);
+        }
         let mut events: Vec<_> = g.sim.drain_events().collect();
         if let Some(r) = replica.as_mut() {
             events = r.step(&g.sim, events, get_frame_time());
@@ -832,7 +868,8 @@ async fn main() {
         if let Some(sc) = scene.as_mut().filter(|_| view3d) {
             let clean = std::env::var_os("PIKMIN_CLEAN").is_some();
             clear_background(if clean {
-                Color::from_rgba(0, 255, 0, 255)
+                if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("strike") { Color::from_rgba(58, 115, 30, 255) }
+                else { Color::from_rgba(9, 11, 17, 255) }
             } else {
                 Color::from_rgba(150, 190, 225, 255)
             });
@@ -864,6 +901,9 @@ async fn main() {
             }
             frames += 1;
             if let Some(path) = shot.as_ref().filter(|_| frames == shot_frame) {
+                if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("throw") {
+                    assert!(g.sim.pikis().iter().any(|p| matches!(p.state, PikiState::Flying { .. })), "portrait must show a flying Pikmin");
+                }
                 get_screen_data().export_png(&path.to_string_lossy());
                 return;
             }

@@ -626,13 +626,18 @@ impl Scene3d {
     ) -> Vec<Overlay> {
         let params: Params = sim.params().clone();
         // `PIKMIN_FOCUS=x,y,z` pins the camera target (for screenshots).
-        let target = std::env::var("PIKMIN_FOCUS")
+        let target = if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("strike") {
+            sim.captain(focus).pos - GVec3::Y * 3.0
+        } else if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("throw") {
+            sim.pikis().iter().find(|p| matches!(p.state, PikiState::Flying { .. }))
+                .map_or(GVec3::ZERO, |p| p.pos + GVec3::Y * 4.0)
+        } else { std::env::var("PIKMIN_FOCUS")
             .ok()
             .and_then(|v| {
                 let p: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
                 (p.len() == 3).then(|| Vec3::new(p[0], p[1], p[2]))
             })
-            .unwrap_or(sim.captain(focus).pos);
+            .unwrap_or(sim.captain(focus).pos) };
         self.update_camera(target);
         set_camera(&self.camera);
         let mut overlays = Vec::new();
@@ -832,7 +837,14 @@ impl Scene3d {
                 }
                 continue;
             };
-            let root = srt_matrix(GVec3::ONE, GVec3::ZERO, o.pos);
+            let mut root = srt_matrix(GVec3::ONE, GVec3::ZERO, o.pos);
+            // The shared host view rebases a flying Onion onto its supplied trajectory;
+            // the disc takeoff clip also carries a translation of its own.
+            if o.anim == OnionAnim::Hover {
+                let pose = self.onion.skel.pose(Mat4::IDENTITY, anim);
+                let rest = self.onion.skel.pose(Mat4::IDENTITY, self.onion_anims.get(1).map(|(_, a)| (a, 0.0)));
+                root *= Mat4::from_translation(rest.joints[1].w_axis.truncate() - pose.joints[1].w_axis.truncate());
+            }
             let now = anim.map_or(0.0, |(_, f)| f);
             let joints = draw_model(
                 &self.onion,
@@ -844,7 +856,7 @@ impl Scene3d {
                 },
                 &mut ctx,
             );
-            let flying = matches!(o.anim, OnionAnim::TakeOff { .. } | OnionAnim::Landing { .. });
+            let flying = matches!(o.anim, OnionAnim::TakeOff { .. } | OnionAnim::Landing { .. }) || o.flight_motion.is_some();
             if let (true, Some(e), Some((info, _))) = (flying, self.effects.as_mut(), self.onion_anims.get(motion_idx)) {
                 let coll = &self.onion.model.coll;
                 let sphere = |id: &str| {
@@ -969,8 +981,16 @@ impl Scene3d {
         // flower on joint 3.
         let mut live = Vec::new();
         for sp in sim.sprouts() {
+            if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("pluckers") {
+                // A small soil bed; the sprout and leaf are the exact PikiHeadItem meshes.
+                macroquad::models::draw_sphere(mq(sp.pos - GVec3::Y * 15.0), 12.0, None, Color::from_rgba(64, 41, 24, 255));
+            }
             live.push(sp.id);
-            let anim = self.animator.sprout(&self.pikihead_anims, sp, dt);
+            let anim = if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("pluckers") {
+                // PikiHeadAI's sprouted idle, UGWAIT (3); a directly planted Ready
+                // seed has never crossed the Flying -> Buried -> Tane -> Ready chain.
+                self.pikihead_anims.get(3).map(|(_, a)| (a, self.time * 30.0 % a.frames as f32))
+            } else { self.animator.sprout(&self.pikihead_anims, sp, dt) };
             let root = if matches!(sp.state, SproutState::Flying) && sp.vel.length() > 0.0 {
                 // Flying seeds point their Y axis against their velocity.
                 let y = -sp.vel.normalize();
@@ -1023,6 +1043,7 @@ impl Scene3d {
         // Enemies: their own models and `.key` animations at the disc scale. Corpses keep
         // their death pose wherever the sim carries the pellet.
         for t in &tekis.list {
+            if std::env::var_os("PIKMIN_PORTRAIT").is_some() { continue; }
             let (Some(spec), Some(gm)) = (tekis.spec(t.kind), self.tekis.get(t.kind.index()).and_then(Option::as_ref))
             else {
                 continue;
@@ -1092,6 +1113,7 @@ impl Scene3d {
         let ante = self.olimar.model.coll.iter().find(|c| c.id == "ante").cloned();
         let mut whistles = Vec::new();
         for (i, c) in sim.captains().iter().enumerate() {
+            if matches!(std::env::var("PIKMIN_PORTRAIT").as_deref(), Ok("pluckers" | "throw" | "onion")) { continue; }
             let anim = self.animator.captain(&self.piki_anims, &params, c, dt);
             let mut pos = c.pos;
             let mut beam = Mat4::IDENTITY;
@@ -1150,7 +1172,9 @@ impl Scene3d {
                 captain_pos: c.pos,
                 radius: wr,
             });
-            if let Some((cursor, marker)) = self.cursor.as_ref() {
+            if std::env::var_os("PIKMIN_PORTRAIT").is_some() {
+                // Cursor and its marker are UI, never portrait subjects.
+            } else if let Some((cursor, marker)) = self.cursor.as_ref() {
                 // `Navi::refresh`: on the ground 1 above, Z pointing away from the captain.
                 let at = c.cursor_world.with_y(c.cursor_world.y + 1.0);
                 let z = (at - c.pos).with_y(0.0).normalize_or(GVec3::Z);
