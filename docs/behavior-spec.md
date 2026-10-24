@@ -509,5 +509,16 @@ following, airborne, dormant and out-of-reach Onions provide no interact prompt.
 - Honeywisps and Spotty/Dwarf Bulborb AI in the core (they are viewer-side for now).
 - Free-mode AI (`ActFree`: wandering and the periodic work search).
 
+### Onion flight particles and planted sprout pose
+
+`GoalItem::playEffect` motions 6-8 key 0 enables the flower's attached flow emitter
+(`setFlowEffect`, particle 296 `kafun_ng.pcr`); motions 9-11 start with flow enabled
+and stop it at key 3. The shared host view now follows these keys as the viewer does,
+including keys at frame zero on a newly selected clip, and tracks the posed `piki`
+collision sphere. Ground takeoff smoke remains particle 269 `take_s.pcr`.
+Directly planted ready PikiHeadItems start with UGWAIT (3), matching
+`pikiheadItem.cpp::startAI` / `PikiHeadAI::Wait`, without a fictitious seed-fall pose.
+
 ### Onion texture animation
+
 The beam's PVW texture matrices advance independently at 30 frames/second times each layer's disc speed (graphics.cpp PVWTextureData::animate). The presentation rebakes visible beams at 30 Hz into stable texture slots; hosts refresh pixels by texture version. Headless checks cover all three colors, moving pixels and bounded texture storage. In-game visual confirmation remains manual.

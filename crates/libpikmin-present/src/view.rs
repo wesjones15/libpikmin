@@ -1232,6 +1232,7 @@ impl View {
             }
             self.onion_light(sim, i, o, dt);
             let smoke_key = (8u64 << 48) | ((o.id.0 as u64) << 8);
+            let flow_key = smoke_key | 1;
             let lifting = matches!(o.anim, libpikmin::onion::OnionAnim::TakeOff { .. } | libpikmin::onion::OnionAnim::Hover);
             if lifting {
                 let ground = self.onion_ground.get(&o.id.0).copied().unwrap_or(o.pos.y);
@@ -1312,10 +1313,10 @@ impl View {
                 self.demo_sounds.push(None);
             }
             if o.dormancy.is_none() && (6..=12).contains(&motion) {
-                // GoalItem::playEffect: the disc animation keys drive takeoff dust,
+                // GoalItem::playEffect: disc keys drive flying sparkles, takeoff dust,
                 // landing smoke, and the stocked Onion's idle sparkle/puff and wheeze.
                 let now = anim.map_or(0.0, |(_, f)| f);
-                let prev = before.unwrap_or(now);
+                let prev = before.unwrap_or(-1.0);
                 let keys: Vec<_> = self.onion_anims.get(motion).into_iter()
                     .flat_map(|(info, _)| &info.event_keys)
                     .filter(|e| e.event == 1 && (if now >= prev {
@@ -1332,12 +1333,20 @@ impl View {
                 let puffs = [sphere("eff1"), sphere("eff2"), sphere("eff3")];
                 let flower = sphere("piki");
                 if let Some(fx) = self.effects.as_mut() {
+                    // GoalItem::startLand enables setFlowEffect before the landing clip.
+                    if (9..=11).contains(&motion) && before.is_none() {
+                        fx.attach(flow_key, fx_defs::KAFUN_NG, flower);
+                    }
                     for value in keys {
                         match (motion, value) {
+                            // GoalItem::setFlowEffect: EFF_Kafun_NG (296), attached
+                            // to the flower's 'piki' collision sphere, not ground smoke.
+                            (6..=8, 0) => { fx.attach(flow_key, fx_defs::KAFUN_NG, flower); }
                             (6..=8, 2) => { /* Attached ground smoke above handles the takeoff key. */ }
                             (9..=11, 0) => { fx.spawn(fx_defs::ROCKET_LAND_S, o.pos); }
                             (9..=11, 1) => { fx.spawn(fx_defs::ROCKET_SMOKE_D, bases[0]); }
                             (9..=11, 2) => { for at in bases { fx.spawn(fx_defs::ROCKET_SMOKE_D, at); } }
+                            (9..=11, 3) => { fx.detach(flow_key); }
                             (12, value) => {
                                 if value == 0 { fx.spawn(fx_defs::ONYON_SPARKLES, flower); }
                                 fx.spawn(fx_defs::ONYON_PUFF, puffs[((o.id.0 as usize) + value as usize) % 3]);
@@ -1346,7 +1355,11 @@ impl View {
                             _ => {}
                         }
                     }
+                    fx.move_attached(flow_key, flower);
+                    if motion == 12 { fx.detach(flow_key); }
                 }
+            } else if let Some(fx) = self.effects.as_mut() {
+                fx.detach(flow_key);
             }
             // GoalItem::refresh: even frames live, odd frames dormant, per colour.
             let frame = o.colors[0].index() as f32 * 2.0

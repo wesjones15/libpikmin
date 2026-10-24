@@ -493,7 +493,9 @@ impl Animator {
         let track = self.sprouts.entry(sp.id).or_insert(SproutTrack {
             state: std::mem::discriminant(&sp.state),
             happa: sp.happa,
-            motion: PikiHeadMotion::TaneFall,
+            // Directly planted ready sprouts start in PikiHeadAI::Wait (UGWAIT),
+            // as pikiheadItem.cpp startAI does; no airborne TaneFall transition occurred.
+            motion: if matches!(sp.state, SproutState::Ready { .. }) { PikiHeadMotion::UgWait } else { PikiHeadMotion::TaneFall },
         });
         let state = std::mem::discriminant(&sp.state);
         let entered = track.state != state;
