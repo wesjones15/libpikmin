@@ -638,7 +638,10 @@ impl Scene3d {
         let mut overlays = Vec::new();
         self.animator.begin_frame(dt);
 
-        self.draw_ground(sim.captain(focus).pos);
+        // `PIKMIN_CLEAN=1`: no terrain, for a portrait capture on a keyable background.
+        if std::env::var_os("PIKMIN_CLEAN").is_none() {
+            self.draw_ground(sim.captain(focus).pos);
+        }
         self.time += dt;
         if let Some(t) = self.arrive.as_mut() {
             *t += dt;

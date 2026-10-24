@@ -175,50 +175,66 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
     let (params, params_source) = load_params(assets);
     let mut sim = Sim::new(params, 0x5eed);
     let olimar = sim.add_captain(Vec3::ZERO);
-    let louie = sim.add_captain(Vec3::new(-250.0, 0.0, 150.0));
+    // `PIKMIN_FEW=1`: a portrait scene, with only the captain, a few Pikmin and the Onions.
+    let few = std::env::var_os("PIKMIN_FEW").is_some();
+    let louie = if few {
+        None
+    } else {
+        Some(sim.add_captain(Vec3::new(-250.0, 0.0, 150.0)))
+    };
     let colors = [PikiColor::Red, PikiColor::Yellow, PikiColor::Blue];
-    for i in 0..60 {
-        let a = i as f32 * 2.4;
-        let pos = Vec3::new(
-            a.sin() * (20.0 + i as f32),
-            0.0,
-            a.cos() * (20.0 + i as f32) - 40.0,
-        );
-        sim.spawn_piki_in_squad(colors[i % 3], pos, olimar);
-    }
-    // 80 in all, so the Onions have room to shoot seeds (100 on the field, `aiconst` p15,
-    // keeps them inside).
-    for i in 0..10 {
-        let a = i as f32 * 2.4;
-        let pos = Vec3::new(-250.0 + a.sin() * 30.0, 0.0, 110.0 + a.cos() * 30.0);
-        sim.spawn_piki_in_squad(PikiColor::Blue, pos, louie);
-    }
-    for i in 0..10 {
-        sim.spawn_piki(
-            PikiColor::Red,
-            Vec3::new(
-                220.0 + (i % 5) as f32 * 14.0,
+    if few {
+        let n: usize = std::env::var("PIKMIN_SQUAD").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
+        for i in 0..n {
+            let pos = Vec3::new((i as f32 - n as f32 * 0.5) * 22.0, 0.0, 35.0 + (i % 2) as f32 * 18.0);
+            sim.spawn_piki_in_squad(colors[i % 3], pos, olimar);
+        }
+    } else {
+        for i in 0..60 {
+            let a = i as f32 * 2.4;
+            let pos = Vec3::new(
+                a.sin() * (20.0 + i as f32),
                 0.0,
-                -200.0 + (i / 5) as f32 * 14.0,
-            ),
-        );
+                a.cos() * (20.0 + i as f32) - 40.0,
+            );
+            sim.spawn_piki_in_squad(colors[i % 3], pos, olimar);
+        }
+        // 80 in all, so the Onions have room to shoot seeds (100 on the field, `aiconst` p15,
+        // keeps them inside).
+        for i in 0..10 {
+            let a = i as f32 * 2.4;
+            let pos = Vec3::new(-250.0 + a.sin() * 30.0, 0.0, 110.0 + a.cos() * 30.0);
+            sim.spawn_piki_in_squad(PikiColor::Blue, pos, louie.unwrap());
+        }
+        for i in 0..10 {
+            sim.spawn_piki(
+                PikiColor::Red,
+                Vec3::new(
+                    220.0 + (i % 5) as f32 * 14.0,
+                    0.0,
+                    -200.0 + (i / 5) as f32 * 14.0,
+                ),
+            );
+        }
     }
     let mut world = World {
         tekis: teki::Tekis::new(load_specs(assets, sim.params())),
     };
-    // A Spotty Bulborb asleep in its nest, Dwarf Bulborbs on patrol, and a Honeywisp.
-    world.tekis.spawn(teki::TekiKind::Spotty, Vec3::new(330.0, 0.0, 160.0), std::f32::consts::PI);
-    world.tekis.spawn(teki::TekiKind::Dwarf, Vec3::new(200.0, 0.0, 300.0), 0.0);
-    world.tekis.spawn(teki::TekiKind::Dwarf, Vec3::new(-120.0, 0.0, 320.0), 0.0);
-    world.tekis.spawn(teki::TekiKind::Honeywisp, Vec3::new(-60.0, 0.0, 140.0), 0.0);
-    // Numbered pellets 1, 5, 10, 20 with the disc's configs (`pelMgr.bin`: pr01, py05, pb10,
-    // pr20).
-    for (i, (n, color)) in [(1, PikiColor::Red), (5, PikiColor::Yellow), (10, PikiColor::Blue), (20, PikiColor::Red)]
-        .into_iter()
-        .enumerate()
-    {
-        let pos = Vec3::new(-150.0 + i as f32 * 90.0, 0.0, -130.0);
-        sim.spawn_pellet(PelletDesc::numbered(sim.params(), n, color, pos, 0.0));
+    if !few {
+        // A Spotty Bulborb asleep in its nest, Dwarf Bulborbs on patrol, and a Honeywisp.
+        world.tekis.spawn(teki::TekiKind::Spotty, Vec3::new(330.0, 0.0, 160.0), std::f32::consts::PI);
+        world.tekis.spawn(teki::TekiKind::Dwarf, Vec3::new(200.0, 0.0, 300.0), 0.0);
+        world.tekis.spawn(teki::TekiKind::Dwarf, Vec3::new(-120.0, 0.0, 320.0), 0.0);
+        world.tekis.spawn(teki::TekiKind::Honeywisp, Vec3::new(-60.0, 0.0, 140.0), 0.0);
+        // Numbered pellets 1, 5, 10, 20 with the disc's configs (`pelMgr.bin`: pr01, py05, pb10,
+        // pr20).
+        for (i, (n, color)) in [(1, PikiColor::Red), (5, PikiColor::Yellow), (10, PikiColor::Blue), (20, PikiColor::Red)]
+            .into_iter()
+            .enumerate()
+        {
+            let pos = Vec3::new(-150.0 + i as f32 * 90.0, 0.0, -130.0);
+            sim.spawn_pellet(PelletDesc::numbered(sim.params(), n, color, pos, 0.0));
+        }
     }
     sim.add_onion(Vec3::new(-220.0, 0.0, -260.0), &[PikiColor::Red]);
     sim.add_onion(Vec3::new(0.0, 0.0, -340.0), &[PikiColor::Yellow]);
@@ -232,29 +248,31 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
     // The S.S. Dolphin to the west facing east, and three of its parts: the Main Engine,
     // the Whimsical Radar and the Automatic Gear.
     if let Ok(a) = assets {
-        let (pos, yaw) = (Vec3::new(-460.0, 0.0, 40.0), std::f32::consts::FRAC_PI_2);
-        if let Some((goal, suck)) = ship_points(a, pos, yaw) {
-            let ship = sim.add_ship(pos, goal, suck);
-            let n: u32 = std::env::var("PIKMIN_SHIP_PARTS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-            for p in 0..n.min(30) {
-                sim.give_ship_part(ship, p);
+        if !few {
+            let (pos, yaw) = (Vec3::new(-460.0, 0.0, 40.0), std::f32::consts::FRAC_PI_2);
+            if let Some((goal, suck)) = ship_points(a, pos, yaw) {
+                let ship = sim.add_ship(pos, goal, suck);
+                let n: u32 = std::env::var("PIKMIN_SHIP_PARTS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+                for p in 0..n.min(30) {
+                    sim.give_ship_part(ship, p);
+                }
             }
-        }
-        let params = sim.params().clone();
-        for (part, at) in [
-            (libpikmin_assets::ship::MAIN_ENGINE as u32, Vec3::new(-170.0, 0.0, 30.0)),
-            (5, Vec3::new(130.0, 0.0, 60.0)),
-            (20, Vec3::new(400.0, 0.0, -40.0)),
-        ] {
-            if let Some(d) = ship_part_desc(a, &params, part, at) {
-                sim.spawn_pellet(d);
+            let params = sim.params().clone();
+            for (part, at) in [
+                (libpikmin_assets::ship::MAIN_ENGINE as u32, Vec3::new(-170.0, 0.0, 30.0)),
+                (5, Vec3::new(130.0, 0.0, 60.0)),
+                (20, Vec3::new(400.0, 0.0, -40.0)),
+            ] {
+                if let Some(d) = ship_part_desc(a, &params, part, at) {
+                    sim.spawn_pellet(d);
+                }
             }
         }
     }
     Game {
         sim,
         world,
-        captains: vec![olimar, louie],
+        captains: if few { vec![olimar] } else { vec![olimar, louie.unwrap()] },
         active: 0,
         hits: 0,
         stolen: 0,
@@ -568,8 +586,15 @@ async fn main() {
                     whistle: is_key_down(KeyCode::LeftShift)
                         || is_mouse_button_down(MouseButton::Right)
                         || std::env::var_os("PIKMIN_WHISTLE").is_some(),
-                    throw: (is_key_down(KeyCode::Space) && !space_held_for_menu) || auto_throw,
-                    dismiss: is_key_down(KeyCode::X),
+                    throw: (is_key_down(KeyCode::Space) && !space_held_for_menu)
+                        || auto_throw
+                        || std::env::var_os("PIKMIN_THROW").is_some()
+                        || std::env::var("PIKMIN_THROW_FRAME")
+                            .ok()
+                            .and_then(|v| v.parse::<u32>().ok())
+                            == Some(frames),
+                    dismiss: is_key_down(KeyCode::X)
+                        || (frames == 40 && std::env::var_os("PIKMIN_STRIKE").is_some()),
                     swarm,
                     pose: None,
                     cursor: None,
@@ -805,10 +830,15 @@ async fn main() {
 
         // ---- draw ----
         if let Some(sc) = scene.as_mut().filter(|_| view3d) {
-            clear_background(Color::from_rgba(150, 190, 225, 255));
+            let clean = std::env::var_os("PIKMIN_CLEAN").is_some();
+            clear_background(if clean {
+                Color::from_rgba(0, 255, 0, 255)
+            } else {
+                Color::from_rgba(150, 190, 225, 255)
+            });
             sc.paused = paused;
             let overlays = sc.draw(replica.as_ref().map_or(&g.sim, |r| &r.sim), active, &g.world.tekis, dt);
-            for o in overlays {
+            for o in overlays.into_iter().filter(|_| !clean) {
                 match o {
                     render3d::Overlay::Text { at, text, color, size } => {
                         if let Some(s) = sc.world_to_screen(at) {
@@ -825,10 +855,12 @@ async fn main() {
                     }
                 }
             }
-            draw_hud(&g);
-            draw_onion_prompt(&g, menu.as_ref());
-            if let (Some(m), Some(u)) = (msg.as_ref(), ui.as_mut()) {
-                m.draw(u);
+            if !clean {
+                draw_hud(&g);
+                draw_onion_prompt(&g, menu.as_ref());
+                if let (Some(m), Some(u)) = (msg.as_ref(), ui.as_mut()) {
+                    m.draw(u);
+                }
             }
             frames += 1;
             if let Some(path) = shot.as_ref().filter(|_| frames == shot_frame) {
@@ -1109,7 +1141,7 @@ fn draw_hud(g: &Game) {
             "{}  squad {} | Louie squad {} | idle {} | attacking {} | latched {} | knocked {}",
             if g.active == 0 { "Olimar" } else { "Louie" },
             g.sim.captain(g.captains[0]).plate.len(),
-            g.sim.captain(g.captains[1]).plate.len(),
+            g.captains.get(1).map_or(0, |c| g.sim.captain(*c).plate.len()),
             count(&|s| matches!(s, PikiState::Idle)),
             count(&|s| matches!(s, PikiState::Attack(_))),
             count(&|s| s.latched_to().is_some()),
