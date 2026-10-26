@@ -6,8 +6,14 @@
 //! two stereo pairs per 36 bytes that are mixed at `mixLevel` (0x5FFF each by default).
 //! Decoder state resets only at the start of the stream.
 
-use super::adpcm::{History, decode_frame4};
+use super::adpcm::{History, Overflow, decode_frame4};
 use crate::Error;
+
+/// Saturating, like the DSP and bank waves. The CPU decoder this stream follows
+/// (`Jac_Decode_ADPCM`, syncstream.c) stores each sample into an `s16`, which wraps, so
+/// `Overflow::Wrap` is the decomp-faithful choice; kept as it was when the decoder was
+/// shared, to be switched deliberately (libsms already wraps).
+const OVERFLOW: Overflow = Overflow::Clamp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StreamHeader {
@@ -55,8 +61,8 @@ impl Stream {
             4 => {
                 let (mut hl, mut hr) = (History::default(), History::default());
                 for f in data.as_chunks::<18>().0 {
-                    decode_frame4(&f[..9], &mut hl, &mut l);
-                    decode_frame4(&f[9..], &mut hr, &mut r);
+                    decode_frame4(&f[..9], &mut hl, &mut l, OVERFLOW);
+                    decode_frame4(&f[9..], &mut hr, &mut r, OVERFLOW);
                     for i in 0..16 {
                         stereo.extend_from_slice(&[l[i], r[i]]);
                     }
@@ -67,10 +73,10 @@ impl Stream {
                 let mut h = [History::default(); 4];
                 let (mut l2, mut r2) = ([0i16; 16], [0i16; 16]);
                 for f in data.as_chunks::<36>().0 {
-                    decode_frame4(&f[..9], &mut h[0], &mut l);
-                    decode_frame4(&f[9..18], &mut h[1], &mut r);
-                    decode_frame4(&f[18..27], &mut h[2], &mut l2);
-                    decode_frame4(&f[27..], &mut h[3], &mut r2);
+                    decode_frame4(&f[..9], &mut h[0], &mut l, OVERFLOW);
+                    decode_frame4(&f[9..18], &mut h[1], &mut r, OVERFLOW);
+                    decode_frame4(&f[18..27], &mut h[2], &mut l2, OVERFLOW);
+                    decode_frame4(&f[27..], &mut h[3], &mut r2, OVERFLOW);
                     let mix = |a: i16, b: i16| {
                         (((a as i32 * MIX) >> 15) + ((b as i32 * MIX) >> 15)).clamp(-0x8000, 0x7FFF)
                             as i16
@@ -86,4 +92,38 @@ impl Stream {
         stereo.resize(n * 2, 0);
         Ok(Stream { header, stereo })
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::adpcm::baseline::{fnv, random};
+    use super::*;
+
+    fn stx(format: u16, data: &[u8], samples: u32) -> Vec<u8> {
+        let mut d = vec![0u8; 0x20];
+        d[0..4].copy_from_slice(&(data.len() as u32).to_be_bytes());
+        d[4..8].copy_from_slice(&samples.to_be_bytes());
+        d[10..12].copy_from_slice(&format.to_be_bytes());
+        d.extend_from_slice(data);
+        d
+    }
+
+    /// Whole-stream output over random data, pinned before the decoder moved to libcommon.
+    #[test]
+    fn decoded_streams_match_baseline() {
+        let data = random(18 * 40);
+        let got: Vec<u64> = [(4, 16 * 40), (5, 16 * 20)]
+            .iter()
+            .map(|&(format, n)| {
+                let s = Stream::decode(&stx(format, &data, n)).unwrap();
+                assert_eq!(s.stereo.len(), n as usize * 2);
+                fnv(&s.stereo)
+            })
+            .collect();
+        println!("{got:#x?}");
+        assert_eq!(got, BASELINE);
+    }
+
+    // Recorded from the decoder before it moved to libcommon::audio::afc.
+    const BASELINE: [u64; 2] = [0x9ca145f2761a0db5, 0x9891edb425df0ca1];
 }
