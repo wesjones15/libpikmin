@@ -18,7 +18,7 @@
 use glam::{Vec2, Vec3};
 
 use crate::Error;
-use crate::reader::Reader;
+use crate::reader::{Reader, ReaderExt};
 use crate::texture::{self, Image, TexFormat};
 
 mod chunk {

@@ -9,7 +9,7 @@
 use glam::Vec3;
 
 use crate::Error;
-use crate::reader::Reader;
+use crate::reader::{Reader, ReaderExt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnimKind {
@@ -54,7 +54,7 @@ pub struct Anim {
 
 fn data_chunk(r: &mut Reader) -> Result<Vec<f32>, Error> {
     let n = r.count()?;
-    (0..n).map(|_| r.f32()).collect()
+    (0..n).map(|_| Ok(r.f32()?)).collect()
 }
 
 impl Anim {

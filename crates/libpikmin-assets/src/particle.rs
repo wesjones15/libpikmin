@@ -17,7 +17,7 @@ use std::sync::Arc;
 use glam::{Mat3, Quat, Vec3};
 
 use crate::Error;
-use crate::reader::Reader;
+use crate::reader::{Reader, ReaderExt};
 
 /// An `EffectMgr` entry: a generator and its texture (and child-particle texture).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
