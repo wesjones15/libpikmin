@@ -9,6 +9,7 @@ edition = "2024"
 publish = false
 
 [workspace.dependencies]
+libcommon = { path = "../libcommon" }
 libpikmin = { path = "crates/libpikmin" }
 libpikmin-assets = { path = "crates/libpikmin-assets" }
 libpikmin-audio = { path = "crates/libpikmin-audio" }

@@ -5,6 +5,7 @@
 //! tile sizes. The pixel layouts are the standard GX tiled formats.
 
 use crate::Error;
+use libcommon::texture::gx::{self, GxFormat};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TexFormat {
@@ -37,20 +38,18 @@ impl TexFormat {
         })
     }
 
-    /// Tile size in pixels.
-    fn tile(self) -> (usize, usize) {
+    /// The shared GX decoder's format (`Texture::decodeData` maps these one to one).
+    fn gx(self) -> GxFormat {
         match self {
-            Self::I4 | Self::S3tc => (8, 8),
-            Self::I8 | Self::Ia4 | Self::Z8 => (8, 4),
-            _ => (4, 4),
-        }
-    }
-
-    /// Bytes per tile.
-    fn tile_bytes(self) -> usize {
-        match self {
-            Self::Rgba8 => 64,
-            _ => 32,
+            Self::Rgb565 => GxFormat::Rgb565,
+            Self::S3tc => GxFormat::Cmpr,
+            Self::Rgb5a3 => GxFormat::Rgb5a3,
+            Self::I4 => GxFormat::I4,
+            Self::I8 => GxFormat::I8,
+            Self::Ia4 => GxFormat::Ia4,
+            Self::Ia8 => GxFormat::Ia8,
+            Self::Rgba8 => GxFormat::Rgba8,
+            Self::Z8 => GxFormat::Z8,
         }
     }
 }
@@ -61,28 +60,6 @@ pub struct Image {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
-}
-
-fn rgb565(c: u16) -> [u8; 4] {
-    let r = ((c >> 11) & 0x1F) as u8;
-    let g = ((c >> 5) & 0x3F) as u8;
-    let b = (c & 0x1F) as u8;
-    [(r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2), 255]
-}
-
-fn rgb5a3(c: u16) -> [u8; 4] {
-    if c & 0x8000 != 0 {
-        let r = ((c >> 10) & 0x1F) as u8;
-        let g = ((c >> 5) & 0x1F) as u8;
-        let b = (c & 0x1F) as u8;
-        [(r << 3) | (r >> 2), (g << 3) | (g >> 2), (b << 3) | (b >> 2), 255]
-    } else {
-        let a = ((c >> 12) & 0x7) as u8;
-        let r = ((c >> 8) & 0xF) as u8;
-        let g = ((c >> 4) & 0xF) as u8;
-        let b = (c & 0xF) as u8;
-        [r * 0x11, g * 0x11, b * 0x11, (a << 5) | (a << 2) | (a >> 1)]
-    }
 }
 
 /// A `.bti` texture (`TexImg::importBti`, graphics.cpp): the 0x20-byte `BtiHeader`, then the
@@ -112,109 +89,8 @@ pub fn decode_bti(data: &[u8]) -> Result<(Image, bool, bool), Error> {
 
 /// Decodes the first image level.
 pub fn decode(format: TexFormat, width: u32, height: u32, data: &[u8]) -> Result<Image, Error> {
-    let (w, h) = (width as usize, height as usize);
-    let (tw, th) = format.tile();
-    let tiles_x = w.div_ceil(tw);
-    let tiles_y = h.div_ceil(th);
-    let need = tiles_x * tiles_y * format.tile_bytes();
-    if data.len() < need {
-        return Err(Error::Bad(format!(
-            "{format:?} {w}x{h} needs {need} bytes, have {}",
-            data.len()
-        )));
-    }
-
-    let mut rgba = vec![0u8; w * h * 4];
-    let mut put = |x: usize, y: usize, px: [u8; 4]| {
-        if x < w && y < h {
-            rgba[(y * w + x) * 4..][..4].copy_from_slice(&px);
-        }
-    };
-    let be16 = |o: usize| u16::from_be_bytes([data[o], data[o + 1]]);
-
-    for ty in 0..tiles_y {
-        for tx in 0..tiles_x {
-            let base = (ty * tiles_x + tx) * format.tile_bytes();
-            let (x0, y0) = (tx * tw, ty * th);
-            match format {
-                TexFormat::S3tc => {
-                    for sub in 0..4 {
-                        let b = base + sub * 8;
-                        let (sx, sy) = (x0 + (sub % 2) * 4, y0 + (sub / 2) * 4);
-                        let (c0, c1) = (be16(b), be16(b + 2));
-                        let (p0, p1) = (rgb565(c0), rgb565(c1));
-                        let mix = |a: u8, b: u8, wa: u16, wb: u16| {
-                            ((a as u16 * wa + b as u16 * wb) / (wa + wb)) as u8
-                        };
-                        let palette = if c0 > c1 {
-                            [
-                                p0,
-                                p1,
-                                std::array::from_fn(|i| if i == 3 { 255 } else { mix(p0[i], p1[i], 2, 1) }),
-                                std::array::from_fn(|i| if i == 3 { 255 } else { mix(p0[i], p1[i], 1, 2) }),
-                            ]
-                        } else {
-                            [
-                                p0,
-                                p1,
-                                std::array::from_fn(|i| if i == 3 { 255 } else { mix(p0[i], p1[i], 1, 1) }),
-                                [0, 0, 0, 0],
-                            ]
-                        };
-                        for row in 0..4 {
-                            let bits = data[b + 4 + row];
-                            for col in 0..4 {
-                                let idx = (bits >> (6 - col * 2)) & 3;
-                                put(sx + col, sy + row, palette[idx as usize]);
-                            }
-                        }
-                    }
-                }
-                TexFormat::Rgba8 => {
-                    for i in 0..16 {
-                        let (a, r) = (data[base + i * 2], data[base + i * 2 + 1]);
-                        let (g, b) = (data[base + 32 + i * 2], data[base + 32 + i * 2 + 1]);
-                        put(x0 + i % 4, y0 + i / 4, [r, g, b, a]);
-                    }
-                }
-                _ => {
-                    for i in 0..tw * th {
-                        let (x, y) = (x0 + i % tw, y0 + i / tw);
-                        let px = match format {
-                            TexFormat::Rgb565 => rgb565(be16(base + i * 2)),
-                            TexFormat::Rgb5a3 => rgb5a3(be16(base + i * 2)),
-                            // GX samples intensity formats as I in all four channels (the
-                            // decomp's PC path, `Texture::decodeData`, forces alpha to 255).
-                            TexFormat::I4 => {
-                                let byte = data[base + i / 2];
-                                let v = if i % 2 == 0 { byte >> 4 } else { byte & 0xF } * 0x11;
-                                [v, v, v, v]
-                            }
-                            TexFormat::I8 => {
-                                let v = data[base + i];
-                                [v, v, v, v]
-                            }
-                            TexFormat::Z8 => {
-                                let v = data[base + i];
-                                [v, v, v, 255]
-                            }
-                            TexFormat::Ia4 => {
-                                let byte = data[base + i];
-                                let (a, v) = ((byte >> 4) * 0x11, (byte & 0xF) * 0x11);
-                                [v, v, v, a]
-                            }
-                            TexFormat::Ia8 => {
-                                let (a, v) = (data[base + i * 2], data[base + i * 2 + 1]);
-                                [v, v, v, a]
-                            }
-                            TexFormat::S3tc | TexFormat::Rgba8 => unreachable!(),
-                        };
-                        put(x, y, px);
-                    }
-                }
-            }
-        }
-    }
+    let rgba = gx::decode(format.gx(), width, height, data, &[])
+        .map_err(|e| Error::Bad(e.to_string()))?;
     Ok(Image {
         width,
         height,
@@ -225,6 +101,7 @@ pub fn decode(format: TexFormat, width: u32, height: u32, data: &[u8]) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use libcommon::texture::gx::rgb5a3;
 
     #[test]
     fn rgb5a3_opaque_and_translucent() {
@@ -232,6 +109,44 @@ mod tests {
         assert_eq!(rgb5a3(0x7F00), [255, 0, 0, 255]);
         assert_eq!(rgb5a3(0x0000), [0, 0, 0, 0]);
     }
+
+    fn fnv(bytes: &[u8]) -> u64 {
+        bytes.iter().fold(0xcbf29ce484222325, |h, &b| (h ^ b as u64).wrapping_mul(0x100000001b3))
+    }
+
+    /// Pixel-exact baseline over pseudo-random data, including partial edge tiles, so a
+    /// refactor of the decoder cannot change color or alpha unnoticed.
+    #[test]
+    fn decoded_pixels_match_baseline() {
+        let mut s = 0x1234_5678u32;
+        let data: Vec<u8> = (0..4096)
+            .map(|_| {
+                s = s.wrapping_mul(1664525).wrapping_add(1013904223);
+                (s >> 24) as u8
+            })
+            .collect();
+        let got: Vec<u64> = (0..=8)
+            .map(|f| {
+                let format = TexFormat::from_tex_img(f).unwrap();
+                fnv(&decode(format, 13, 11, &data).unwrap().rgba)
+            })
+            .collect();
+        println!("{got:#x?}");
+        assert_eq!(got, BASELINE);
+    }
+
+    // Recorded from the decoder before it moved to libcommon::texture::gx.
+    const BASELINE: [u64; 9] = [
+        0xa7e5dc0259b842b2,
+        0xb9d7fb80fab30c30,
+        0x433f0bf7c535a946,
+        0x8951b18c7a118b4d,
+        0x46ebc824be401321,
+        0x9824912f42098bdf,
+        0x7ba54e580471227b,
+        0xb51c3975d39f7dfc,
+        0xd4cc7b445e0f4bad,
+    ];
 
     #[test]
     fn i8_tile_order() {
