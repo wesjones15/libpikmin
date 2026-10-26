@@ -526,6 +526,7 @@ version = "0.1.0"
 dependencies = [
  "cpal",
  "glam 0.30.10",
+ "libcommon",
  "libpikmin",
  "libpikmin-assets",
  "libpikmin-audio",

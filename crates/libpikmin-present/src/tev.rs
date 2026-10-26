@@ -18,7 +18,8 @@
 use libpikmin_assets::model::{TevCombiner, TevInfo, TevStage, mat_flags};
 use libpikmin_assets::{Image, Model};
 
-type C4 = [f32; 4];
+use libcommon::tev::{C4, Combine, Regs, alpha_in, color_in, combine_alpha, combine_color, konst};
+use libcommon::texture::{Wrap, sample_rgba8_bilinear};
 
 /// Per-draw overrides of a material's inputs.
 #[derive(Debug, Clone, Copy, Default)]
@@ -114,93 +115,6 @@ impl Baked {
     }
 }
 
-/// GX konst selection (`GXTevKColorSel` / `GXTevKAlphaSel`): 0..7 are fractions 8/8..1/8,
-/// 12..15 a konst colour, then its R, G, B, A replicated.
-fn konst(sel: u8, k: &[[u8; 4]; 4]) -> C4 {
-    if sel < 8 {
-        let v = 1.0 - sel as f32 / 8.0;
-        return [v; 4];
-    }
-    let idx = (sel as usize).wrapping_sub(12) % 4;
-    let c = k[idx].map(|v| v as f32 / 255.0);
-    match sel {
-        12..=15 => c,
-        16..=19 => [c[0]; 4],
-        20..=23 => [c[1]; 4],
-        24..=27 => [c[2]; 4],
-        _ => [c[3]; 4],
-    }
-}
-
-struct Regs {
-    prev: C4,
-    r: [C4; 3],
-}
-
-/// `GXTevColorArg`.
-fn color_in(a: u8, g: &Regs, tex: C4, ras: C4, k: C4) -> [f32; 3] {
-    let rgb = |c: C4| [c[0], c[1], c[2]];
-    let rep = |v: f32| [v; 3];
-    match a {
-        0 => rgb(g.prev),
-        1 => rep(g.prev[3]),
-        2 => rgb(g.r[0]),
-        3 => rep(g.r[0][3]),
-        4 => rgb(g.r[1]),
-        5 => rep(g.r[1][3]),
-        6 => rgb(g.r[2]),
-        7 => rep(g.r[2][3]),
-        8 => rgb(tex),
-        9 => rep(tex[3]),
-        10 => rgb(ras),
-        11 => rep(ras[3]),
-        12 => rep(1.0),
-        13 => rep(0.5),
-        14 => rgb(k),
-        _ => rep(0.0),
-    }
-}
-
-/// `GXTevAlphaArg`.
-fn alpha_in(a: u8, g: &Regs, tex: C4, ras: C4, k: C4) -> f32 {
-    match a {
-        0 => g.prev[3],
-        1 => g.r[0][3],
-        2 => g.r[1][3],
-        3 => g.r[2][3],
-        4 => tex[3],
-        5 => ras[3],
-        6 => k[3],
-        _ => 0.0,
-    }
-}
-
-/// The register a stage writes (`GX_TEVPREV`, `GX_TEVREG0..2`).
-fn slot(g: &mut Regs, out: u8) -> &mut C4 {
-    match out {
-        0 => &mut g.prev,
-        n => &mut g.r[(n as usize - 1).min(2)],
-    }
-}
-
-fn combine(c: &TevCombiner, a: f32, b: f32, cc: f32, d: f32) -> f32 {
-    let (a, b, cc) = (a.clamp(0.0, 1.0), b.clamp(0.0, 1.0), cc.clamp(0.0, 1.0));
-    let l = a + (b - a) * cc;
-    let bias = match c.bias {
-        1 => 0.5,
-        2 => -0.5,
-        _ => 0.0,
-    };
-    let scale = match c.scale {
-        1 => 2.0,
-        2 => 4.0,
-        3 => 0.5,
-        _ => 1.0,
-    };
-    let v = (d + if c.op == 1 { -l } else { l } + bias) * scale;
-    if c.clamp { v.clamp(0.0, 1.0) } else { v.clamp(-4.0, 4.0) }
-}
-
 fn tev(model: &Model, mi: usize) -> Option<&TevInfo> {
     let m = &model.materials[mi];
     m.tev_info
@@ -294,6 +208,13 @@ fn eval(model: &Model, mi: usize, mat: [u8; 4], regs: [[u8; 4]; 3], tex: &dyn Fn
         return std::array::from_fn(|i| c[i] * mat[i]);
     };
     let mut g = Regs { prev: [0.0; 4], r: regs.map(|r| r.map(|v| v as f32 / 255.0)) };
+    let konsts = t.konst.map(|k| k.map(|v| v as f32 / 255.0));
+    let combine = |c: &libpikmin_assets::model::TevCombiner| Combine {
+        op: c.op,
+        bias: c.bias,
+        scale: c.scale,
+        clamp: c.clamp,
+    };
     for (i, s) in t.stages.iter().enumerate() {
         // Channel 0 is the lit material colour (lighting is the host's job); channel 1 is the
         // specular term, which has no flat value.
@@ -303,26 +224,26 @@ fn eval(model: &Model, mi: usize, mat: [u8; 4], regs: [[u8; 4]; 3], tex: &dyn Fn
             _ => [0.0; 4],
         };
         let tx = tex(i);
-        let kc = konst(s.kcolor_sel, &t.konst);
-        let ka = konst(s.kalpha_sel, &t.konst);
+        let kc = konst(s.kcolor_sel, &konsts);
+        let ka = konst(s.kalpha_sel, &konsts);
         let c = &s.color;
-        let (ca, cb, ccc, cd) = (
+        let rgb = combine_color(
+            &combine(c),
             color_in(c.a, &g, tx, ras, kc),
             color_in(c.b, &g, tx, ras, kc),
             color_in(c.c, &g, tx, ras, kc),
             color_in(c.d, &g, tx, ras, kc),
         );
-        let rgb: [f32; 3] = std::array::from_fn(|i| combine(c, ca[i], cb[i], ccc[i], cd[i]));
         let al = &s.alpha;
-        let a = combine(
-            al,
+        let a = combine_alpha(
+            &combine(al),
             alpha_in(al.a, &g, tx, ras, ka),
             alpha_in(al.b, &g, tx, ras, ka),
             alpha_in(al.c, &g, tx, ras, ka),
             alpha_in(al.d, &g, tx, ras, ka),
         );
-        slot(&mut g, c.out)[..3].copy_from_slice(&rgb);
-        slot(&mut g, al.out)[3] = a;
+        g.slot(c.out)[..3].copy_from_slice(&rgb);
+        g.slot(al.out)[3] = a;
     }
     g.prev.map(|v| v.clamp(0.0, 1.0))
 }
@@ -345,35 +266,6 @@ pub fn textured(model: &Model, mi: usize, images: &Images) -> bool {
     reads(model, mi, images).iter().any(|r| match r {
         Read::Uv { attr, .. } | Read::Env { attr, .. } => images.image(model, *attr).is_some(),
         _ => false,
-    })
-}
-
-/// GX bilinear filtering at `uv`, wrapping as the texture says.
-fn sample(img: &Image, wrap: [u8; 2], u: f32, v: f32) -> C4 {
-    let (w, h) = (img.width as i32, img.height as i32);
-    let fix = |i: i32, n: i32, mode: u8| match mode {
-        1 => i.clamp(0, n - 1),
-        2 => {
-            let p = i.rem_euclid(2 * n);
-            if p < n { p } else { 2 * n - 1 - p }
-        }
-        _ => i.rem_euclid(n),
-    };
-    let texel = |x: i32, y: i32| {
-        let (x, y) = (fix(x, w, wrap[0]), fix(y, h, wrap[1]));
-        let o = (y * w + x) as usize * 4;
-        let p = &img.rgba[o..o + 4];
-        [p[0], p[1], p[2], p[3]].map(|c| c as f32 / 255.0)
-    };
-    let (x, y) = (u * w as f32 - 0.5, v * h as f32 - 0.5);
-    let (x0, y0) = (x.floor(), y.floor());
-    let (fx, fy) = (x - x0, y - y0);
-    let (x0, y0) = (x0 as i32, y0 as i32);
-    let (a, b, c, d) = (texel(x0, y0), texel(x0 + 1, y0), texel(x0, y0 + 1), texel(x0 + 1, y0 + 1));
-    std::array::from_fn(|i| {
-        let top = a[i] + (b[i] - a[i]) * fx;
-        let bottom = c[i] + (d[i] - c[i]) * fx;
-        top + (bottom - top) * fy
     })
 }
 
@@ -440,4 +332,11 @@ pub fn bake_at(model: &Model, mi: usize, inputs: Inputs, images: &Images, second
         }
     }
     Some(Baked { width: w, height: h, wrap, rgba, env })
+}
+
+/// GX bilinear filtering at `uv`, wrapping as the texture says (host codes: 0 repeat, 1 clamp,
+/// 2 mirror). White for an empty image.
+fn sample(img: &Image, wrap: [u8; 2], u: f32, v: f32) -> C4 {
+    sample_rgba8_bilinear(img.width, img.height, &img.rgba, wrap.map(Wrap::from_host), u, v)
+        .unwrap_or([1.0; 4])
 }

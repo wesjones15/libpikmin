@@ -10,4 +10,5 @@ libpikmin-assets.workspace = true
 libpikmin-audio.workspace = true
 libpikmin-teki.workspace = true
 glam.workspace = true
+libcommon.workspace = true
 cpal = "0.15"
