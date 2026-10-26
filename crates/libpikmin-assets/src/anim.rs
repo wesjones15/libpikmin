@@ -145,17 +145,7 @@ impl Anim {
 
 /// `extract` in shapeBase.cpp: cubic Hermite with tangents in units per second at 30 fps.
 fn hermite(frame: f32, t0: f32, v0: f32, m0: f32, t1: f32, v1: f32, m1: f32) -> f32 {
-    let span = t1 - t0;
-    if span <= 0.0 {
-        return v0;
-    }
-    let s = (frame - t0) / span;
-    let (s2, s3) = (s * s, s * s * s);
-    let dt = span / 30.0;
-    (2.0 * s3 - 3.0 * s2 + 1.0) * v0
-        + (-2.0 * s3 + 3.0 * s2) * v1
-        + (s3 - 2.0 * s2 + s) * dt * m0
-        + (s3 - s2) * dt * m1
+    libcommon::anim::hermite(frame, t0, v0, m0 / 30.0, t1, v1, m1 / 30.0)
 }
 
 /// Reads every animation in an `.anm` bundle, keyed by the path stored in the bundle.

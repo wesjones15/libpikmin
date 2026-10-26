@@ -128,15 +128,8 @@ fn sample_keys(keys: &[ColorKey], frame: f32) -> Option<f32> {
             if span <= 0.0 {
                 return Some(k0.value);
             }
-            let a = frame - k0.frame;
-            let s = a / span;
-            let (s2, s3) = (s * s, s * s * s);
-            Some(
-                (2.0 * s3 - 3.0 * s2 + 1.0) * k0.value
-                    + (-2.0 * s3 + 3.0 * s2) * k1.value
-                    + a * (s2 - 2.0 * s + 1.0) * k0.out_tan
-                    + a * (s2 - s) * k1.in_tan,
-            )
+            let s = (frame - k0.frame) / span;
+            Some(libcommon::anim::hermite_s(s, span, k0.value, k0.out_tan, k1.value, k1.in_tan))
         }
     }
 }
