@@ -108,7 +108,7 @@ impl PiantaSkin {
             self.body.pose_mario(name, t.clamp(0.0, frames), Some((plant, self.plant_frame(plant, time))))
         };
         let mut track = self.jumps.get(&id).copied().unwrap_or_default();
-        let mut posed = None;
+        let posed: Option<Vec<Mat4>>;
         if let Some(j) = c.jump {
             // A new jump while airborne restarts the clock: a double, then a triple jump.
             if j.elapsed + 0.05 < track.last { track.air += 1; }
