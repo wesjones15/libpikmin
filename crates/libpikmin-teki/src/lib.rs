@@ -17,6 +17,7 @@ pub mod effects;
 pub mod info;
 pub mod kabekui;
 pub mod kinoko;
+pub mod kogane;
 pub mod mar;
 pub mod miurin;
 pub mod mizinko;
@@ -24,6 +25,7 @@ pub mod napkid;
 pub mod otama;
 pub mod palm;
 pub mod otimoti;
+pub mod p2;
 pub mod shell;
 pub mod tai;
 pub mod tank;
@@ -69,6 +71,14 @@ impl Tekis {
             infos.push(info);
             strategies.push(strategy);
         }
+        // Pikmin 2's enemies follow, from the cache `libsms::extract::p2_enemy` fills beside the Pikmin 1 files.
+        let p2_root = assets.root.join("p2");
+        for kind in p2::FIRST..p2::FIRST + p2::KIND_TABLE.len() as u8 {
+            let info = TekiInfo::load_p2(&p2_root, kind).ok().map(Arc::new);
+            let strategy = info.as_ref().map(|_| Arc::new(kogane::strategy(kind)));
+            infos.push(info);
+            strategies.push(strategy);
+        }
         Tekis { infos, strategies, list: Vec::new(), next_id: 0, rng: Rng(0x9E37_79B9_7F4A_7C15), pending: Vec::new(), buried: Vec::new() }
     }
 
@@ -106,6 +116,12 @@ impl Tekis {
 
     /// A hit (the host damage, in the disc life units).
     pub fn damage(&mut self, id: TekiId, amount: f32, attacker: Option<Target>) {
+        // Pikmin 2's invulnerable enemies (the Kogane family) answer a hit the way they answer a Pikmin landing on
+        // them: `pressCallBack`.
+        if self.get(id).is_some_and(|t| t.kind >= p2::FIRST && t.option(opt::INVINCIBLE) && t.alive()) && amount < 1.0e5 {
+            self.pending.push((id, Event::Pressed));
+            return;
+        }
         if let Some(t) = self.get_mut(id) {
             // A killing blow (the host's body died) goes through whatever the enemy is doing.
             if amount >= 1.0e5 {
@@ -199,6 +215,10 @@ impl Tekis {
             let mut w = World { sim, host, navis, buried: &buried, others: &others, out: &mut out, rng: &mut self.rng, dt };
             t.gravity = w.sim.params().ai.gravity;
             step(t, &strategy, &mut w, &mut events);
+            if t.kind >= p2::FIRST {
+                // `doUpdateCommon`, which every state runs.
+                kogane::update_common(t, &mut w);
+            }
         }
         // Messages between enemies, and the enemies that finished.
         let mut finished = Vec::new();
