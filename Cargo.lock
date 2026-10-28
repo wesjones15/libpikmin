@@ -531,6 +531,9 @@ dependencies = [
  "libpikmin-assets",
  "libpikmin-audio",
  "libpikmin-teki",
+ "libsms",
+ "libsms-assets",
+ "libsms-present",
 ]
 
 [[package]]
@@ -540,6 +543,60 @@ dependencies = [
  "glam 0.30.10",
  "libpikmin",
  "libpikmin-assets",
+]
+
+[[package]]
+name = "libsms"
+version = "0.1.0"
+dependencies = [
+ "glam 0.30.10",
+ "libcommon",
+]
+
+[[package]]
+name = "libsms-assets"
+version = "0.1.0"
+dependencies = [
+ "glam 0.30.10",
+ "libcommon",
+ "libsms",
+]
+
+[[package]]
+name = "libsms-audio"
+version = "0.1.0"
+dependencies = [
+ "glam 0.30.10",
+ "libsms-assets",
+]
+
+[[package]]
+name = "libsms-present"
+version = "0.1.0"
+dependencies = [
+ "cpal",
+ "glam 0.30.10",
+ "libcommon",
+ "libsms",
+ "libsms-assets",
+ "libsms-audio",
+ "libssbm-assets",
+]
+
+[[package]]
+name = "libssbm"
+version = "0.1.0"
+dependencies = [
+ "glam 0.30.10",
+]
+
+[[package]]
+name = "libssbm-assets"
+version = "0.1.0"
+dependencies = [
+ "glam 0.30.10",
+ "libcommon",
+ "libssbm",
 ]
 
 [[package]]

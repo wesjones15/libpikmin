@@ -9,6 +9,7 @@
 pub mod animator;
 pub mod audio;
 pub mod effects;
+pub mod pianta;
 pub mod stings;
 pub mod teki;
 pub mod tev;

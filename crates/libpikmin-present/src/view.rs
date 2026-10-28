@@ -132,6 +132,8 @@ pub struct ViewModel {
     /// Per batch: environment mapped ([`tev::Baked::env`]): its texture coordinates come from
     /// the view-space normals each frame ([`View::uvs`]), through this matrix.
     pub batch_env: Vec<Option<Option<[[f32; 3]; 2]>>>,
+    /// Per batch [`ViewModel::batch_light`], for a model that brings its own materials (the Pianta skin).
+    pub lit: Option<Vec<u8>>,
 }
 
 impl ViewModel {
@@ -163,7 +165,21 @@ impl ViewModel {
             batch_texture: Vec::new(),
             batch_blend: Vec::new(),
             batch_env: Vec::new(),
+            lit: None,
         })
+    }
+
+    /// A model the host's other library built (the Pianta skin): its own batches and baked textures, no PVW materials.
+    pub fn external(batches: Vec<Batch>, lo: Vec3, hi: Vec3, batch_texture: Vec<i32>, batch_blend: Vec<u8>,
+        batch_env: Vec<Option<Option<[[f32; 3]; 2]>>>, lit: Vec<u8>) -> Self {
+        let model = Model::default();
+        let images = tev::Images::new(&model);
+        ViewModel {
+            vertex_count: batches.iter().map(|b| b.vertices.len()).sum(),
+            skel: Skeleton { parents: Vec::new(), bind: Vec::new(), inverse_bind: Vec::new(), envelopes: Vec::new() },
+            model, batches, lo, hi, images, textured: Vec::new(), batch_texture, batch_blend, batch_env,
+            lit: Some(lit),
+        }
     }
 
     /// Horizontal radius of the bind pose.
@@ -177,6 +193,9 @@ impl ViewModel {
     /// How batch `b` is lit: 1 its colour, 2 its alpha (`LightingControlFlags::EnableAlpha0`:
     /// with the stages' ambient alpha of 0, Olimar's helmet is only opaque where light falls).
     pub fn batch_light(&self, b: usize) -> u8 {
+        if let Some(lit) = &self.lit {
+            return lit.get(b).copied().unwrap_or(1);
+        }
         let m = &self.model.materials[self.batches[b].material];
         let alpha = m.flags & libpikmin_assets::model::mat_flags::PVW != 0 && m.lighting & 4 != 0;
         m.lit() as u8 | (alpha as u8) << 1
@@ -511,6 +530,9 @@ pub struct View {
     grown: Vec<Grown>,
     /// The stage each sprout already sparkled for (`PikiHeadAI::WaitExec` once per stage).
     sparkled: HashMap<libpikmin::SproutId, libpikmin::Happa>,
+    /// The Pianta body some captains wear ([`View::load_pianta`]) and who wears it.
+    pub(crate) pianta: Option<crate::pianta::PiantaSkin>,
+    captain_skins: HashMap<u32, u8>,
 }
 
 enum Grown {
@@ -705,6 +727,8 @@ impl View {
             arrivals: Vec::new(),
             grown: Vec::new(),
             sparkled: HashMap::new(),
+            pianta: None,
+            captain_skins: HashMap::new(),
         })
     }
 
@@ -936,6 +960,80 @@ impl View {
         let flags = flags | if retain_pose { flags::RETAIN_POSE } else { 0 };
         if !retain_pose { self.posed_models.insert(k, model); }
         self.draws.push(Draw { key: k, kind, flags, model, pos, rot, first_vertex, first_color, alpha });
+    }
+
+    /// Loads the Pianta body some captains can wear from the Sunshine assets folder `dir` (the
+    /// standard extraction has it); returns its model index, which is appended to the model table, so
+    /// call it before the host reads the table. `female` and `colour` pick the Pianta.
+    pub fn load_pianta(&mut self, dir: &std::path::Path, female: bool, colour: usize) -> Result<u32, String> {
+        if let Some(p) = &self.pianta { return Ok(p.model); }
+        let model = self.models.len() as u32;
+        let tex_base = self.textures.list.len() as i32;
+        let skin = crate::pianta::PiantaSkin::load(dir, &self.models[models::OLIMAR as usize].model, model, tex_base, female, colour)?;
+        let m = &skin.body.model;
+        let (lo, hi) = skin.bounds();
+        let textures = skin.textures();
+        self.textures.list.extend(textures);
+        self.models.push(ViewModel::external(
+            skin.batches(), lo, hi,
+            m.batch_texture.iter().map(|&t| if t >= 0 { t + tex_base } else { -1 }).collect(),
+            m.batch_blend.clone(),
+            m.batch_env.clone(),
+            m.batch_lit.iter().map(|l| l & 3).collect(),
+        ));
+        self.pianta = Some(skin);
+        Ok(model)
+    }
+
+    /// Who wears which body ([`crate::pianta::SKIN_OLIMAR`] or [`crate::pianta::SKIN_PIANTA`]); anything
+    /// unloaded draws Olimar.
+    pub fn set_captain_skin(&mut self, captain: u32, skin: u8) {
+        self.captain_skins.insert(captain, skin);
+    }
+
+    /// How tall the Pianta stands, to the top of his head, in sim units.
+    pub fn set_pianta_height(&mut self, units: f32) {
+        if let Some(p) = self.pianta.as_mut() { p.set_height(units); }
+    }
+
+    /// Skins the Pianta from `joints` (his own units) with `root` over his scale, lowest vertex on the
+    /// ground, and queues him as a captain draw.
+    fn push_pianta(&mut self, k: u64, pos: Vec3, rot: Quat, root: Mat4, joints: &[Mat4], alpha: f32, flags: u8) {
+        let Some(skin) = self.pianta.take() else { return };
+        let m = &skin.body.model;
+        let pose = libsms_assets::Pose::new(&m.bmd, root * Mat4::from_scale(Vec3::splat(skin.scale)), joints);
+        let low = m.batches.iter().flat_map(|b| &b.vertices).map(|v| pose.skin(v).0.y).fold(f32::INFINITY, f32::min);
+        let low = if low.is_finite() { low } else { 0.0 };
+        let first_vertex = self.positions.len() as u32;
+        let first_color = self.colors.len() as u32;
+        for (bi, b) in m.batches.iter().enumerate() {
+            let env = m.batch_env.get(bi).copied().flatten();
+            for v in &b.vertices {
+                let (mut p, n) = pose.skin(v);
+                p.y -= low;
+                let n = n.normalize_or_zero();
+                self.positions.push(p);
+                self.normals.push(n);
+                self.uvs.push(match env {
+                    Some(mtx) => {
+                        let w = rot * n;
+                        let [r, u, _] = self.camera;
+                        libsms_present::tev::env_uv(w.dot(r), w.dot(u), mtx)
+                    }
+                    None => [v.uv[0].x, v.uv[0].y],
+                });
+            }
+            let id = match m.batch_texture.get(bi).copied() {
+                Some(t) if t >= 0 => t + skin.tex_base,
+                _ => -1,
+            };
+            let mut c = if id >= 0 { [1.0; 4] } else { m.batch_color_of(bi) };
+            c[3] *= alpha;
+            self.colors.push(c);
+            self.texture_ids.push(id);
+        }
+        self.draws.push(Draw { key: k, kind: kinds::CAPTAIN, flags, model: skin.model, pos, rot, first_vertex, first_color, alpha });
+        self.pianta = Some(skin);
     }
 
     /// Captain `captain` is appearing in a beam, `progress` 0 (a thin column) to 1 (himself); 1 or more
@@ -1531,6 +1629,11 @@ impl View {
                     .map(|(info, a)| (a, (self.time * 30.0) % info.keys.last().copied().unwrap_or(1).max(1) as f32))
             } else { self.animator.captain(&self.piki_anims, &params, c, dt) };
             let mut root = crate::animator::captain_root(&params, c);
+            let pianta_body = self.pianta.is_some() && self.captain_skins.get(&c.id.0) == Some(&crate::pianta::SKIN_PIANTA);
+            if pianta_body {
+                // The Pianta jumps in Mario's clips, not tipped over on Olimar's geyser ride.
+                root = Mat4::IDENTITY;
+            }
             let fx_key = (8u64 << 48) | ((c.id.0 as u64) << 8);
             let heal_key = (9u64 << 48) | ((c.id.0 as u64) << 8);
             if let Some(&(_, ghosts)) = self.healing.get(&c.id.0) {
@@ -1589,14 +1692,33 @@ impl View {
                 fx.detach_where(|k| k & !255 == fx_key);
             }
             let pose = self.models[models::OLIMAR as usize].skel.pose(root, anim);
+            let (motion, _) = crate::animator::captain_motion(&params, c, self.animator.throwing(c.id));
+            let phase = motion.anim_index().and_then(|i| self.piki_anims.get(i)).zip(anim).map_or(0.0, |((info, _), (_, frame))| {
+                let (a, b) = (*info.keys.first().unwrap_or(&0) as f32, *info.keys.last().unwrap_or(&1) as f32);
+                if b > a { ((frame - a) / (b - a)).rem_euclid(1.0) } else { 0.0 }
+            });
             let flash = c.damage_frames > 0.0 && (c.damage_frames as i32 / 2) % 2 == 0;
             let f = if flash { flags::FLASH } else { 0 };
             // The whistle's beam starts at the antenna (`Navi::demoDraw`'s 'ante' sphere).
-            let antenna = self
+            let mut antenna = self
                 .ante
                 .as_ref()
                 .and_then(|a| Some(pos + rot * pose.joints.get(a.joint)?.transform_point3(a.centre)))
                 .unwrap_or(pos + Vec3::Y * 30.0);
+            // The Pianta wears his palm where Olimar has his antenna.
+            let mut pianta_joints = None;
+            if pianta_body {
+                let time = self.time;
+                let rest = self.models[models::OLIMAR as usize].skel.pose(Mat4::IDENTITY, anim);
+                if let Some(skin) = self.pianta.as_mut() {
+                    let joints = skin.joints(c.id.0, c, motion, phase, time, &rest);
+                    let head = skin.body.rig.find("yashi_jnt").and_then(|j| joints.get(j));
+                    if let Some(h) = head {
+                        antenna = pos + rot * (h.w_axis.truncate() * skin.scale);
+                    }
+                    pianta_joints = Some(joints);
+                }
+            }
             self.whistles.push(WhistleFrame {
                 captain: c.id,
                 state: c.whistle,
@@ -1605,7 +1727,11 @@ impl View {
                 captain_pos: pos,
                 radius: c.whistle_radius(&params),
             });
-            self.push(k, kinds::CAPTAIN, models::OLIMAR, pos, rot, pose, &no_inputs, 1.0, f);
+            if let Some(joints) = pianta_joints {
+                self.push_pianta(k, pos, rot, root, &joints, 1.0, f);
+            } else {
+                self.push(k, kinds::CAPTAIN, models::OLIMAR, pos, rot, pose, &no_inputs, 1.0, f);
+            }
             if !self.show_cursors {
                 continue;
             }

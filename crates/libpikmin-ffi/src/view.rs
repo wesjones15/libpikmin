@@ -289,6 +289,41 @@ pub unsafe extern "C" fn pik_view_set_celebrating(view: *mut PikView, on: u8) {
     if let Some(v) = unsafe { view.as_mut() } { v.view.celebrating = on != 0; }
 }
 
+/// Loads the Pianta body an Olimar can wear (skin 2) from the Sunshine assets folder `dir`, appending it
+/// to the model table: call it before reading the table. `female` picks the woman, `colour` the game's
+/// body colour (out of range: the default). Returns its model index, or -1 when the Sunshine files are
+/// missing (the skin is then not offered).
+/// # Safety
+/// `view` is a live handle; `dir` a NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_load_pianta(view: *mut PikView, dir: *const c_char, female: u8, colour: u32) -> i32 {
+    if dir.is_null() { return -1; }
+    // SAFETY: as documented.
+    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+    unsafe {
+        with_view(view, -1, |v| match v.view.load_pianta(std::path::Path::new(&dir), female != 0, colour as usize) {
+            Ok(m) => m as i32,
+            Err(_) => -1,
+        })
+    }
+}
+
+/// Which body a captain wears: 0 Olimar, 2 the Pianta (when loaded). Takes effect on the next update.
+/// # Safety
+/// `view` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_captain_skin(view: *mut PikView, captain: u32, skin: u8) {
+    if let Some(v) = unsafe { view.as_mut() } { v.view.set_captain_skin(captain, skin); }
+}
+
+/// How tall the Pianta stands, to the top of his head, in sim units (Olimar is about 25).
+/// # Safety
+/// `view` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_pianta_height(view: *mut PikView, units: f32) {
+    if let Some(v) = unsafe { view.as_mut() } { v.view.set_pianta_height(units); }
+}
+
 /// # Safety
 /// `view` is a live handle.
 #[unsafe(no_mangle)]

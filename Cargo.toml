@@ -15,4 +15,7 @@ libpikmin-assets = { path = "crates/libpikmin-assets" }
 libpikmin-audio = { path = "crates/libpikmin-audio" }
 libpikmin-present = { path = "crates/libpikmin-present" }
 libpikmin-teki = { path = "crates/libpikmin-teki" }
+libsms = { path = "../libsms/crates/libsms" }
+libsms-assets = { path = "../libsms/crates/libsms-assets" }
+libsms-present = { path = "../libsms/crates/libsms-present" }
 glam = "0.30"
