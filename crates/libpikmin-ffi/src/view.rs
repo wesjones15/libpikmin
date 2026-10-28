@@ -914,6 +914,12 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
                     }
                 }
             }
+            let cues = v.view.take_pianta_cues();
+            if let Some(sa) = v.pianta_audio.as_ref() {
+                for (captain, sound) in cues {
+                    sa.play_id_at(sound, heard_at(captain), 0x5049_0000 + captain as u64);
+                }
+            }
             if let Some(la) = v.louie_audio.as_mut() {
                 la.set_volume(f.volume);
                 la.set_listener(listener_view(eye, f.forward.into(), f.up.into()), eye);

@@ -1095,6 +1095,11 @@ impl View {
         self.captain_skins.iter().filter(|(_, s)| **s == crate::pianta::SKIN_PIANTA).map(|(c, _)| *c).collect()
     }
 
+    /// The sounds the Pianta's clips triggered since the last call (his footsteps): (captain, `JAISoundID`).
+    pub fn take_pianta_cues(&mut self) -> Vec<(u32, u32)> {
+        self.pianta.as_mut().map(|p| std::mem::take(&mut p.cues)).unwrap_or_default()
+    }
+
     /// The cries Pianta captains made since the last call, for the host's sound system.
     pub fn take_pianta_voices(&mut self) -> Vec<(u32, u8, crate::pianta::Voice)> {
         std::mem::take(&mut self.pianta_voices)
@@ -2069,7 +2074,7 @@ impl View {
                 let time = self.time;
                 let rest = self.models[models::OLIMAR as usize].skel.pose(Mat4::IDENTITY, anim);
                 if let Some(skin) = self.pianta.as_mut() {
-                    let joints = skin.joints(c.id.0, c, motion, phase, time, &rest);
+                    let joints = skin.joints(c.id.0, c, motion, phase, time, params.navi.run_speed * c.speed_scale, &rest);
                     let head = skin.body.rig.find("yashi_jnt").and_then(|j| joints.get(j));
                     if let Some(h) = head {
                         antenna = pos + rot * (h.w_axis.truncate() * skin.scale);
@@ -2087,7 +2092,8 @@ impl View {
             });
             let pikachu_world = if pikachu_body {
                 let rest = self.models[models::OLIMAR as usize].skel.pose(Mat4::IDENTITY, anim);
-                self.pikachu.as_ref().map(|p| p.captain.pose(&rest.joints))
+                let time = self.time;
+                self.pikachu.as_ref().map(|p| p.captain_world(motion, phase, time, &rest.joints))
             } else { None };
             let louie_joints = if louie_body { self.louie.as_ref().map(|l| l.joints(c, motion, phase)) } else { None };
             if let Some(joints) = pianta_joints {

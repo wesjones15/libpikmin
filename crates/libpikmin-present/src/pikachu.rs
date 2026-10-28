@@ -14,6 +14,8 @@ use std::path::Path;
 
 use glam::{EulerRot, Mat3, Mat4, Quat, Vec2, Vec3};
 use libpikmin_assets::model::{Batch, BatchVertex, Cull, Skin};
+use libpikmin_assets::motion::Motion;
+use libssbm_assets::animation::Animations;
 use libssbm_assets::dat::Dat;
 use libssbm_assets::fighter::Archive;
 use libssbm_assets::model as hsd;
@@ -268,6 +270,8 @@ impl HsdBody {
 /// four): each Pikmin colour has a family of them ([`PikachuSkin::costume`]).
 pub struct PikachuSkin {
     pub captain: HsdBody,
+    /// Pikachu's own animations (`PlPkAJ.dat`), when the cache has them: he stands, walks and runs in his own clips.
+    anims: Option<Animations>,
     pub climbers: Vec<HsdBody>,
     olimar_height: f32,
     captain_ratio: f32,
@@ -304,9 +308,32 @@ impl PikachuSkin {
         for (costume, data, root, kind) in CLIMBER_COSTUMES {
             climbers.push(HsdBody::load(dir, costume, Archive { file: data, root }, kind, src_bind)?);
         }
-        let mut skin = PikachuSkin { captain, climbers, olimar_height, captain_ratio: 1.0, climber_ratio: 0.42 };
+        let anims = Animations::load_for(dir, &libssbm_assets::fighter::PIKACHU).ok();
+        let mut skin = PikachuSkin { captain, anims, climbers, olimar_height, captain_ratio: 1.0, climber_ratio: 0.42 };
         skin.refit();
         Ok(skin)
+    }
+
+    /// Pikachu's joints this frame. Standing, walking and running play his own Melee clips (`Wait`, `WalkMiddle`, `Run`, at
+    /// 60 frames a second; the walk and run follow Olimar's stride phase so the feet keep the pace); everything else
+    /// (the pluck, throw, whistle, dismiss, punch, damage, knockdown, jumps) is Olimar's clip handed over through the
+    /// retarget, as before.
+    pub fn captain_world(&self, motion: Motion, phase: f32, time: f32, olimar: &[Mat4]) -> Vec<Mat4> {
+        if let Some(a) = &self.anims {
+            let pick = match motion {
+                Motion::Wait | Motion::Asibumi => Some(("Wait", None)),
+                Motion::Walk => Some(("WalkMiddle", Some(phase))),
+                Motion::Run | Motion::Nigeru => Some(("Run", Some(phase))),
+                _ => None,
+            };
+            if let Some((name, stride)) = pick
+                && let Some(clip) = a.clips.get(name)
+            {
+                let frame = stride.map_or(time * 60.0, |p| p * clip.frames);
+                return a.pose(&self.captain.model, name, frame, true);
+            }
+        }
+        self.captain.pose(olimar)
     }
 
     /// The climber (index into [`PikachuSkin::climbers`]) that dresses Pikmin `id` of `color`: one of its colour's
@@ -372,5 +399,37 @@ mod tests {
             assert!((high - want).abs() < want * 0.2, "stands {high}, wanted about {want}");
             assert!(p.iter().all(|v| v.is_finite()) && n.iter().all(|v| v.is_finite()));
         }
+    }
+
+    /// Pikachu stands, walks and runs in his own Melee clips (the rest stays Olimar's): they exist, pose his joints, and
+    /// his feet stay on the ground and his height stays Olimar's across a stride.
+    #[test]
+    fn pikachu_walks_in_his_own_clips() {
+        let Some(dir) = melee() else { eprintln!("SKIP: no Melee cache with the Ice Climbers"); return };
+        if !dir.join("PlPkAJ.dat").is_file() { eprintln!("SKIP: no PlPkAJ.dat"); return }
+        let Some(a) = Assets::discover(None) else { eprintln!("SKIP: no Pikmin assets"); return };
+        let mut skin = PikachuSkin::load(&dir, &olimar_bind(&a), 25.1).expect("load");
+        let anims = skin.anims.as_ref().expect("Pikachu's animations load");
+        for name in ["Wait", "WalkMiddle", "Run"] {
+            assert!(anims.clips.contains_key(name), "no {name} clip in {:?}", anims.clips.keys().collect::<Vec<_>>());
+        }
+        let m = a.model(paths::OLIMAR).unwrap();
+        let rest = Skeleton::new(&m).pose(Mat4::IDENTITY, None);
+        let mut tex = Vec::new();
+        skin.captain.register(0, &mut tex);
+        for (motion, phases) in [(Motion::Wait, [0.0, 0.5]), (Motion::Walk, [0.1, 0.6]), (Motion::Run, [0.2, 0.7])] {
+            for phase in phases {
+                let world = skin.captain_world(motion, phase, 0.3, &rest.joints);
+                assert_eq!(world.len(), skin.captain.model.joints.len());
+                let (mut p, mut n) = (Vec::new(), Vec::new());
+                let low = skin.captain.skin_into(&world, Mat4::IDENTITY, &mut p, &mut n);
+                assert!(low.is_finite() && p.iter().all(|v| v.is_finite()));
+                let high = p.iter().fold(f32::MIN, |h, v| h.max(v.y)) - low;
+                assert!((12.0..40.0).contains(&high), "{motion:?} at {phase}: stands {high}");
+            }
+        }
+        // Olimar's own motions are still his.
+        let throw = skin.captain_world(Motion::Throw, 0.5, 0.3, &rest.joints);
+        assert_eq!(throw, skin.captain.pose(&rest.joints));
     }
 }

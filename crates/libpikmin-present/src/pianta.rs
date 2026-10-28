@@ -3,9 +3,11 @@
 //! and beam-in all apply.
 //!
 //! Which clip poses him (host adaptation; nothing here is Pikmin or Sunshine gameplay):
-//! - standing still: the Pianta's own idle (`mom_wait`, his palm and leaves sway in it);
-//! - walking, running, fleeing and jumping: Mario's clips (`ma_walk`, `ma_run2`, `ma_jump`, the
-//!   double and triple jump pairs), retargeted onto the Pianta;
+//! - standing still, walking, running and fleeing: the Pianta's own clips (`mom_wait`, `mom_walk`, `mom_run`: his palm
+//!   and leaves sway in them), whose sound keys (`bas/mom_walk.bas`, `mom_run.bas`) give his footsteps;
+//! - acrobatics, in Mario's clips retargeted onto him: the jump (`ma_jump`, `ma_broad_jump` for a running jump, the
+//!   double and triple jump pairs), the ground pound (`hipsr`, `hipat`), the dismiss strike's dive (`sldct`) and the
+//!   landings (`jmped`, `2jmed`, `hiped`);
 //! - everything else (throw, pluck, whistle, dismiss, damage, knockdown): Olimar's own clip,
 //!   retargeted joint by joint through [`OLIMAR_ALIASES`].
 //!
@@ -80,12 +82,27 @@ pub const SOUND_SCALE: f32 = 160.0 / 25.1;
 /// until the host says. Olimar is 25.1.
 pub const DEFAULT_HEIGHT: f32 = 30.0;
 
-/// Where a captain is in a chain of mid-air jumps.
+/// Where a captain is in a chain of mid-air jumps, and the acrobatics around it.
 #[derive(Default, Clone, Copy)]
 struct JumpTrack {
     last: f32,
     air: u32,
+    /// The first jump of this flight was a running one (`broad_jump`).
+    long: bool,
+    /// The view's seconds when the ground pound / the dive began (0: not under way).
+    stomp_start: f32,
+    dive_start: f32,
+    /// Airborne last call, since when, and how it ended (the landing clip).
+    air_since: f32,
+    was_air: bool,
+    landing: Option<&'static str>,
+    landing_start: f32,
+    /// The frame of the own locomotion clip last time, for its sound keys.
+    last_frame: Option<f32>,
 }
+
+/// Mario's and the Pianta's clips run at 60 frames a second.
+const FPS: f32 = 60.0;
 
 pub struct PiantaSkin {
     pub body: Pianta,
@@ -100,6 +117,12 @@ pub struct PiantaSkin {
     /// Head-top height of the bind pose in Pianta units.
     head_top: f32,
     jumps: HashMap<u32, JumpTrack>,
+    /// The sounds in the Pianta's clips (`bas/mom_<clip>.bas`): (frame, sound id) by clip.
+    keys: HashMap<&'static str, Vec<(f32, u32)>>,
+    /// Sounds his clips triggered since the host last took them: (captain, `JAISoundID`).
+    pub cues: Vec<(u32, u32)>,
+    /// The straw skirt's joint (`mino_null`): no Pianta clip moves it, so the host sways it.
+    skirt: Option<usize>,
 }
 
 /// Olimar's rig as a `libsms` skeleton, to retarget from.
@@ -122,7 +145,19 @@ impl PiantaSkin {
         let top = body.rig.find("yashi_jnt").map_or(body.height(), |j| body.bind_world()[j].w_axis.y);
         let mut skin = PiantaSkin {
             body, olimar, retarget, model, tex_base, scale: 1.0, head_top: top.max(1.0), jumps: HashMap::new(),
+            keys: HashMap::new(), cues: Vec::new(), skirt: None,
         };
+        skin.skirt = skin.body.rig.find("mino_null");
+        // His footsteps: the walk and run clips' sound keys (`TBaseNPC` animation sounds).
+        let prefix = if female { "mow_" } else { "mom_" };
+        let folder = if female { "npc/montewcommon/bas" } else { "npc/montemcommon/bas" };
+        for clip in ["walk", "run"] {
+            if let Ok(d) = std::fs::read(dir.join(folder).join(format!("{prefix}{clip}.bas")))
+                && let Ok(t) = libsms_assets::sound::AnimSoundTable::parse(&d)
+            {
+                skin.keys.insert(clip, t.sounds.iter().map(|k| (k.start_frame, k.id)).collect());
+            }
+        }
         skin.set_height(DEFAULT_HEIGHT);
         Ok(skin)
     }
@@ -135,42 +170,118 @@ impl PiantaSkin {
     }
 
     /// The Pianta's joints this frame, in his own units. `phase` is how far through its loop the
-    /// captain's current Olimar clip is (0..1), `time` the view's seconds, `olimar` his posed rig.
-    pub fn joints(&mut self, id: u32, c: &Captain, motion: Motion, phase: f32, time: f32, olimar: &Pose) -> Vec<Mat4> {
-        let mario = |name: &str, t: f32, plant: &str| -> Option<Vec<Mat4>> {
-            let frames = self.body.mario_clip_frames(name)?;
-            self.body.pose_mario(name, t.clamp(0.0, frames), Some((plant, self.plant_frame(plant, time))))
-        };
+    /// captain's current Olimar clip is (0..1), `time` the view's seconds, `olimar` his posed rig, `run_speed` the
+    /// captain's top speed (sim units a second), which tells a running jump from a standing one.
+    #[allow(clippy::too_many_arguments)]
+    pub fn joints(&mut self, id: u32, c: &Captain, motion: Motion, phase: f32, time: f32, run_speed: f32, olimar: &Pose) -> Vec<Mat4> {
         let mut track = self.jumps.get(&id).copied().unwrap_or_default();
+        let speed = c.vel.x.hypot(c.vel.z);
+        let airborne = c.jump.is_some() || !c.on_ground;
+        let pounding = c.stomp.is_some();
+        let diving = c.strike.is_some();
+        // The acrobatics' bookkeeping: when each began, and what a touchdown is.
+        if pounding && track.stomp_start == 0.0 { track.stomp_start = time.max(1e-3); }
+        if diving && track.dive_start == 0.0 { track.dive_start = time.max(1e-3); }
+        if airborne && !track.was_air {
+            track.air_since = time;
+            track.landing = None;
+        }
+        if !airborne && track.was_air && time - track.air_since > 0.25 && speed < 0.6 * run_speed {
+            track.landing = Some(if track.stomp_start > 0.0 { "hiped" } else if track.air > 0 { "2jmed" } else { "jmped" });
+            track.landing_start = time;
+        }
+        track.was_air = airborne;
+        let wait_frame = {
+            let frames = self.body.own_clip_frames("wait").unwrap_or(60.0).max(1.0);
+            (time * FPS).rem_euclid(frames)
+        };
+        let mario = |body: &Pianta, name: &str, t: f32| -> Option<Vec<Mat4>> {
+            let frames = body.mario_clip_frames(name)?;
+            body.pose_mario(name, t.clamp(0.0, frames), Some(("wait", wait_frame)))
+        };
         let posed: Option<Vec<Mat4>>;
-        if let Some(j) = c.jump {
+        if pounding {
+            // `hipsr` winds up, `hipat` falls: `TMario`'s ground pound.
+            let t = (time - track.stomp_start) * FPS;
+            let start = self.body.mario_clip_frames("hipsr").unwrap_or(0.0);
+            posed = if t < start { mario(&self.body, "hipsr", t) } else { mario(&self.body, "hipat", t - start) };
+        } else if diving {
+            posed = mario(&self.body, "sldct", (time - track.dive_start) * FPS);
+        } else if let Some(j) = c.jump {
             // A new jump while airborne restarts the clock: a double, then a triple jump.
             if j.elapsed + 0.05 < track.last { track.air += 1; }
+            if track.last == 0.0 && track.air == 0 { track.long = speed > 0.75 * run_speed; }
             track.last = j.elapsed;
-            let t = j.elapsed * 60.0;
-            let (first, second) = match track.air { 0 => ("jump", ""), 1 => ("2jmp1", "2jmp2"), _ => ("tjmp1", "tjmp2") };
+            let t = j.elapsed * FPS;
+            let (first, second) = match track.air {
+                0 if track.long && self.body.mario_clip_frames("broad_jump").is_some() => ("broad_jump", ""),
+                0 => ("jump", ""),
+                1 => ("2jmp1", "2jmp2"),
+                _ => ("tjmp1", "tjmp2"),
+            };
             posed = match self.body.mario_clip_frames(first) {
-                Some(f) if !second.is_empty() && t >= f => mario(second, t - f, "wait"),
-                Some(_) => mario(first, t, "wait"),
+                Some(f) if !second.is_empty() && t >= f => mario(&self.body, second, t - f),
+                Some(_) => mario(&self.body, first, t),
                 None => None,
             };
+        } else if !c.on_ground {
+            // Off a ledge or knocked into the air: the jump's falling end.
+            let end = self.body.mario_clip_frames("jump").unwrap_or(0.0);
+            posed = mario(&self.body, "jump", end);
         } else {
-            track = JumpTrack::default();
-            let sway = |name: &str| -> Option<Vec<Mat4>> {
-                let frames = self.body.mario_clip_frames(name)?;
-                mario(name, phase * frames, if name == "walk" { "walk" } else { "run" })
-            };
-            posed = match motion {
-                Motion::Wait | Motion::Asibumi => self.body.pose_own("wait", self.plant_frame("wait", time)),
-                Motion::Walk => sway("walk"),
-                Motion::Run | Motion::Nigeru => sway("run2"),
-                _ => None,
+            track.last = 0.0;
+            track.air = 0;
+            track.long = false;
+            let landing = track.landing.filter(|&name| {
+                self.body.mario_clip_frames(name).is_some_and(|f| (time - track.landing_start) * FPS < f)
+            });
+            if landing.is_none() { track.landing = None; }
+            posed = if let Some(name) = landing {
+                mario(&self.body, name, (time - track.landing_start) * FPS)
+            } else {
+                match motion {
+                    Motion::Wait | Motion::Asibumi => {
+                        track.last_frame = None;
+                        self.body.pose_own("wait", wait_frame)
+                    }
+                    Motion::Walk | Motion::Run | Motion::Nigeru => {
+                        let name: &'static str = if motion == Motion::Walk { "walk" } else { "run" };
+                        let frames = self.body.own_clip_frames(name);
+                        let frame = frames.map(|f| phase * f);
+                        let own = frame.and_then(|fr| self.body.pose_own(name, fr));
+                        if let (Some(frame), Some(frames)) = (frame, frames) {
+                            // The clip's sound keys (his footsteps) as the frame passes them.
+                            if let (Some(prev), Some(keys)) = (track.last_frame, self.keys.get(name)) {
+                                for &(at, sound) in keys {
+                                    let at = at.rem_euclid(frames);
+                                    let crossed = if frame >= prev { at > prev && at <= frame } else { at > prev || at <= frame };
+                                    if crossed { self.cues.push((id, sound)); }
+                                }
+                            }
+                            track.last_frame = Some(frame);
+                        }
+                        own
+                    }
+                    _ => {
+                        track.last_frame = None;
+                        None
+                    }
+                }
             };
         }
+        if !pounding { track.stomp_start = 0.0; }
+        if !diving { track.dive_start = 0.0; }
         self.jumps.insert(id, track);
-        posed.unwrap_or_else(|| {
+        let mut joints = posed.unwrap_or_else(|| {
             self.body.pose_from(&self.retarget, &olimar.joints, Some(("wait", self.plant_frame("wait", time))))
-        })
+        });
+        // The skirt trails behind him as he runs and sways a little (a host addition: nothing animates `mino_null`).
+        if let Some(m) = self.skirt.and_then(|j| joints.get_mut(j)) {
+            let trail = 0.22 * (speed / run_speed.max(1.0)).clamp(0.0, 1.0);
+            let sway = 0.035 * (time * 2.4 + id as f32).sin();
+            *m *= Mat4::from_rotation_x(trail + 0.5 * sway) * Mat4::from_rotation_z(sway);
+        }
+        joints
     }
 
     /// The frame of the Pianta's own clip `name` at `time` seconds, looping (60 frames a second).
