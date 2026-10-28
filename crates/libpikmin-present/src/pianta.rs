@@ -42,24 +42,33 @@ pub const OLIMAR_ALIASES: &[(&str, &str)] = &[
     ("legRT_jnt", "j10"), ("legLT_jnt", "j11"),
 ];
 
-/// What the Pianta says, in place of Olimar's own cries.
+/// What a skin's voice says, in place of Olimar's own cries. The Pianta has the first four; Louie
+/// (`louie::voice_id`) has his calls too.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Voice {
     Jump,
     Throw,
     Hurt,
     Down,
+    /// The whistle's call (`Event::Whistle`).
+    Whistle,
+    /// The dismiss call (`Event::Dismissed`).
+    Dismiss,
+    /// The punch (`Event::Punched`).
+    Punch,
 }
 
 impl Voice {
     /// The Sunshine cue (`MSD_SE_NPC_VM_MONTM_*`, the male Pianta's speech lines; SoundEffects.hpp). Chosen by
     /// their names (proud, invitation, surprise, regret), not heard.
-    pub const fn cue(self) -> &'static str {
+    pub const fn cue(self) -> Option<&'static str> {
         match self {
-            Voice::Jump => "MSD_SE_NPC_VM_MONTM_PROUD",
-            Voice::Throw => "MSD_SE_NPC_VM_MONTM_INVITN",
-            Voice::Hurt => "MSD_SE_NPC_VM_MONTM_SURPRS",
-            Voice::Down => "MSD_SE_NPC_VM_MONTM_REGRET",
+            Voice::Jump => Some("MSD_SE_NPC_VM_MONTM_PROUD"),
+            Voice::Throw => Some("MSD_SE_NPC_VM_MONTM_INVITN"),
+            Voice::Hurt => Some("MSD_SE_NPC_VM_MONTM_SURPRS"),
+            Voice::Down => Some("MSD_SE_NPC_VM_MONTM_REGRET"),
+            // Olimar's whistle, dismiss and punch have no cry to replace.
+            Voice::Whistle | Voice::Dismiss | Voice::Punch => None,
         }
     }
 }

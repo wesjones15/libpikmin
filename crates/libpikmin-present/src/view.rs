@@ -540,7 +540,7 @@ pub struct View {
     pub(crate) pikachu: Option<std::sync::Arc<crate::pikachu::PikachuSkin>>,
     captain_skins: HashMap<u32, u8>,
     /// Cries a Pianta captain made since the host last took them ([`View::take_pianta_voices`]).
-    pianta_voices: Vec<(u32, crate::pianta::Voice)>,
+    pianta_voices: Vec<(u32, u8, crate::pianta::Voice)>,
 }
 
 enum Grown {
@@ -746,7 +746,7 @@ impl View {
 
     pub fn on_event(&mut self, e: &Event) {
         self.animator.on_event(e);
-        // A Pianta captain cries out with his own voice where Olimar would with his.
+        // A Pianta or Louie captain cries out with his own voice where Olimar would with his.
         {
             use crate::pianta::Voice;
             let cry = match *e {
@@ -754,13 +754,21 @@ impl View {
                 Event::Thrown { captain, .. } => Some((captain, Voice::Throw)),
                 Event::CaptainHurt { captain, .. } => Some((captain, Voice::Hurt)),
                 Event::CaptainDown { captain } => Some((captain, Voice::Down)),
+                Event::Whistle { captain, .. } => Some((captain, Voice::Whistle)),
+                Event::Dismissed { captain } => Some((captain, Voice::Dismiss)),
+                Event::Punched { captain, .. } => Some((captain, Voice::Punch)),
                 _ => None,
             };
-            if let Some((captain, voice)) = cry
-                && self.pianta.is_some()
-                && self.captain_skins.get(&captain.0) == Some(&crate::pianta::SKIN_PIANTA)
-            {
-                self.pianta_voices.push((captain.0, voice));
+            if let Some((captain, voice)) = cry {
+                match self.captain_skins.get(&captain.0).copied() {
+                    Some(crate::pianta::SKIN_PIANTA) if self.pianta.is_some() => {
+                        self.pianta_voices.push((captain.0, crate::pianta::SKIN_PIANTA, voice));
+                    }
+                    Some(crate::louie::SKIN_LOUIE) if self.louie.is_some() && crate::louie::voice_id(voice).is_some() => {
+                        self.pianta_voices.push((captain.0, crate::louie::SKIN_LOUIE, voice));
+                    }
+                    _ => {}
+                }
             }
         }
         // `Piki::doKill`: the ghost rises from where it died.
@@ -1020,6 +1028,12 @@ impl View {
         self.captain_skins.insert(captain, skin);
     }
 
+    /// The captains wearing Louie now.
+    pub fn louie_captains(&self) -> HashSet<u32> {
+        if self.louie.is_none() { return HashSet::new(); }
+        self.captain_skins.iter().filter(|(_, s)| **s == crate::louie::SKIN_LOUIE).map(|(c, _)| *c).collect()
+    }
+
     /// The captains wearing the Pianta now.
     pub fn pianta_captains(&self) -> HashSet<u32> {
         if self.pianta.is_none() { return HashSet::new(); }
@@ -1027,7 +1041,7 @@ impl View {
     }
 
     /// The cries Pianta captains made since the last call, for the host's sound system.
-    pub fn take_pianta_voices(&mut self) -> Vec<(u32, crate::pianta::Voice)> {
+    pub fn take_pianta_voices(&mut self) -> Vec<(u32, u8, crate::pianta::Voice)> {
         std::mem::take(&mut self.pianta_voices)
     }
 

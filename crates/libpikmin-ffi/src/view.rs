@@ -146,6 +146,10 @@ pub struct PikView {
     pianta_dir: Option<std::path::PathBuf>,
     pianta_audio: Option<libsms_present::audio::Audio>,
     pianta_audio_tried: bool,
+    /// The Pikmin 2 cache (`pik_view_load_louie`), and Pikmin 2's sound effects on their own output: Louie's voice.
+    louie_dir: Option<std::path::PathBuf>,
+    louie_audio: Option<libsms_present::audio::Pikmin2Audio>,
+    louie_audio_tried: bool,
     /// Sounds the host asked for by name this frame (`pik_view_teki_named_sound`), with where.
     named: Vec<(&'static str, Vec3)>,
 }
@@ -187,6 +191,9 @@ pub unsafe extern "C" fn pik_view_new(assets_dir: *const c_char, sound: u8) -> *
             pianta_dir: None,
             pianta_audio: None,
             pianta_audio_tried: false,
+            louie_dir: None,
+            louie_audio: None,
+            louie_audio_tried: false,
             named: Vec::new(),
         })
     });
@@ -330,7 +337,10 @@ pub unsafe extern "C" fn pik_view_load_louie(view: *mut PikView, dir: *const c_c
     let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
     unsafe {
         with_view(view, -1, |v| match v.view.load_louie(std::path::Path::new(&dir)) {
-            Ok(m) => m as i32,
+            Ok(m) => {
+                v.louie_dir = Some(std::path::PathBuf::from(&dir));
+                m as i32
+            }
             Err(_) => -1,
         })
     }
@@ -453,6 +463,13 @@ pub unsafe extern "C" fn pik_view_set_captain_skin(view: *mut PikView, captain: 
     if let Some(v) = unsafe { view.as_mut() } {
         v.view.set_captain_skin(captain, skin);
         // His voice is Sunshine's sound system: start it now, not at his first jump.
+        // Louie's voice is Pikmin 2's sound effects, on a second output of their own.
+        if skin == libpikmin_present::louie::SKIN_LOUIE && v.audio.is_some() && !v.louie_audio_tried {
+            v.louie_audio_tried = true;
+            if let Some(dir) = &v.louie_dir {
+                v.louie_audio = libsms_present::audio::Pikmin2Audio::start(dir);
+            }
+        }
         if skin == libpikmin_present::pianta::SKIN_PIANTA && v.audio.is_some() && !v.pianta_audio_tried {
             v.pianta_audio_tried = true;
             if let Some(dir) = &v.pianta_dir {
@@ -827,22 +844,40 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
                     a.on_event(e, &s.sim, creatures);
                 }
             }
-            // A Pianta captain's cries are his own, not Olimar's.
-            let wear = v.view.pianta_captains();
+            // A Pianta's or Louie's cries are his own, not Olimar's (Louie's only once his sound output is running).
+            let mut wear = v.view.pianta_captains();
+            if v.louie_audio.is_some() {
+                wear.extend(v.view.louie_captains());
+            }
             if let Some(a) = v.audio.as_mut() {
                 a.pianta_captains = wear;
             }
             let voices = v.view.take_pianta_voices();
+            use libpikmin_present::pianta::SOUND_SCALE;
+            let eye = Vec3::from(f.eye) * SOUND_SCALE;
+            let heard_at = |captain: u32| {
+                let at = s.sim.captains().get(captain as usize).map_or(Vec3::from(f.eye), |c| c.pos);
+                // Your own captain is in your ears; another player's is where he stands.
+                if f.listener < 0 || f.listener as u32 == captain { eye } else { at * SOUND_SCALE }
+            };
             if let Some(sa) = v.pianta_audio.as_ref() {
-                use libpikmin_present::pianta::SOUND_SCALE;
                 sa.set_volume(f.volume);
-                sa.set_listener(listener_view(Vec3::from(f.eye) * SOUND_SCALE, f.forward.into(), f.up.into()), Vec3::from(f.eye) * SOUND_SCALE);
-                for (captain, voice) in voices {
-                    let at = s.sim.captains().get(captain as usize).map_or(Vec3::from(f.eye), |c| c.pos);
-                    let own = f.listener < 0 || f.listener as u32 == captain;
-                    // Your own Pianta is in your ears; another player's is where he stands.
-                    sa.play_at(voice.cue(), if own { Vec3::from(f.eye) * SOUND_SCALE } else { at * SOUND_SCALE });
+                sa.set_listener(listener_view(eye, f.forward.into(), f.up.into()), eye);
+                for &(captain, skin, voice) in &voices {
+                    if skin == libpikmin_present::pianta::SKIN_PIANTA && let Some(cue) = voice.cue() {
+                        sa.play_at(cue, heard_at(captain));
+                    }
                 }
+            }
+            if let Some(la) = v.louie_audio.as_mut() {
+                la.set_volume(f.volume);
+                la.set_listener(listener_view(eye, f.forward.into(), f.up.into()), eye);
+                for &(captain, skin, voice) in &voices {
+                    if skin == libpikmin_present::louie::SKIN_LOUIE && let Some(id) = libpikmin_present::louie::voice_id(voice) {
+                        la.play(id, Some(heard_at(captain)), 0x4C4F_0000 + captain as u64);
+                    }
+                }
+                la.advance(f.dt);
             }
             let dt = f.dt.clamp(0.0, 0.25);
             // The camera, for environment maps and billboards: the same axes the listener uses.

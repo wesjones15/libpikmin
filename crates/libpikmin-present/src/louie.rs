@@ -56,6 +56,28 @@ fn motion_name(motion: Motion) -> &'static str {
     }
 }
 
+/// What Louie says: Pikmin 2 sound effect ids (`SoundID.h` in the decomp, `PSSE_PL_*`; the `_LUI` / `_LUGI` ones are his
+/// own lines). `None` for the cries he does not have (his jump is silent, like Olimar's in Pikmin 2).
+pub const fn voice_id(voice: crate::pianta::Voice) -> Option<u32> {
+    use crate::pianta::Voice;
+    match voice {
+        Voice::Jump => None,
+        // `PSSE_PL_THROW`: the player's throw sound.
+        Voice::Throw => Some(0x806),
+        // `PSSE_PL_DAMAGE_LUI`.
+        Voice::Hurt => Some(0x891),
+        // `PSSE_PL_DOOM_LUGI`.
+        Voice::Down => Some(0x871),
+        // `PSSE_PL_SYUGO_LUI` (the assembly call) and `PSSE_PL_KAISAN_LUI` (dismissal). The name table has the call at
+        // 0x9F, a held sound the game re-requests every frame while the whistle blows (it dies after one frame
+        // otherwise); with the 0x800 bit, as here, the same entry plays through once.
+        Voice::Whistle => Some(0x89F),
+        Voice::Dismiss => Some(0x8A1),
+        // `PSSE_PL_PUNCH_LUI`.
+        Voice::Punch => Some(0x88E),
+    }
+}
+
 impl LouieSkin {
     pub fn load(dir: &Path, model: u32, tex_base: i32, olimar_height: f32) -> Result<Self, String> {
         let body = Louie::load(dir)?;
