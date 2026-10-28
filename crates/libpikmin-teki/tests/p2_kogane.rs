@@ -26,6 +26,8 @@ fn assets() -> Option<Assets> {
 }
 
 struct Rig {
+    /// The most nectar drops the sim had at once since the last [`Rig::take_drops`].
+    drops: usize,
     sim: Sim,
     tekis: Tekis,
     id: TekiId,
@@ -39,7 +41,7 @@ impl Rig {
         let mut tekis = Tekis::load(a);
         tekis.seed(11);
         let id = tekis.spawn(kind, 3, Vec3::ZERO, 0.0).expect("spawn");
-        Rig { sim, tekis, id, player: Navi { id: 5, pos: player_at, size: 8.0, alive: true }, outs: Vec::new() }
+        Rig { drops: 0, sim, tekis, id, player: Navi { id: 5, pos: player_at, size: 8.0, alive: true }, outs: Vec::new() }
     }
     fn tick(&mut self) {
         let mut frame = CreatureFrame::default();
@@ -48,6 +50,10 @@ impl Rig {
         self.sim.step(&mut Frame(&frame));
         let out = self.tekis.update(&mut self.sim, &FlatHost, &[self.player], 1.0 / 30.0);
         self.outs.extend(out);
+        self.drops = self.drops.max(self.sim.nectar_drops().len());
+    }
+    fn take_drops(&mut self) -> usize {
+        std::mem::take(&mut self.drops)
     }
     fn state(&self) -> Option<i32> {
         self.tekis.get(self.id).map(|t| t.state)
@@ -142,15 +148,14 @@ fn the_flint_beetle_drops_a_pellet_then_nectar_and_leaves() {
     let Some(a) = assets() else { eprintln!("SKIP: Pikmin 2 enemy files are not extracted"); return };
     let mut rig = Rig::new(&a, FLINT_BEETLE, Vec3::new(0.0, 0.0, 30.0));
     let pellets = |r: &Rig| r.outs.iter().filter(|o| matches!(o, Out::SpawnPellets { .. })).count();
-    let nectar = |r: &Rig| r.outs.iter().filter_map(|o| if let Out::SpawnNectar { count, .. } = o { Some(*count) } else { None }).collect::<Vec<_>>();
 
     assert!(rig.flip());
-    assert_eq!((pellets(&rig), nectar(&rig)), (1, vec![]), "first flip: a number-1 pellet");
+    assert_eq!((pellets(&rig), rig.take_drops()), (1, 0), "first flip: a number-1 pellet");
     assert!(rig.outs.iter().any(|o| matches!(o, Out::Sound { name: "KOGANE_HIT", .. })));
     assert!(rig.flip());
-    assert_eq!(nectar(&rig), vec![2], "second flip: two nectar");
+    assert_eq!(rig.take_drops(), 2, "second flip: two nectar");
     assert!(rig.flip() || rig.state() == Some(DISAPPEAR) || rig.tekis.get(rig.id).is_none());
-    assert_eq!(nectar(&rig), vec![2, 3], "third flip: three nectar");
+    assert_eq!(rig.take_drops(), 3, "third flip: three nectar");
     // Having given all, it dives away and is gone.
     assert!(rig.run_until(10.0, |r| r.tekis.get(r.id).is_none()), "it should leave after the third flip");
     assert!(rig.outs.iter().any(|o| matches!(o, Out::Died { .. })));

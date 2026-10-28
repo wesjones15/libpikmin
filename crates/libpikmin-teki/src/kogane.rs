@@ -156,8 +156,15 @@ fn create_item(t: &mut Teki, w: &mut World, v: Variant) {
                 w.out.push(Out::SpawnPellets { pos: at, number, color, count: 1 });
             }
         }
-        // `createDoping`: yellow nectar (`HONEY_Y`).
-        Drop::Nectar(count) => w.out.push(Out::SpawnNectar { pos: at, count }),
+        // `createDoping`: yellow nectar (`HONEY_Y`), thrown out in a fan like the pellets; here it falls as the Honeywisp's
+        // drops do (`Sim::spawn_nectar`), for the Pikmin to drink.
+        Drop::Nectar(count) => {
+            let face = t.yaw + std::f32::consts::TAU / 3.0;
+            for i in 0..count {
+                let angle = face + std::f32::consts::TAU / 3.0 / (count + 1) as f32 * (i + 1) as f32;
+                w.sim.spawn_nectar(at + Vec3::new(angle.sin(), 0.0, angle.cos()) * 14.0);
+            }
+        }
         Drop::Nothing => {}
     }
     if t.count[0] == 2 {
