@@ -44,7 +44,10 @@ Workspace:
   shaders). No music: hosts keep theirs. `teki` is for hosts with their own enemy AI (RoR2 monsters):
   `TekiInfo` (the disc's parms, motions and corpse config for the Dwarf and Spotty Bulborb) and
   `View::set_tekis`, which draws the instances a host names (kind, pos, yaw, `.key` motion, frame);
-  off unless `set_teki_models(true)` before `View::load`.
+  off unless `set_teki_models(true)` before `View::load`. `pianta` is Olimar's Pianta alt-skin
+  (a Sunshine NPC body from `libsms-present::body`, posed from Mario's clips, the Pianta's own and Olimar's
+  retargeted; voice from Sunshine's sound system): `View::load_pianta`, `set_captain_skin`; see
+  `../ror2-olimar/DOCS/pianta-skin.md`.
 - `crates/libpikmin-teki/`: Pikmin 1's enemies as engine-free state machines ported from the decomp's `Tai*` (plugPikiNakata) and
   `TAI*` (plugPikiYamashita) strategies: `tai.rs`/`yai.rs` the shared actions, one module per enemy, `info.rs` the per-kind
   disc facts. A host spawns an enemy for a body of its own, feeds it the ground, water and damage, and applies its `Out`s
