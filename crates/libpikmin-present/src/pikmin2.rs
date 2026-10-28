@@ -18,6 +18,9 @@ use libsms_present::body::{Louie, PIKMIN2_FILES};
 
 use crate::tev;
 
+/// How many Pikmin colours there are (`libpikmin::piki::COLOUR_COUNT`).
+pub const COLOUR_COUNT: usize = libpikmin::piki::COLOUR_COUNT;
+
 /// Which joint carries the leaf, bud or flower: `happajnt3`.
 pub const HAPPA_JOINT: usize = 8;
 

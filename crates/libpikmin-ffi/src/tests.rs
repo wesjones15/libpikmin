@@ -1135,8 +1135,8 @@ fn the_pikachu_skin_draws_pikachu_and_his_climbers_through_the_abi() {
         let view = pik_view_new(dir.as_ptr(), 0);
         assert!(!view.is_null());
         assert_eq!(pik_view_load_pikachu(view, melee_c.as_ptr()), 19);
-        assert_eq!(pik_view_model_count(view), 23);
-        for m in 19..23 {
+        assert_eq!(pik_view_model_count(view), 28);
+        for m in 19..28 {
             let mut info = PikModelInfo::default();
             assert_eq!(pik_view_model(view, m, &mut info), 1);
             let mut idx = vec![0u32; info.index_count as usize];
@@ -1151,8 +1151,10 @@ fn the_pikachu_skin_draws_pikachu_and_his_climbers_through_the_abi() {
         }
         let sim = pik_sim_new(dir.as_ptr(), 1);
         let c = pik_sim_add_captain(sim, &PikVec3::default());
-        for (i, color) in [PikiColor::Blue, PikiColor::Red, PikiColor::Yellow].iter().enumerate() {
-            let at = PikVec3 { x: -20.0 - i as f32 * 5.0, y: 0.0, z: 0.0 };
+        // Thirty Pikmin of the three colours: the squad is dressed from every costume the disc has.
+        for i in 0..30 {
+            let color = PikiColor::from_index(i);
+            let at = PikVec3 { x: -20.0 - (i % 10) as f32 * 5.0, y: 0.0, z: (i / 10) as f32 * 6.0 };
             pik_sim_spawn_piki(sim, color.index() as u32, &at, c);
         }
         pik_view_set_captain_skin(view, c as u32, 3);
@@ -1178,13 +1180,15 @@ fn the_pikachu_skin_draws_pikachu_and_his_climbers_through_the_abi() {
         let me = draws.iter().find(|d| d.kind == 0).expect("no captain");
         assert_eq!(me.model, 19, "the captain is not Pikachu");
         let climbers: Vec<_> = draws.iter().filter(|d| d.kind == 1).collect();
-        assert_eq!(climbers.len(), 3);
+        assert_eq!(climbers.len(), 30);
         let mut models: Vec<u32> = climbers.iter().map(|d| d.model).collect();
         models.sort();
-        assert_eq!(models, vec![20, 21, 22], "one climber body per Pikmin colour");
+        models.dedup();
+        assert!(models.iter().all(|&m| (20..28).contains(&m)), "{models:?}");
+        assert!(models.len() >= 6, "the squad wears several costumes: {models:?}");
         let mut vc = 0u32;
         let pos = std::slice::from_raw_parts(pik_view_positions(view, &mut vc), vc as usize);
-        for d in me.model..=22 {
+        for d in me.model..=27 {
             let Some(draw) = draws.iter().find(|x| x.model == d && (x.kind == 0 || x.kind == 1)) else { continue };
             let mut info = PikModelInfo::default();
             pik_view_model(view, d, &mut info);

@@ -1812,7 +1812,7 @@ impl View {
                 p.captain.is_some_and(|c| self.captain_skins.get(&c.0) == Some(&crate::pikachu::SKIN_PIKACHU))
             });
             if let Some(sk) = climber {
-                let body = &sk.climbers[p.color.index().min(2)];
+                let body = &sk.climbers[sk.costume(p.color, p.id.0)];
                 let world = body.pose(&pose.joints);
                 self.push_hsd(body, kinds::PIKI, k, pos, rot, Mat4::from_scale(look.scale), &world, look.fade, f & !flags::FROZEN, true);
             } else {

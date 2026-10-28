@@ -264,34 +264,57 @@ impl HsdBody {
     }
 }
 
-/// Pikachu as the captain and an Ice Climber for each Pikmin colour (Blue, Red, Yellow).
+/// Pikachu as the captain and the Ice Climbers as his squad, in every costume the disc has (Popo's four, Nana's
+/// four): each Pikmin colour has a family of them ([`PikachuSkin::costume`]).
 pub struct PikachuSkin {
     pub captain: HsdBody,
-    pub climbers: [HsdBody; 3],
+    pub climbers: Vec<HsdBody>,
     olimar_height: f32,
     captain_ratio: f32,
     climber_ratio: f32,
 }
 
-/// Popo and Nana's costume for each Pikmin colour: Blue is Popo's blue, Red his red, Yellow Nana's yellow
-/// (`ftpopo.c`, `ftnana.c` costume lists).
-const CLIMBERS: [(&str, &str, &str, usize); 3] = [
+/// Popo's and Nana's costumes (`ftpopo.c`, `ftnana.c` costume lists): the first three are the Blue, Red and Yellow
+/// Pikmin's own (Popo's blue, his red, Nana's yellow), then Nana's aqua, white and pink and Popo's orange and green.
+pub const CLIMBER_COSTUMES: [(&str, &str, &str, usize); 8] = [
     ("PlPpNr.dat", "PlPp.dat", "ftDataPopo", 10),
     ("PlPpRe.dat", "PlPp.dat", "ftDataPopo", 10),
     ("PlNnYe.dat", "PlNn.dat", "ftDataNana", 11),
+    ("PlNnAq.dat", "PlNn.dat", "ftDataNana", 11),
+    ("PlNnWh.dat", "PlNn.dat", "ftDataNana", 11),
+    ("PlNnNr.dat", "PlNn.dat", "ftDataNana", 11),
+    ("PlPpOr.dat", "PlPp.dat", "ftDataPopo", 10),
+    ("PlPpGr.dat", "PlPp.dat", "ftDataPopo", 10),
+];
+
+/// Which costumes dress each Pikmin colour (indices into [`CLIMBER_COSTUMES`]), so the army is mixed but a colour
+/// still reads: cool ones for Blue, warm for Red, Nana's yellow and Popo's green for Yellow.
+const FAMILIES: [&[usize]; crate::pikmin2::COLOUR_COUNT] = [
+    &[0, 3, 4],
+    &[1, 5, 6],
+    &[2, 7],
+    &[5],
+    &[4],
 ];
 
 impl PikachuSkin {
     pub fn load(dir: &Path, src_bind: &[Mat3], olimar_height: f32) -> Result<Self, String> {
         let captain = HsdBody::load(dir, "PlPkNr.dat", Archive { file: "PlPk.dat", root: "ftDataPikachu" }, 12, src_bind)?;
-        let mut load = |i: usize| -> Result<HsdBody, String> {
-            let (costume, data, root, kind) = CLIMBERS[i];
-            HsdBody::load(dir, costume, Archive { file: data, root }, kind, src_bind)
-        };
-        let climbers = [load(0)?, load(1)?, load(2)?];
+        let mut climbers = Vec::with_capacity(CLIMBER_COSTUMES.len());
+        for (costume, data, root, kind) in CLIMBER_COSTUMES {
+            climbers.push(HsdBody::load(dir, costume, Archive { file: data, root }, kind, src_bind)?);
+        }
         let mut skin = PikachuSkin { captain, climbers, olimar_height, captain_ratio: 1.0, climber_ratio: 0.42 };
         skin.refit();
         Ok(skin)
+    }
+
+    /// The climber (index into [`PikachuSkin::climbers`]) that dresses Pikmin `id` of `color`: one of its colour's
+    /// family, the same one every frame.
+    pub fn costume(&self, color: libpikmin::PikiColor, id: u32) -> usize {
+        let family = FAMILIES[color.index()];
+        // Hashed, since ids and colours go round together.
+        family[(id.wrapping_mul(2_654_435_761) >> 13) as usize % family.len()]
     }
 
     fn refit(&mut self) {
@@ -337,7 +360,7 @@ mod tests {
         let m = a.model(paths::OLIMAR).unwrap();
         let sk = Skeleton::new(&m);
         let bind = sk.pose(Mat4::IDENTITY, None);
-        for i in 0..4 {
+        for i in 0..=CLIMBER_COSTUMES.len() {
             let (body, want) = if i == 0 { (&mut skin.captain, 25.1f32) } else { (&mut skin.climbers[i - 1], 25.1 * 0.42) };
             let mut tex = Vec::new();
             body.register(0, &mut tex);
