@@ -197,6 +197,9 @@ pub struct TekiInfo {
     /// The kind's `TPF_*` / `TPI_*` parameters by index, for the strategies' own.
     pub floats: Vec<f32>,
     pub ints: Vec<i32>,
+    /// The clip names by motion index, for kinds whose animations are separate files (Pikmin 2's `.bca`); empty for
+    /// Pikmin 1's `.key` motions.
+    pub clips: Vec<String>,
 }
 
 impl TekiInfo {
@@ -294,6 +297,7 @@ impl TekiInfo {
             anims: Arc::new(set),
             floats: p.floats.clone(),
             ints: p.ints.clone(),
+            clips: Vec::new(),
         })
     }
 }

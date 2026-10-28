@@ -52,6 +52,11 @@ pub fn set_repaired_ship(on: bool) {
 
 static TEKI_MODELS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Whether the enemies' models are asked for ([`set_teki_models`]).
+pub fn teki_models_enabled() -> bool {
+    TEKI_MODELS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Host extension: load the enemies' models (Dwarf and Spotty Bulborbs, [`crate::teki`]) so the host can
 /// draw its own AI's enemies with [`View::set_tekis`]. Off by default (each model's materials are baked
 /// at load). Call before [`View::load`].
@@ -448,6 +453,8 @@ pub fn teki_creature_id(id: u32) -> libpikmin::host::CreatureId {
 pub struct View {
     /// Enemy kinds that loaded ([`set_teki_models`]), by [`crate::teki::TekiInfo::kind`] order.
     pub tekis: Vec<TekiView>,
+    /// Pikmin 2's enemy kinds that loaded ([`View::load_p2_tekis`]).
+    p2_tekis: Vec<std::sync::Arc<crate::p2enemy::P2Teki>>,
     teki_input: Vec<crate::teki::TekiInstance>,
     /// Each enemy's motion and frame at the last update, to find the sound keys it passed.
     teki_played: HashMap<u32, (u32, f32)>,
@@ -687,6 +694,7 @@ impl View {
         let ship_contexts = models[models::SHIP as usize].skel.override_map(&libpikmin_assets::ship::CONTEXT_JOINTS);
         Ok(View {
             tekis,
+            p2_tekis: Vec::new(),
             teki_input: Vec::new(),
             teki_played: HashMap::new(),
             teki_sounds: Vec::new(),
@@ -934,6 +942,33 @@ impl View {
     /// The loaded kind `kind` ([`crate::teki::DWARF`]...), if its files were on the disc.
     pub fn teki(&self, kind: u8) -> Option<&TekiView> {
         self.tekis.iter().find(|t| t.info.kind == kind)
+    }
+
+    /// What the disc says about enemy kind `kind`, Pikmin 1's or Pikmin 2's, if it loaded.
+    pub fn teki_info(&self, kind: u8) -> Option<&crate::teki::TekiInfo> {
+        self.teki(kind).map(|t| &t.info).or_else(|| self.p2_tekis.iter().find(|t| t.info.kind == kind).map(|t| &t.info))
+    }
+
+    /// Loads Pikmin 2's enemies (`libpikmin_teki::p2`) from the cache `dir` (`libsms::extract::p2_enemy`, the folder holding
+    /// `enemy/`), appending one model per kind to the table; returns how many loaded. Call before the host reads the table.
+    pub fn load_p2_tekis(&mut self, dir: &std::path::Path) -> usize {
+        if !self.p2_tekis.is_empty() { return self.p2_tekis.len(); }
+        let loaded = crate::p2enemy::load(dir, self.models.len() as u32, self.textures.list.len() as i32);
+        for t in &loaded {
+            let m = &t.body.model;
+            let (lo, hi) = (m.lo * t.info.scale, m.hi * t.info.scale);
+            let tex_base = t.tex_base;
+            self.textures.list.extend(t.textures());
+            self.models.push(ViewModel::external(
+                t.batches(), lo, hi,
+                m.batch_texture.iter().map(|&b| if b >= 0 { b + tex_base } else { -1 }).collect(),
+                m.batch_blend.clone(),
+                m.batch_env.clone(),
+                m.batch_lit.iter().map(|l| l & 3).collect(),
+            ));
+        }
+        self.p2_tekis = loaded;
+        self.p2_tekis.len()
     }
 
     /// The camera's world axes (`forward` is where it looks), for environment maps and
@@ -1790,6 +1825,23 @@ impl View {
         self.teki_positions.clear();
         let mut heard = HashSet::new();
         for t in std::mem::take(&mut self.teki_input) {
+            // Pikmin 2's enemies: a J3D body on a `.bca` clip, at the size the enemy reports.
+            if let Some(p2) = self.p2_tekis.iter().find(|p| p.info.kind == t.kind).cloned() {
+                let scale = p2.info.scale * t.scale.max(0.0);
+                if scale < 0.01 { continue; }
+                let cid = teki_creature_id(t.id);
+                heard.insert(t.id);
+                self.teki_positions.push((cid, t.pos));
+                let bind = p2.body.bind_world();
+                let joints = p2.clip(t.motion)
+                    .and_then(|c| p2.body.clip_frames(c).and_then(|n| p2.body.pose(c, t.frame.clamp(0.0, (n - 1.0).max(0.0)))))
+                    .unwrap_or(bind);
+                let flags = if t.flash > 0.0 { flags::FLASH } else { 0 };
+                let k = key(kinds::TEKI, t.id as u64);
+                self.push_body(&p2.body.model, p2.model, p2.tex_base, scale, kinds::TEKI, k, t.pos, Quat::from_rotation_y(t.yaw),
+                    Mat4::IDENTITY, &joints, t.alpha.clamp(0.0, 1.0), flags);
+                continue;
+            }
             let Some(view) = self.tekis.iter().find(|v| v.info.kind == t.kind) else { continue };
             // Sound keys passed since the last update: within the motion, or from its start when it changed
             // or looped round.

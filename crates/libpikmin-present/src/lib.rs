@@ -14,6 +14,7 @@ pub mod louie;
 pub mod navilight;
 pub mod pikachu;
 pub mod pianta;
+pub mod p2enemy;
 pub mod pikmin2;
 pub mod stings;
 pub mod teki;

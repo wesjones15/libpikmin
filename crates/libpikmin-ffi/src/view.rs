@@ -168,7 +168,11 @@ pub unsafe extern "C" fn pik_view_new(assets_dir: *const c_char, sound: u8) -> *
     };
     let made = catch_unwind(|| {
         let assets = Assets { root: dir };
-        let view = View::load(&assets).ok()?;
+        let mut view = View::load(&assets).ok()?;
+        // Pikmin 2's enemies join the model table when the enemy models are asked for and the cache has them.
+        if libpikmin_present::view::teki_models_enabled() {
+            view.load_p2_tekis(&assets.root.join("p2"));
+        }
         let (audio, sound_status) = if sound != 0 {
             match Audio::start(&assets) {
                 Ok(a) => {
@@ -404,6 +408,35 @@ pub unsafe extern "C" fn pik_p2_extract(iso: *const c_char, out: *const c_char) 
         (std::ffi::CStr::from_ptr(iso).to_string_lossy().into_owned(), std::ffi::CStr::from_ptr(out).to_string_lossy().into_owned())
     };
     match libsms::extract::p2::extract_navi(std::path::Path::new(&iso), std::path::Path::new(&out), &mut |_| {}) {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+}
+
+/// Whether the Pikmin 2 cache `dir` holds the enemies' files ([`pik_p2_enemies_extract`]).
+/// # Safety
+/// `dir` is a NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_p2_enemies_complete(dir: *const c_char) -> u8 {
+    if dir.is_null() { return 0; }
+    // SAFETY: as documented.
+    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+    libsms::extract::p2_enemy::is_complete(std::path::Path::new(&dir)) as u8
+}
+
+/// Extracts Pikmin 2's enemies (models, clips, textures, parameter text) from the user's disc image `iso` into the
+/// cache folder `out` (the same one as [`pik_p2_extract`]); 0 when done (or already complete), else 1. A host runs it
+/// on a worker thread, once.
+/// # Safety
+/// Both arguments are NUL-terminated strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_p2_enemies_extract(iso: *const c_char, out: *const c_char) -> i32 {
+    if iso.is_null() || out.is_null() { return 1; }
+    // SAFETY: as documented.
+    let (iso, out) = unsafe {
+        (std::ffi::CStr::from_ptr(iso).to_string_lossy().into_owned(), std::ffi::CStr::from_ptr(out).to_string_lossy().into_owned())
+    };
+    match libsms::extract::p2_enemy::extract(std::path::Path::new(&iso), std::path::Path::new(&out), &mut |_| {}) {
         Ok(_) => 0,
         Err(_) => 1,
     }
@@ -1237,8 +1270,8 @@ pub unsafe extern "C" fn pik_view_teki_info(view: *mut PikView, kind: u32, out: 
     // SAFETY: as documented.
     unsafe {
         with_view(view, 0, |v| {
-            let Some(t) = u8::try_from(kind).ok().and_then(|k| v.view.teki(k)) else { return 0 };
-            out.write(info_struct(kind, &t.info));
+            let Some(info) = u8::try_from(kind).ok().and_then(|k| v.view.teki_info(k)) else { return 0 };
+            out.write(info_struct(kind, info));
             1
         })
     }
@@ -1292,7 +1325,11 @@ pub unsafe extern "C" fn pik_teki_info(assets_dir: *const c_char, kind: u32, out
         let assets = Assets { root: dir };
         let pellets = assets.read("parms/pelMgr.bin").ok()
             .and_then(|d| libpikmin::pellet_config::parse_pellet_configs(&d).ok()).unwrap_or_default();
-        libpikmin_present::teki::TekiInfo::load(&assets, u8::try_from(kind).ok()?, 0, &pellets).ok()
+        let kind = u8::try_from(kind).ok()?;
+        if kind >= libpikmin_teki::p2::FIRST {
+            return libpikmin_present::p2enemy::load_info(&assets.root.join("p2"), kind).ok();
+        }
+        libpikmin_present::teki::TekiInfo::load(&assets, kind, 0, &pellets).ok()
     });
     let Ok(Some(i)) = made else { return 0 };
     // SAFETY: as documented.

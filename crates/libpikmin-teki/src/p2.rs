@@ -276,6 +276,7 @@ impl TekiInfo {
             anims: Arc::new(AnimSet::new(AnimMgr { base_path: String::new(), infos: Vec::new() }, Vec::new())),
             floats,
             ints,
+            clips: clips.iter().map(|c| c.file.trim_end_matches(".bca").trim_end_matches(".bck").to_owned()).collect(),
         })
     }
 }
