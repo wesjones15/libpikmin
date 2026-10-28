@@ -12,6 +12,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 libpikmin.workspace = true
 libpikmin-assets.workspace = true
 libpikmin-present.workspace = true
+libsms-assets.workspace = true
 libsms-present.workspace = true
 libsms.workspace = true
 libssbm-assets.workspace = true

@@ -894,6 +894,9 @@ const EVENT_BACKLOG: usize = 16384;
 pub struct PikSim {
     sim: Sim,
     part_specs: Vec<Option<PelletDesc>>,
+    /// Pikmin 2's treasures from the Pikmin 2 cache beside the assets (`<assets>/p2/treasure`), by their index in
+    /// `otakara_config.txt`; a bad config is `None` so the indices stay put.
+    treasure_specs: Vec<Option<TreasureSpec>>,
     /// The creatures the host gave last, copied into the sim each tick.
     frame: CreatureFrame,
     /// Events for [`pik_sim_events`].
@@ -1014,12 +1017,14 @@ pub unsafe extern "C" fn pik_sim_new(assets_dir: *const c_char, seed: u64) -> *m
             params.load_pikmin2_dir(&dir.join("p2").join("parms"));
         }
         let part_specs = load_part_specs(&params, dir.as_deref());
-        (Sim::new(params, seed), source, part_specs)
+        let treasure_specs = load_treasure_specs(dir.as_deref());
+        (Sim::new(params, seed), source, part_specs, treasure_specs)
     });
     match made {
-        Ok((sim, source, part_specs)) => Box::into_raw(Box::new(PikSim {
+        Ok((sim, source, part_specs, treasure_specs)) => Box::into_raw(Box::new(PikSim {
             sim,
             part_specs,
+            treasure_specs,
             frame: CreatureFrame::default(),
             pending: VecDeque::new(),
             view_log: Vec::new(),
@@ -1059,6 +1064,88 @@ fn load_part_specs(params: &Params, dir: Option<&Path>) -> Vec<Option<PelletDesc
             min_carriers: cfg.min_carriers as u32, max_carriers: cfg.max_carriers as u32,
             seeds_matching: 0, seeds_other: 0, color: None, creature: None, ship_part: Some(part as u32) })
     }).collect()
+}
+
+/// A Pikmin 2 treasure as a Ship Repair objective: its pellet (a ship-part pellet from
+/// [`libpikmin::TREASURE_PART_BASE`] up), its in-game name and its worth in Pokos.
+struct TreasureSpec {
+    desc: PelletDesc,
+    name: String,
+    value: u32,
+}
+
+// `PelletConfig` (pelletConfig.cpp) of `otakara_config.txt`: `radius` the footprint, `height`, `min`/`max` the
+// carriers (`Pellet::getPelletConfigMin/Max`), `money` the Pokos; the name is from `pikmin2.bmg` (`TItemZukan`).
+// The cache is what `libsms::extract::p2_treasure` writes; without it there are no treasures.
+fn load_treasure_specs(dir: Option<&Path>) -> Vec<Option<TreasureSpec>> {
+    let Some(dir) = dir else { return Vec::new() };
+    let root = dir.join("p2").join("treasure");
+    let Ok(table) = libsms_assets::treasure::Table::load(&root) else { return Vec::new() };
+    table.treasures.iter().enumerate().map(|(index, c)| {
+        if c.min == 0 || c.max < c.min || !c.radius.is_finite() || c.radius <= 0.0 { return None; }
+        let name = table.display_name(c)?;
+        Some(TreasureSpec {
+            desc: PelletDesc { pos: Vec3::ZERO, yaw: 0.0, radius: c.radius, height: c.height.max(1.0),
+                min_carriers: c.min, max_carriers: c.max.min(128),
+                seeds_matching: 0, seeds_other: 0, color: None, creature: None,
+                ship_part: Some(libpikmin::TREASURE_PART_BASE + index as u32) },
+            name, value: c.money,
+        })
+    }).collect()
+}
+
+/// How many treasures the Pikmin 2 cache holds (188 with it, 0 without).
+/// # Safety
+/// `sim` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_treasure_count(sim: *mut PikSim) -> u32 {
+    unsafe { with(sim, 0, |s| s.treasure_specs.len() as u32) }
+}
+
+/// Treasure `index`'s carry requirement (Pikmin needed to lift it), or 0 when it is not usable.
+/// # Safety
+/// `sim` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_treasure_weight(sim: *mut PikSim, index: u32) -> u32 {
+    unsafe { with(sim, 0, |s| s.treasure_specs.get(index as usize).and_then(|t| t.as_ref()).map_or(0, |t| t.desc.min_carriers)) }
+}
+
+/// Treasure `index`'s worth in Pokos (what the Onion pays in Pikmin 2), or 0 when it is not usable.
+/// # Safety
+/// `sim` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_treasure_value(sim: *mut PikSim, index: u32) -> u32 {
+    unsafe { with(sim, 0, |s| s.treasure_specs.get(index as usize).and_then(|t| t.as_ref()).map_or(0, |t| t.value)) }
+}
+
+/// Copies treasure `index`'s English name, NUL terminated; returns the bytes written excluding the NUL.
+/// # Safety
+/// `out` is writable for `cap` bytes; `sim` is live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_treasure_name(sim: *mut PikSim, index: u32, out: *mut u8, cap: u32) -> u32 {
+    if out.is_null() || cap == 0 { return 0; }
+    unsafe { with(sim, 0, |s| {
+        let Some(t) = s.treasure_specs.get(index as usize).and_then(|t| t.as_ref()) else { return 0 };
+        let n = t.name.len().min(cap as usize - 1);
+        std::ptr::copy_nonoverlapping(t.name.as_ptr(), out, n);
+        *out.add(n) = 0;
+        n as u32
+    }) }
+}
+
+/// Spawns treasure `index` as a pellet a ship receives like a part; its part id in the receipt is
+/// `TREASURE_PART_BASE + index` (1000 + index). Returns the pellet id or -1.
+/// # Safety
+/// `sim` is live; `pos` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_spawn_treasure(sim: *mut PikSim, index: u32, pos: *const PikVec3, yaw: f32) -> i32 {
+    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return -1 };
+    if !Vec3::from(pos).is_finite() || !yaw.is_finite() { return -1; }
+    unsafe { with(sim, -1, |s| {
+        let Some(mut d) = s.treasure_specs.get(index as usize).and_then(|t| t.as_ref()).map(|t| t.desc) else { return -1 };
+        d.pos = pos.into(); d.yaw = yaw;
+        s.sim.spawn_pellet(d).0 as i32
+    }) }
 }
 
 /// Host-selected receipt policy; the default continues to deliver to ships.

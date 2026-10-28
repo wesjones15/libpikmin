@@ -1225,3 +1225,45 @@ fn the_pikachu_skin_draws_pikachu_and_his_climbers_through_the_abi() {
         pik_view_free(view);
     }
 }
+
+/// Pikmin 2's treasures cross the ABI as ship-part pellets with ids from `TREASURE_PART_BASE` (skips without the
+/// Pikmin 2 treasure cache in `<assets>/p2/treasure`).
+#[test]
+fn treasures_cross_the_spawn_abi() {
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
+    if !assets.root.join("p2/treasure/config/otakara_config.txt").is_file() {
+        eprintln!("SKIP: no Pikmin 2 treasure cache");
+        return;
+    }
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let sim = pik_sim_new(dir.as_ptr(), 1);
+        assert!(!sim.is_null());
+        assert_eq!(pik_sim_treasure_count(sim), 188);
+        let mut usable = 0;
+        let mut name = [0u8; 128];
+        for i in 0..188 {
+            let weight = pik_sim_treasure_weight(sim, i);
+            if weight == 0 { continue }
+            usable += 1;
+            assert!(pik_sim_treasure_value(sim, i) >= 10, "treasure {i}");
+            assert!(pik_sim_treasure_name(sim, i, name.as_mut_ptr(), 128) > 0, "treasure {i}");
+        }
+        assert_eq!(usable, 188);
+        // Rubber Ugly (index 0): 8 to lift, 90 Pokos.
+        assert_eq!(pik_sim_treasure_weight(sim, 0), 8);
+        assert_eq!(pik_sim_treasure_value(sim, 0), 90);
+        let n = pik_sim_treasure_name(sim, 0, name.as_mut_ptr(), 128) as usize;
+        assert_eq!(std::str::from_utf8(&name[..n]).unwrap(), "Rubber Ugly");
+        let pos = PikVec3 { x: 10.0, y: 0.0, z: 0.0 };
+        let id = pik_sim_spawn_treasure(sim, 5, &pos, 0.0);
+        assert!(id >= 0);
+        assert_eq!((*sim).sim.pellets()[id as usize].desc.ship_part, Some(libpikmin::TREASURE_PART_BASE + 5));
+        let mut frame = [PikPellet::default(); 1];
+        assert_eq!(pik_sim_pellets(sim, frame.as_mut_ptr(), 1), 1);
+        assert_eq!(frame[0].has_ship_part, 1);
+        assert_eq!(pik_sim_spawn_treasure(sim, 188, &pos, 0.0), -1);
+        assert_eq!(pik_sim_treasure_weight(sim, u32::MAX), 0);
+        pik_sim_free(sim);
+    }
+}
