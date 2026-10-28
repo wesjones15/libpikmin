@@ -29,7 +29,7 @@ pub mod strike;
 mod sim;
 
 pub use captain::{Captain, CaptainInput, CaptainPose, LockView};
-pub use carry::{Pellet, PelletDesc, PelletId, PelletState};
+pub use carry::{Pellet, PelletDesc, PelletId, PelletState, TREASURE_PART_BASE};
 pub use clock::{FixedClock, TICK_DT, TICK_HZ};
 pub use damage::DeathCause;
 pub use event::Event;

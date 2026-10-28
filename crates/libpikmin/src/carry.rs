@@ -100,6 +100,11 @@ pub struct PelletDesc {
     pub ship_part: Option<u32>,
 }
 
+/// Ship-part ids from here up are Pikmin 2 treasures (`PelletDesc::ship_part`): a treasure is carried and received
+/// by a ship like a part, and the host's receipt (`Event::ShipPartCollected`) names it by `TREASURE_PART_BASE + index`
+/// in its own treasure table. The 30 Dolphin parts are 0..30; a treasure never joins a ship's fitted parts.
+pub const TREASURE_PART_BASE: u32 = 1000;
+
 /// The numbered pellets' values, from the disc's `pelMgr.bin` (`p{b,r,y}{01,05,10,20}`).
 pub const PELLET_NUMBERS: [u32; 4] = [1, 5, 10, 20];
 
@@ -903,7 +908,7 @@ impl Sim {
                 // `UfoItem::suckMe`: the part goes on the ship (`PlayerState::getUfoParts`).
                 let id = p.id;
                 let ship = self.onions[onion.0 as usize].ship.as_mut().expect("ship parts go to ships");
-                if !ship.parts.contains(&part) {
+                if !ship.parts.contains(&part) && part < TREASURE_PART_BASE {
                     ship.parts.push(part);
                 }
                 let total = ship.parts.len() as u32;
@@ -1548,6 +1553,52 @@ mod tests {
         assert_eq!(got, Some((4, 1, ship)));
         assert_eq!(sim.onions()[ship.0 as usize].ship.as_ref().unwrap().parts, vec![4]);
         assert!(sim.sprouts().next().is_none(), "no seeds from a ship part");
+    }
+
+    /// A Pikmin 2 treasure is a ship-part pellet with an id from `TREASURE_PART_BASE` up: the ship takes it, the host
+    /// is told which, and the ship's fitted parts stay as they were (under both the default and the host's receipt).
+    #[test]
+    fn a_treasure_is_received_by_the_ship_without_fitting_it() {
+        for host_receipt in [false, true] {
+            let mut sim = Sim::new(Params::default(), 5);
+            let mut host = FlatHost;
+            let _onion = sim.add_onion(Vec3::new(100.0, 0.0, 0.0), &[PikiColor::Red]);
+            let ship = sim.add_ship(Vec3::new(-300.0, 0.0, 0.0), Vec3::new(-180.0, 0.0, 0.0), Vec3::new(-280.0, 60.0, 20.0));
+            if host_receipt {
+                sim.set_ship_part_host_delivery(true);
+            }
+            let pel = sim.spawn_pellet(PelletDesc {
+                pos: Vec3::ZERO,
+                yaw: 0.0,
+                radius: 20.0,
+                height: 10.0,
+                min_carriers: 1,
+                max_carriers: 4,
+                seeds_matching: 0,
+                seeds_other: 0,
+                color: None,
+                creature: None,
+                ship_part: Some(TREASURE_PART_BASE + 37),
+            });
+            attach(&mut sim, PikiColor::Red, pel);
+            sim.step(&mut host);
+            assert!(matches!(sim.pellet(pel).state, PelletState::Carried { onion: o, .. } if o == ship));
+            let mut got = None;
+            for _ in 0..30 * 30 {
+                sim.step(&mut host);
+                for e in sim.drain_events() {
+                    if let Event::ShipPartCollected { part, ship: s, .. } = e {
+                        got = Some((part, s));
+                    }
+                }
+                if got.is_some() {
+                    break;
+                }
+            }
+            assert_eq!(got, Some((TREASURE_PART_BASE + 37, ship)), "host_receipt {host_receipt}");
+            assert!(sim.onions()[ship.0 as usize].ship.as_ref().unwrap().parts.is_empty(), "a treasure is not a fitted part");
+            assert!(sim.sprouts().next().is_none(), "no seeds from a treasure");
+        }
     }
 
     #[test]
