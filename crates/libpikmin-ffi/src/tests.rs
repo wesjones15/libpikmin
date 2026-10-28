@@ -1267,3 +1267,96 @@ fn treasures_cross_the_spawn_abi() {
         pik_sim_free(sim);
     }
 }
+
+#[test]
+fn pikmin_2_enemies_draw_and_run_through_the_abi() {
+    use crate::teki_ai::*;
+    let _views = VIEWS.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else {
+        eprintln!("no extracted assets; skipping");
+        return;
+    };
+    if !assets.root.join("tekis/.all").exists() || !libsms::extract::p2_enemy::is_complete(&assets.root.join("p2")) {
+        eprintln!("SKIP: the Pikmin 1 enemy files or the Pikmin 2 enemy cache are not extracted");
+        return;
+    }
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    let first = libpikmin_teki::p2::FIRST as u32;
+    let count = libpikmin_teki::p2::KIND_TABLE.len() as u32;
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        crate::view::pik_view_set_teki_models(1);
+        let view = pik_view_new(dir.as_ptr(), 0);
+        crate::view::pik_view_set_teki_models(0);
+        assert!(!view.is_null());
+        let sim = pik_sim_new(dir.as_ptr(), 1);
+        let t = pik_tekis_new(dir.as_ptr(), 3);
+        let mut models = std::collections::HashSet::new();
+        let mut list = Vec::new();
+        for k in first..first + count {
+            assert_eq!(pik_tekis_has_strategy(t, k), 1, "kind {k}");
+            let mut info = crate::view::PikTekiInfo::default();
+            assert_eq!(crate::view::pik_view_teki_info(view, k, &mut info), 1, "kind {k} not in the view");
+            assert!(models.insert(info.model), "kind {k} shares a model");
+            assert!(info.model >= 19 && info.life > 0.0 && info.hi.y > info.lo.y);
+            // The same facts without a view.
+            let mut bare = crate::view::PikTekiInfo::default();
+            assert_eq!(crate::view::pik_teki_info(dir.as_ptr(), k, &mut bare), 1);
+            assert_eq!(bare.life, info.life);
+            list.push(crate::view::PikTekiInstance {
+                id: k, kind: k, motion: 0, frame: 3.0, scale: 1.0, alpha: 1.0,
+                pos: PikVec3 { x: (k - first) as f32 * 60.0, y: 0.0, z: 0.0 }, ..Default::default()
+            });
+        }
+        let frame = PikViewFrame {
+            dt: 1.0 / 30.0,
+            forward: PikVec3 { x: 0.0, y: 0.0, z: 1.0 },
+            up: PikVec3 { x: 0.0, y: 1.0, z: 0.0 },
+            listener: -1,
+            ..Default::default()
+        };
+        crate::view::pik_view_set_tekis(view, list.as_ptr(), count);
+        pik_view_update(view, sim, &frame);
+        let n = pik_view_draws(view, std::ptr::null_mut(), 0);
+        let mut draws = vec![PikDraw::default(); n as usize];
+        pik_view_draws(view, draws.as_mut_ptr(), n);
+        let mine: Vec<_> = draws.iter().filter(|d| d.kind == 12).collect();
+        assert_eq!(mine.len() as u32, count);
+        assert!(mine.iter().all(|d| models.contains(&d.model)));
+        // A Flint Beetle comes up when a player walks close, then is a body the view draws at its reported size.
+        let at = PikVec3::default();
+        let id = pik_tekis_spawn(t, first, 4242, &at, 0.0) as u32;
+        let navi = PikNavi { id: 1, pos: PikVec3 { x: 0.0, y: 0.0, z: 30.0 }, size: 10.0, alive: 1, buried: 0, _pad: [0; 2] };
+        for _ in 0..30 {
+            pik_tekis_update(t, sim, &navi, 1, 1);
+        }
+        let mut st = PikTekiState::default();
+        assert_eq!(pik_tekis_state(t, id, &mut st), 1);
+        assert_eq!(st.flags & 3, 3, "visible and alive once someone is near");
+        assert!((st.fade - 1.0).abs() < 1e-3, "full size: {}", st.fade);
+        pik_tekis_free(t);
+        pik_sim_free(sim);
+        pik_view_free(view);
+    }
+}
+
+#[test]
+fn treasure_cache_completeness_crosses_the_abi() {
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
+    let p2 = assets.root.join("p2");
+    if !p2.join("treasure/config/otakara_config.txt").is_file() {
+        eprintln!("SKIP: no Pikmin 2 treasure cache");
+        return;
+    }
+    let dir = CString::new(p2.to_string_lossy().as_bytes()).unwrap();
+    let missing = CString::new(p2.join("nowhere").to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        assert_eq!(pik_p2_treasures_complete(dir.as_ptr()), 1);
+        assert_eq!(pik_p2_treasures_complete(missing.as_ptr()), 0);
+        assert_eq!(pik_p2_treasures_complete(std::ptr::null()), 0);
+        // Already complete: extracting is a no-op that succeeds without a disc.
+        let none = CString::new("no-such-disc.iso").unwrap();
+        assert_eq!(pik_p2_extract_treasures(none.as_ptr(), dir.as_ptr()), 0);
+        assert_eq!(pik_p2_extract_treasures(none.as_ptr(), missing.as_ptr()), 1);
+    }
+}

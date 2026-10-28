@@ -1094,6 +1094,30 @@ fn load_treasure_specs(dir: Option<&Path>) -> Vec<Option<TreasureSpec>> {
     }).collect()
 }
 
+/// Whether the Pikmin 2 cache folder `dir` (the one [`pik_p2_extract`] fills) holds the treasure files too.
+/// # Safety
+/// `dir` is a NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_p2_treasures_complete(dir: *const c_char) -> u8 {
+    // SAFETY: as documented.
+    let Some(dir) = (unsafe { path_arg(dir) }) else { return 0 };
+    libsms::extract::p2_treasure::is_complete(&dir) as u8
+}
+
+/// Extracts Pikmin 2's treasures (models, configs, names, jingles) from the user's disc image `iso` into the Pikmin 2
+/// cache folder `out`, beside Louie's files; 0 when done (or already complete), else 1.
+/// # Safety
+/// Both arguments are NUL-terminated strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_p2_extract_treasures(iso: *const c_char, out: *const c_char) -> i32 {
+    // SAFETY: as documented.
+    let (Some(iso), Some(out)) = (unsafe { (path_arg(iso), path_arg(out)) }) else { return 1 };
+    match catch_unwind(|| libsms::extract::p2_treasure::extract(&iso, &out, &mut |_| {})) {
+        Ok(Ok(_)) => 0,
+        _ => 1,
+    }
+}
+
 /// How many treasures the Pikmin 2 cache holds (188 with it, 0 without).
 /// # Safety
 /// `sim` is a live handle.
