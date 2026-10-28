@@ -534,6 +534,9 @@ pub struct View {
     pub(crate) pianta: Option<crate::pianta::PiantaSkin>,
     /// The Louie body some captains wear ([`View::load_louie`]).
     pub(crate) louie: Option<crate::louie::LouieSkin>,
+    /// Louie's navi light (a stand-in for the JPA2 effect) and where it burns this frame: (feet, height).
+    navi_light: Option<crate::navilight::NaviLight>,
+    light_spots: Vec<(Vec3, f32)>,
     /// Purple and White Pikmin (Pikmin 2, [`View::load_pikmin2`]).
     pub(crate) pikmin2: Option<std::sync::Arc<crate::pikmin2::Pikmin2Skin>>,
     /// Pikachu and his Ice Climbers ([`View::load_pikachu`]).
@@ -737,6 +740,8 @@ impl View {
             sparkled: HashMap::new(),
             pianta: None,
             louie: None,
+            navi_light: None,
+            light_spots: Vec::new(),
             pikmin2: None,
             pikachu: None,
             captain_skins: HashMap::new(),
@@ -935,6 +940,13 @@ impl View {
         match self.effects.as_mut() {
             Some(fx) => self.particles.update(fx, right, up),
             None => self.particles.quads.clear(),
+        }
+        // Louie's navi light over each captain wearing him.
+        if let Some(mut light) = self.navi_light.take() {
+            for &(feet, height) in &self.light_spots {
+                light.draw(&mut self.particles, feet, height, self.time, right, up);
+            }
+            self.navi_light = Some(light);
         }
     }
 
@@ -1190,6 +1202,11 @@ impl View {
             m.batch_lit.iter().map(|l| l & 3).collect(),
         ));
         self.louie = Some(skin);
+        // His navi light is optional: the same cache, the effects file.
+        match crate::navilight::NaviLight::load(dir) {
+            Ok(light) => self.navi_light = Some(light),
+            Err(e) => eprintln!("Louie's navi light: {e}"),
+        }
         Ok(model)
     }
 
@@ -1251,6 +1268,7 @@ impl View {
     pub fn update(&mut self, sim: &Sim, alpha: f32, dt: f32) {
         self.render_frame = self.render_frame.wrapping_add(1);
         self.draws.clear();
+        self.light_spots.clear();
         self.positions.clear();
         self.normals.clear();
         self.colors.clear();
@@ -1961,6 +1979,9 @@ impl View {
                 self.push_pianta(k, pos, rot, root, &joints, 1.0, f);
             } else if let Some(joints) = louie_joints {
                 self.push_louie(k, pos, rot, root, &joints, 1.0, f);
+                if let Some(l) = &self.louie {
+                    self.light_spots.push((pos, l.scale * l.body.height()));
+                }
             } else if let Some(world) = pikachu_world {
                 if let Some(sk) = self.pikachu.clone() {
                     self.push_hsd(&sk.captain, kinds::CAPTAIN, k, pos, rot, root, &world, 1.0, f, false);

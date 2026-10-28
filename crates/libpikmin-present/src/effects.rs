@@ -600,6 +600,12 @@ pub struct Flat {
 }
 
 impl Flat {
+    /// Registers a texture of a host's own (not from an effect) and returns its id.
+    pub fn add_texture(&mut self, image: Image, wrap: [bool; 2]) -> u32 {
+        self.textures.push(Texture { image, wrap });
+        self.textures.len() as u32 - 1
+    }
+
     fn texture(&mut self, fx: &Effects, def: usize, child: bool, how: Derive) -> u32 {
         if let Some(&id) = self.ids.get(&(def, child, how)) {
             return id;

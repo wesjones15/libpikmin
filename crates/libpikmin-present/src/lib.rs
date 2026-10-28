@@ -10,6 +10,7 @@ pub mod animator;
 pub mod audio;
 pub mod effects;
 pub mod louie;
+pub mod navilight;
 pub mod pikachu;
 pub mod pianta;
 pub mod pikmin2;

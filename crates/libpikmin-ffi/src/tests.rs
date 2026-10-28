@@ -1041,6 +1041,10 @@ fn the_louie_skin_draws_through_the_abi() {
                 }
             }
         }
+        // His navi light burns over him: four additive glow layers among the particles.
+        let mut lights = 0u32;
+        pik_view_particles(view, &mut lights);
+        assert!(lights >= 4, "{lights} particle quads");
         pik_view_free(view);
     }
 }
