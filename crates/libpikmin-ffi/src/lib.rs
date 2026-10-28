@@ -747,6 +747,28 @@ pub unsafe extern "C" fn pik_find_disc(dirs: *const c_char, out: *mut u8, out_le
     }
 }
 
+/// Like [`pik_find_disc`] for a Pikmin 2 image (`GPV*`), for Louie.
+///
+/// # Safety
+/// `dirs` a nul-terminated string; `out` writable for `out_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_p2_find_disc(dirs: *const c_char, out: *mut u8, out_len: u32) -> u8 {
+    if dirs.is_null() {
+        return 0;
+    }
+    // SAFETY: as documented.
+    let dirs = unsafe { CStr::from_ptr(dirs) }.to_string_lossy().into_owned();
+    let found = catch_unwind(|| {
+        let dirs: Vec<PathBuf> = dirs.split(';').filter(|s| !s.is_empty()).map(PathBuf::from).collect();
+        libsms::extract::p2::find_disc(&dirs)
+    });
+    match found {
+        // SAFETY: as documented.
+        Ok(Some(p)) => unsafe { write_str(&p.to_string_lossy(), out, out_len) },
+        _ => 0,
+    }
+}
+
 /// First-run extraction: builds the assets folder `out_dir` from the user's disc image at
 /// `disc`. Does nothing if `out_dir` is already complete. Returns 1 on success; either way a
 /// short message (the error, or what was done) goes to `msg`.
