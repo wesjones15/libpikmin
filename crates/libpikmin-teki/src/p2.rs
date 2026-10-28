@@ -282,7 +282,8 @@ impl TekiInfo {
 }
 
 /// The Pikmin 2 sound id (`SoundID.h`) of an `Out::Sound` name (a `PSSE_EN_*` without the prefix). Ids without the 0x800
-/// bit (`FART_BUZZ`, `OTAKARA_ATK_GAS`) are held sounds the host re-requests each tick; the others play once.
+/// bit (`FART_BUZZ` 0x5162, `OTAKARA_ATK_GAS` 0x5164) are the held flavour, which the game re-requests every frame and
+/// which is near silent asked once: the ids here are their once-only forms (the 0x800 bit).
 pub fn sound_id(name: &str) -> Option<u32> {
     Some(match name {
         "ENEMY_LOOSE_ITEM" => 0x5810,
@@ -293,8 +294,8 @@ pub fn sound_id(name: &str) -> Option<u32> {
         "TAMAGOMUSHI_APPEAR" => 0x5915,
         "FART_GAS" => 0x5960,
         "FART_HIT" => 0x5961,
-        "FART_BUZZ" => 0x5162,
-        "OTAKARA_ATK_GAS" => 0x5164,
+        "FART_BUZZ" => 0x5962,
+        "OTAKARA_ATK_GAS" => 0x5964,
         _ => return None,
     })
 }

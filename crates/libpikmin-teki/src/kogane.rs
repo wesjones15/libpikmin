@@ -185,7 +185,6 @@ fn gas(t: &mut Teki, w: &mut World) {
     for (id, health) in victims {
         w.sim.attack_piki(id, health.max(1.0));
     }
-    w.out.push(Out::Sound { name: "OTAKARA_ATK_GAS", pos: at });
 }
 
 /// Builds the Kogane family's strategy for `kind`.
@@ -279,6 +278,7 @@ pub fn strategy(kind: u8) -> Strategy {
                         let behind = t.f(fp::own::SCALE) * t.f(fp::MAX_ATTACK_RANGE);
                         t.wander = t.pos + Vec3::Y * 8.0 - dir_vec(t.yaw) * behind;
                         sound(w, "FART_GAS", t.pos);
+                        sound(w, "OTAKARA_ATK_GAS", t.wander);
                     }
                 })
                 .on_act(|t, w| {
@@ -368,8 +368,10 @@ pub fn update_common(t: &mut Teki, w: &mut World) {
         return;
     }
     gas(t, w);
-    // `getStateID() >= 2`: buzzing while it is out (Move, Wait, Press).
-    if t.state >= MOVE {
+    // `getStateID() >= 2`: buzzing while it is out (Move, Wait, Press). The game re-requests the held sound every
+    // frame; the host asks for the once-only flavour about every second instead.
+    if t.state >= MOVE && t.timer_elapsed(5) {
+        t.timers[5] = 1.0;
         w.out.push(Out::Sound { name: "FART_BUZZ", pos: t.pos });
     }
 }

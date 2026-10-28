@@ -152,6 +152,8 @@ pub struct PikView {
     louie_audio_tried: bool,
     /// Sounds the host asked for by name this frame (`pik_view_teki_named_sound`), with where.
     named: Vec<(&'static str, Vec3)>,
+    /// The Pikmin 2 cache (`<assets>/p2`), where the enemies' Pikmin 2 sounds come from when Louie is not in play.
+    p2_dir: Option<std::path::PathBuf>,
 }
 
 /// Loads the disc's models (and with `sound` non-zero, opens the default output device for
@@ -199,6 +201,7 @@ pub unsafe extern "C" fn pik_view_new(assets_dir: *const c_char, sound: u8) -> *
             louie_audio: None,
             louie_audio_tried: false,
             named: Vec::new(),
+            p2_dir: Some(assets.root.join("p2")),
         })
     });
     match made {
@@ -936,6 +939,19 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
             let mut table_sounds = if v.audio.is_none() || v.last_tick != Some(s.sim.tick()) { std::mem::take(&mut v.view.teki_sounds) } else { Vec::new() };
             // Named sounds sound from stand-in creatures where they were asked for.
             for (i, (name, at)) in std::mem::take(&mut v.named).into_iter().enumerate() {
+                // Pikmin 2's enemies name `PSSE_EN_*` sounds, which play on the Pikmin 2 output (started on the first).
+                if let Some(sound) = libpikmin_teki::p2::sound_id(name) {
+                    if v.louie_audio.is_none() && !v.louie_audio_tried && v.audio.is_some() {
+                        v.louie_audio_tried = true;
+                        if let Some(dir) = v.louie_dir.clone().or_else(|| v.p2_dir.clone()) {
+                            v.louie_audio = libsms_present::audio::Pikmin2Audio::start(&dir);
+                        }
+                    }
+                    if let Some(la) = v.louie_audio.as_ref() {
+                        la.play(sound, Some(at * SOUND_SCALE), 0x5032_0000 + sound as u64);
+                    }
+                    continue;
+                }
                 let id = 0xFFFF_0000_0000u64 + i as u64;
                 positions.push((id, at));
                 table_sounds.push((id, name, 0));
