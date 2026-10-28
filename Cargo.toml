@@ -18,4 +18,5 @@ libpikmin-teki = { path = "crates/libpikmin-teki" }
 libsms = { path = "../libsms/crates/libsms" }
 libsms-assets = { path = "../libsms/crates/libsms-assets" }
 libsms-present = { path = "../libsms/crates/libsms-present" }
+libssbm-assets = { path = "../libssbm/crates/libssbm-assets" }
 glam = "0.30"

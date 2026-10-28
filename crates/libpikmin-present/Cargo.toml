@@ -15,4 +15,6 @@ libcommon.workspace = true
 libsms.workspace = true
 libsms-assets.workspace = true
 libsms-present.workspace = true
+# Melee bodies (Pikachu, the Ice Climbers) for the Pikachu skin (pikachu.rs).
+libssbm-assets.workspace = true
 cpal = "0.15"

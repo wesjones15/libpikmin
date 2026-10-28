@@ -520,6 +520,7 @@ dependencies = [
  "libpikmin-teki",
  "libsms",
  "libsms-present",
+ "libssbm-assets",
 ]
 
 [[package]]
@@ -536,6 +537,7 @@ dependencies = [
  "libsms",
  "libsms-assets",
  "libsms-present",
+ "libssbm-assets",
 ]
 
 [[package]]

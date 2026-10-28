@@ -534,6 +534,8 @@ pub struct View {
     pub(crate) pianta: Option<crate::pianta::PiantaSkin>,
     /// The Louie body some captains wear ([`View::load_louie`]).
     pub(crate) louie: Option<crate::louie::LouieSkin>,
+    /// Pikachu and his Ice Climbers ([`View::load_pikachu`]).
+    pub(crate) pikachu: Option<std::sync::Arc<crate::pikachu::PikachuSkin>>,
     captain_skins: HashMap<u32, u8>,
     /// Cries a Pianta captain made since the host last took them ([`View::take_pianta_voices`]).
     pianta_voices: Vec<(u32, crate::pianta::Voice)>,
@@ -733,6 +735,7 @@ impl View {
             sparkled: HashMap::new(),
             pianta: None,
             louie: None,
+            pikachu: None,
             captain_skins: HashMap::new(),
             pianta_voices: Vec::new(),
         })
@@ -1082,6 +1085,73 @@ impl View {
             self.texture_ids.push(id);
         }
         self.draws.push(Draw { key: k, kind: kinds::CAPTAIN, flags, model: index, pos, rot, first_vertex, first_color, alpha });
+    }
+
+    /// Loads Pikachu and the Ice Climbers from the Melee cache `dir` (with `PlPp.dat`/`PlNn.dat`, see
+    /// `libssbm_assets::disc::extract_ice_climbers`), appending four models to the table: Pikachu, then
+    /// the climbers for Blue, Red and Yellow Pikmin. Returns Pikachu's model index. Call before the host
+    /// reads the table.
+    pub fn load_pikachu(&mut self, dir: &std::path::Path) -> Result<u32, String> {
+        if let Some(p) = &self.pikachu { return Ok(p.captain.index); }
+        let olimar = &self.models[models::OLIMAR as usize].model;
+        let height = crate::louie::olimar_height(olimar);
+        let src_bind: Vec<Mat3> = libpikmin_assets::Skeleton::new(olimar).pose(Mat4::IDENTITY, None).joints.iter()
+            .map(|j| Mat3::from_quat(j.to_scale_rotation_translation().1)).collect();
+        let mut skin = crate::pikachu::PikachuSkin::load(dir, &src_bind, height)?;
+        let first = self.models.len() as u32;
+        let mut list = std::mem::take(&mut self.textures.list);
+        let mut entries = Vec::new();
+        for (i, body) in std::iter::once(&mut skin.captain).chain(skin.climbers.iter_mut()).enumerate() {
+            body.register(first + i as u32, &mut list);
+            let (lo, hi) = body.bounds();
+            let (blend, lit) = body.blend_lit();
+            let n = body.shown.len();
+            entries.push(ViewModel::external(
+                body.table_batches(), lo, hi,
+                body.shown.iter().map(|&(_, t)| t).collect(), blend, vec![None; n], lit.iter().map(|l| l & 3).collect(),
+            ));
+        }
+        self.textures.list = list;
+        self.models.extend(entries);
+        self.pikachu = Some(std::sync::Arc::new(skin));
+        Ok(first)
+    }
+
+    /// Pikachu's height and a climber's, as multiples of Olimar's.
+    pub fn set_pikachu_ratios(&mut self, captain: f32, climber: f32) {
+        if let Some(p) = self.pikachu.as_mut().and_then(std::sync::Arc::get_mut) { p.set_ratios(captain, climber); }
+    }
+
+    /// Skins a Melee body from `joints` (its own units) with `root` over them, lowest vertex on the ground, and
+    /// queues it as a draw of `kind`. `swarm`: a far one in a swarm may keep its last mesh (the pose budget).
+    #[allow(clippy::too_many_arguments)]
+    fn push_hsd(&mut self, body: &crate::pikachu::HsdBody, kind: u8, k: u64, pos: Vec3, rot: Quat, root: Mat4,
+        joints: &[Mat4], alpha: f32, flags: u8, swarm: bool) {
+        let retain_pose = swarm
+            && self.posed_models.get(&k) == Some(&body.index)
+            && self.pose_budget.is_some_and(|(eye, far)| pos.distance_squared(eye) > far * far)
+            && (self.render_frame + (k & 0xffff_ffff)) % 3 != 0;
+        let first_vertex = self.positions.len() as u32;
+        let first_color = self.colors.len() as u32;
+        if !retain_pose {
+            let (mut p, mut n) = (Vec::new(), Vec::new());
+            let low = body.skin_into(joints, root, &mut p, &mut n);
+            let low = if low.is_finite() { low } else { 0.0 };
+            self.positions.extend(p.into_iter().map(|v| Vec3::new(v.x, v.y - low, v.z)));
+            self.normals.extend(n);
+            for &(src, _) in &body.shown {
+                self.uvs.extend(body.model.batches[src].vertices.iter().map(|v| [v.uv.x, v.uv.y]));
+            }
+            self.posed_models.insert(k, body.index);
+        }
+        for (i, &(_, tex)) in body.shown.iter().enumerate() {
+            let mut c = body.color(i);
+            c[3] *= alpha;
+            self.colors.push(c);
+            self.texture_ids.push(tex);
+        }
+        let flags = flags | if retain_pose { flags::RETAIN_POSE } else { 0 };
+        self.draws.push(Draw { key: k, kind, flags, model: body.index, pos, rot, first_vertex, first_color, alpha });
     }
 
     /// Loads the Louie body some captains can wear from the Pikmin 2 cache `dir` (`libsms::extract::p2`),
@@ -1683,7 +1753,17 @@ impl View {
             let tint = if frozen { icy(piki_rgb(p.color)) } else { piki_rgb(p.color) };
             let inputs = move |m: usize| Inputs { material: (m == 0).then_some(tint), ..Default::default() };
             let f = if frozen { flags::FROZEN } else { 0 };
-            self.push(k, kinds::PIKI, model, pos, rot, pose, &inputs, look.fade, f);
+            // A Pikachu captain's squad is Ice Climbers, on the Pikmin's own motion.
+            let climber = self.pikachu.clone().filter(|_| {
+                p.captain.is_some_and(|c| self.captain_skins.get(&c.0) == Some(&crate::pikachu::SKIN_PIKACHU))
+            });
+            if let Some(sk) = climber {
+                let body = &sk.climbers[p.color.index().min(2)];
+                let world = body.pose(&pose.joints);
+                self.push_hsd(body, kinds::PIKI, k, pos, rot, Mat4::from_scale(look.scale), &world, look.fade, f & !flags::FROZEN, true);
+            } else {
+                self.push(k, kinds::PIKI, model, pos, rot, pose, &inputs, look.fade, f);
+            }
             if let Some(j) = head
                 && !matches!(p.state, PikiState::Pressed { .. })
             {
@@ -1706,7 +1786,8 @@ impl View {
             let mut root = crate::animator::captain_root(&params, c);
             let pianta_body = self.pianta.is_some() && self.captain_skins.get(&c.id.0) == Some(&crate::pianta::SKIN_PIANTA);
             let louie_body = self.louie.is_some() && self.captain_skins.get(&c.id.0) == Some(&crate::louie::SKIN_LOUIE);
-            if pianta_body || louie_body {
+            let pikachu_body = self.pikachu.is_some() && self.captain_skins.get(&c.id.0) == Some(&crate::pikachu::SKIN_PIKACHU);
+            if pianta_body || louie_body || pikachu_body {
                 // The Pianta jumps in Mario's clips, not tipped over on Olimar's geyser ride.
                 root = Mat4::IDENTITY;
             }
@@ -1803,11 +1884,19 @@ impl View {
                 captain_pos: pos,
                 radius: c.whistle_radius(&params),
             });
+            let pikachu_world = if pikachu_body {
+                let rest = self.models[models::OLIMAR as usize].skel.pose(Mat4::IDENTITY, anim);
+                self.pikachu.as_ref().map(|p| p.captain.pose(&rest.joints))
+            } else { None };
             let louie_joints = if louie_body { self.louie.as_ref().map(|l| l.joints(c, motion, phase)) } else { None };
             if let Some(joints) = pianta_joints {
                 self.push_pianta(k, pos, rot, root, &joints, 1.0, f);
             } else if let Some(joints) = louie_joints {
                 self.push_louie(k, pos, rot, root, &joints, 1.0, f);
+            } else if let Some(world) = pikachu_world {
+                if let Some(sk) = self.pikachu.clone() {
+                    self.push_hsd(&sk.captain, kinds::CAPTAIN, k, pos, rot, root, &world, 1.0, f, false);
+                }
             } else {
                 self.push(k, kinds::CAPTAIN, models::OLIMAR, pos, rot, pose, &no_inputs, 1.0, f);
             }

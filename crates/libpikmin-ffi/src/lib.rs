@@ -42,7 +42,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 48;
+pub const PIK_ABI_VERSION: u32 = 49;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
@@ -761,6 +761,38 @@ pub unsafe extern "C" fn pik_p2_find_disc(dirs: *const c_char, out: *mut u8, out
     let found = catch_unwind(|| {
         let dirs: Vec<PathBuf> = dirs.split(';').filter(|s| !s.is_empty()).map(PathBuf::from).collect();
         libsms::extract::p2::find_disc(&dirs)
+    });
+    match found {
+        // SAFETY: as documented.
+        Ok(Some(p)) => unsafe { write_str(&p.to_string_lossy(), out, out_len) },
+        _ => 0,
+    }
+}
+
+/// Like [`pik_find_disc`] for the user's Melee image (GALE01 revision 2), for the Pikachu skin.
+///
+/// # Safety
+/// `dirs` a nul-terminated string; `out` writable for `out_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_ssbm_find_disc(dirs: *const c_char, out: *mut u8, out_len: u32) -> u8 {
+    if dirs.is_null() {
+        return 0;
+    }
+    // SAFETY: as documented.
+    let dirs = unsafe { CStr::from_ptr(dirs) }.to_string_lossy().into_owned();
+    let found = catch_unwind(|| {
+        for dir in dirs.split(';').filter(|s| !s.is_empty()) {
+            let Ok(rd) = std::fs::read_dir(dir) else { continue };
+            let mut entries: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
+            entries.sort();
+            for p in entries {
+                let ext = p.extension().and_then(|e| e.to_str()).map(str::to_lowercase);
+                if matches!(ext.as_deref(), Some("iso" | "gcm" | "ciso")) && libssbm_assets::disc::Disc::open(&p).is_ok() {
+                    return Some(p);
+                }
+            }
+        }
+        None
     });
     match found {
         // SAFETY: as documented.

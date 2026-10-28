@@ -1044,3 +1044,88 @@ fn the_louie_skin_draws_through_the_abi() {
         pik_view_free(view);
     }
 }
+
+/// Olimar's Pikachu skin: Pikachu draws on the captain and his Pikmin draw as Ice Climbers, small, with
+/// their feet on the ground.
+#[test]
+fn the_pikachu_skin_draws_pikachu_and_his_climbers_through_the_abi() {
+    let _views = VIEWS.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else {
+        eprintln!("SKIP: no extracted assets");
+        return;
+    };
+    let melee = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../libssbm/assets");
+    let melee_c = CString::new(melee.to_string_lossy().as_bytes()).unwrap();
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        if pik_ssbm_ice_climbers_complete(melee_c.as_ptr()) == 0 || !melee.join("PlPkNr.dat").is_file() {
+            eprintln!("SKIP: no Melee cache with Pikachu and the Ice Climbers");
+            return;
+        }
+        let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+        let view = pik_view_new(dir.as_ptr(), 0);
+        assert!(!view.is_null());
+        assert_eq!(pik_view_load_pikachu(view, melee_c.as_ptr()), 19);
+        assert_eq!(pik_view_model_count(view), 23);
+        for m in 19..23 {
+            let mut info = PikModelInfo::default();
+            assert_eq!(pik_view_model(view, m, &mut info), 1);
+            let mut idx = vec![0u32; info.index_count as usize];
+            assert_eq!(pik_view_indices(view, m, idx.as_mut_ptr(), info.index_count), info.index_count);
+            assert!(idx.iter().all(|&i| i < info.vertex_count), "model {m}");
+            let mut batches = vec![PikBatch::default(); info.batch_count as usize];
+            assert_eq!(pik_view_batches(view, m, batches.as_mut_ptr(), info.batch_count), info.batch_count);
+            for b in batches.iter().filter(|b| b.texture >= 0) {
+                let mut t = PikTexture::default();
+                assert_eq!(pik_view_texture(view, b.texture as u32, &mut t, std::ptr::null_mut(), 0), 1);
+            }
+        }
+        let sim = pik_sim_new(dir.as_ptr(), 1);
+        let c = pik_sim_add_captain(sim, &PikVec3::default());
+        for (i, color) in [PikiColor::Blue, PikiColor::Red, PikiColor::Yellow].iter().enumerate() {
+            let at = PikVec3 { x: -20.0 - i as f32 * 5.0, y: 0.0, z: 0.0 };
+            pik_sim_spawn_piki(sim, color.index() as u32, &at, c);
+        }
+        pik_view_set_captain_skin(view, c as u32, 3);
+        let mut world = World::default();
+        let h = host(&mut world);
+        let mut frame = PikViewFrame {
+            dt: 1.0 / 60.0,
+            forward: PikVec3 { x: 0.0, y: 0.0, z: 1.0 },
+            up: PikVec3 { x: 0.0, y: 1.0, z: 0.0 },
+            listener: -1,
+            volume: 1.0,
+            ..Default::default()
+        };
+        pik_sim_set_input(sim, 0, &PikInput { stick_y: 0.6, ..Default::default() });
+        for _ in 0..90 {
+            pik_sim_advance(sim, &h, 1.0 / 60.0);
+            frame.lag = 1.0 - pik_sim_alpha(sim);
+            pik_view_update(view, sim, &frame);
+        }
+        let n = pik_view_draws(view, std::ptr::null_mut(), 0);
+        let mut draws = vec![PikDraw::default(); n as usize];
+        pik_view_draws(view, draws.as_mut_ptr(), n);
+        let me = draws.iter().find(|d| d.kind == 0).expect("no captain");
+        assert_eq!(me.model, 19, "the captain is not Pikachu");
+        let climbers: Vec<_> = draws.iter().filter(|d| d.kind == 1).collect();
+        assert_eq!(climbers.len(), 3);
+        let mut models: Vec<u32> = climbers.iter().map(|d| d.model).collect();
+        models.sort();
+        assert_eq!(models, vec![20, 21, 22], "one climber body per Pikmin colour");
+        let mut vc = 0u32;
+        let pos = std::slice::from_raw_parts(pik_view_positions(view, &mut vc), vc as usize);
+        for d in me.model..=22 {
+            let Some(draw) = draws.iter().find(|x| x.model == d && (x.kind == 0 || x.kind == 1)) else { continue };
+            let mut info = PikModelInfo::default();
+            pik_view_model(view, d, &mut info);
+            let mine = &pos[draw.first_vertex as usize..(draw.first_vertex + info.vertex_count) as usize];
+            assert!(mine.iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()));
+            let (lo, hi) = mine.iter().fold((f32::MAX, f32::MIN), |(l, h), p| (l.min(p.y), h.max(p.y)));
+            assert!(lo.abs() < 0.01, "model {d}: feet at {lo}");
+            let want = if d == 19 { 25.1 } else { 25.1 * 0.42 };
+            assert!(hi > want * 0.6 && hi < want * 1.5, "model {d} stands {hi}, wanted about {want}");
+        }
+        pik_view_free(view);
+    }
+}

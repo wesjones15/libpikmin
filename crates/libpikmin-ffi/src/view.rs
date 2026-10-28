@@ -372,7 +372,62 @@ pub unsafe extern "C" fn pik_p2_extract(iso: *const c_char, out: *const c_char) 
     }
 }
 
-/// Which body a captain wears: 0 Olimar, 1 Louie, 2 the Pianta (when loaded). Takes effect on the next update.
+/// Loads Pikachu and the Ice Climbers (skin 3) from the Melee cache `dir` (which must hold `PlPp.dat` and
+/// `PlNn.dat`: [`pik_ssbm_extract_ice_climbers`]), appending four models to the table: Pikachu, then the
+/// climbers for Blue, Red and Yellow Pikmin. Call before reading the table. Returns Pikachu's model index, or
+/// -1 when the files are missing.
+/// # Safety
+/// `view` is a live handle; `dir` a NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_load_pikachu(view: *mut PikView, dir: *const c_char) -> i32 {
+    if dir.is_null() { return -1; }
+    // SAFETY: as documented.
+    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+    unsafe {
+        with_view(view, -1, |v| match v.view.load_pikachu(std::path::Path::new(&dir)) {
+            Ok(m) => m as i32,
+            Err(_) => -1,
+        })
+    }
+}
+
+/// Pikachu's height and an Ice Climber's, as multiples of Olimar's (1 and 0.42 by default).
+/// # Safety
+/// `view` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_pikachu_ratios(view: *mut PikView, captain: f32, climber: f32) {
+    if let Some(v) = unsafe { view.as_mut() } { v.view.set_pikachu_ratios(captain, climber); }
+}
+
+/// Whether the Melee cache `dir` holds the Ice Climbers' models.
+/// # Safety
+/// `dir` is a NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_ssbm_ice_climbers_complete(dir: *const c_char) -> u8 {
+    if dir.is_null() { return 0; }
+    // SAFETY: as documented.
+    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+    libssbm_assets::disc::ice_climbers_present(std::path::Path::new(&dir)) as u8
+}
+
+/// Extracts the Ice Climbers' models from the user's Melee (GALE01 revision 2) image `iso` into the Melee
+/// cache folder `out`; 0 on success.
+/// # Safety
+/// Both arguments are NUL-terminated strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_ssbm_extract_ice_climbers(iso: *const c_char, out: *const c_char) -> i32 {
+    if iso.is_null() || out.is_null() { return 1; }
+    // SAFETY: as documented.
+    let (iso, out) = unsafe {
+        (std::ffi::CStr::from_ptr(iso).to_string_lossy().into_owned(), std::ffi::CStr::from_ptr(out).to_string_lossy().into_owned())
+    };
+    match libssbm_assets::disc::extract_ice_climbers(std::path::Path::new(&iso), std::path::Path::new(&out)) {
+        Ok(()) => 0,
+        Err(_) => 1,
+    }
+}
+
+/// Which body a captain wears: 0 Olimar, 1 Louie, 2 the Pianta, 3 Pikachu (when loaded). Takes effect on the next update.
 /// # Safety
 /// `view` is a live handle.
 #[unsafe(no_mangle)]
