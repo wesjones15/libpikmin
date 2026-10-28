@@ -141,6 +141,11 @@ pub struct PikView {
     particles: Vec<PikParticle>,
     last_tick: Option<u64>,
     poisoned: bool,
+    /// The Pianta skin's voice: Sunshine's sound system, started when a captain first wears him
+    /// (only on a view with sound), and the folder it and the Pianta come from.
+    pianta_dir: Option<std::path::PathBuf>,
+    pianta_audio: Option<libsms_present::audio::Audio>,
+    pianta_audio_tried: bool,
     /// Sounds the host asked for by name this frame (`pik_view_teki_named_sound`), with where.
     named: Vec<(&'static str, Vec3)>,
 }
@@ -179,6 +184,9 @@ pub unsafe extern "C" fn pik_view_new(assets_dir: *const c_char, sound: u8) -> *
             particles: Vec::new(),
             last_tick: None,
             poisoned: false,
+            pianta_dir: None,
+            pianta_audio: None,
+            pianta_audio_tried: false,
             named: Vec::new(),
         })
     });
@@ -302,7 +310,10 @@ pub unsafe extern "C" fn pik_view_load_pianta(view: *mut PikView, dir: *const c_
     let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
     unsafe {
         with_view(view, -1, |v| match v.view.load_pianta(std::path::Path::new(&dir), female != 0, colour as usize) {
-            Ok(m) => m as i32,
+            Ok(m) => {
+                v.pianta_dir = Some(std::path::PathBuf::from(&dir));
+                m as i32
+            }
             Err(_) => -1,
         })
     }
@@ -313,7 +324,16 @@ pub unsafe extern "C" fn pik_view_load_pianta(view: *mut PikView, dir: *const c_
 /// `view` is a live handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_captain_skin(view: *mut PikView, captain: u32, skin: u8) {
-    if let Some(v) = unsafe { view.as_mut() } { v.view.set_captain_skin(captain, skin); }
+    if let Some(v) = unsafe { view.as_mut() } {
+        v.view.set_captain_skin(captain, skin);
+        // His voice is Sunshine's sound system: start it now, not at his first jump.
+        if skin == libpikmin_present::pianta::SKIN_PIANTA && v.audio.is_some() && !v.pianta_audio_tried {
+            v.pianta_audio_tried = true;
+            if let Some(dir) = &v.pianta_dir {
+                v.pianta_audio = libsms_present::audio::Audio::start(dir, false);
+            }
+        }
+    }
 }
 
 /// How tall the Pianta stands, to the top of his head, in sim units (Olimar is about 25).
@@ -679,6 +699,23 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
                 v.view.on_event(e);
                 if let Some(a) = v.audio.as_mut() {
                     a.on_event(e, &s.sim, creatures);
+                }
+            }
+            // A Pianta captain's cries are his own, not Olimar's.
+            let wear = v.view.pianta_captains();
+            if let Some(a) = v.audio.as_mut() {
+                a.pianta_captains = wear;
+            }
+            let voices = v.view.take_pianta_voices();
+            if let Some(sa) = v.pianta_audio.as_ref() {
+                use libpikmin_present::pianta::SOUND_SCALE;
+                sa.set_volume(f.volume);
+                sa.set_listener(listener_view(Vec3::from(f.eye) * SOUND_SCALE, f.forward.into(), f.up.into()), Vec3::from(f.eye) * SOUND_SCALE);
+                for (captain, voice) in voices {
+                    let at = s.sim.captains().get(captain as usize).map_or(Vec3::from(f.eye), |c| c.pos);
+                    let own = f.listener < 0 || f.listener as u32 == captain;
+                    // Your own Pianta is in your ears; another player's is where he stands.
+                    sa.play_at(voice.cue(), if own { Vec3::from(f.eye) * SOUND_SCALE } else { at * SOUND_SCALE });
                 }
             }
             let dt = f.dt.clamp(0.0, 0.25);

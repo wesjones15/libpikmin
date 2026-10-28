@@ -42,6 +42,31 @@ pub const OLIMAR_ALIASES: &[(&str, &str)] = &[
     ("legRT_jnt", "j10"), ("legLT_jnt", "j11"),
 ];
 
+/// What the Pianta says, in place of Olimar's own cries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Voice {
+    Jump,
+    Throw,
+    Hurt,
+    Down,
+}
+
+impl Voice {
+    /// The Sunshine cue (`MSD_SE_NPC_VM_MONTM_*`, the male Pianta's speech lines; SoundEffects.hpp). Chosen by
+    /// their names (proud, invitation, surprise, regret), not heard.
+    pub const fn cue(self) -> &'static str {
+        match self {
+            Voice::Jump => "MSD_SE_NPC_VM_MONTM_PROUD",
+            Voice::Throw => "MSD_SE_NPC_VM_MONTM_INVITN",
+            Voice::Hurt => "MSD_SE_NPC_VM_MONTM_SURPRS",
+            Voice::Down => "MSD_SE_NPC_VM_MONTM_REGRET",
+        }
+    }
+}
+
+/// Sunshine's units per Pikmin unit (Mario is 160 tall, Olimar 25), so the voice's distances sound right.
+pub const SOUND_SCALE: f32 = 160.0 / 25.1;
+
 /// How tall the Pianta stands in the host's sim units (to the top of his head, before the palm),
 /// until the host says. Olimar is 25.1.
 pub const DEFAULT_HEIGHT: f32 = 30.0;

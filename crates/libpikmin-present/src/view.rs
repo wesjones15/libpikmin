@@ -533,6 +533,8 @@ pub struct View {
     /// The Pianta body some captains wear ([`View::load_pianta`]) and who wears it.
     pub(crate) pianta: Option<crate::pianta::PiantaSkin>,
     captain_skins: HashMap<u32, u8>,
+    /// Cries a Pianta captain made since the host last took them ([`View::take_pianta_voices`]).
+    pianta_voices: Vec<(u32, crate::pianta::Voice)>,
 }
 
 enum Grown {
@@ -729,11 +731,29 @@ impl View {
             sparkled: HashMap::new(),
             pianta: None,
             captain_skins: HashMap::new(),
+            pianta_voices: Vec::new(),
         })
     }
 
     pub fn on_event(&mut self, e: &Event) {
         self.animator.on_event(e);
+        // A Pianta captain cries out with his own voice where Olimar would with his.
+        {
+            use crate::pianta::Voice;
+            let cry = match *e {
+                Event::CaptainJumped { captain, .. } => Some((captain, Voice::Jump)),
+                Event::Thrown { captain, .. } => Some((captain, Voice::Throw)),
+                Event::CaptainHurt { captain, .. } => Some((captain, Voice::Hurt)),
+                Event::CaptainDown { captain } => Some((captain, Voice::Down)),
+                _ => None,
+            };
+            if let Some((captain, voice)) = cry
+                && self.pianta.is_some()
+                && self.captain_skins.get(&captain.0) == Some(&crate::pianta::SKIN_PIANTA)
+            {
+                self.pianta_voices.push((captain.0, voice));
+            }
+        }
         // `Piki::doKill`: the ghost rises from where it died.
         if let Event::PikiGone { pos, .. } = e
             && let Some(fx) = self.effects.as_mut()
@@ -989,6 +1009,17 @@ impl View {
     /// unloaded draws Olimar.
     pub fn set_captain_skin(&mut self, captain: u32, skin: u8) {
         self.captain_skins.insert(captain, skin);
+    }
+
+    /// The captains wearing the Pianta now.
+    pub fn pianta_captains(&self) -> HashSet<u32> {
+        if self.pianta.is_none() { return HashSet::new(); }
+        self.captain_skins.iter().filter(|(_, s)| **s == crate::pianta::SKIN_PIANTA).map(|(c, _)| *c).collect()
+    }
+
+    /// The cries Pianta captains made since the last call, for the host's sound system.
+    pub fn take_pianta_voices(&mut self) -> Vec<(u32, crate::pianta::Voice)> {
+        std::mem::take(&mut self.pianta_voices)
     }
 
     /// How tall the Pianta stands, to the top of his head, in sim units.

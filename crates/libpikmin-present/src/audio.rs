@@ -90,6 +90,9 @@ pub struct Audio {
     /// The captain this machine's player is (`None`: no one in particular). Another captain's player
     /// sounds are not played in the listener's ears: the positional ones come from where he is.
     listener: Option<usize>,
+    /// Captains wearing the Pianta body, whose own voice (`pianta::PiantaVoice`) replaces Olimar's
+    /// throw and hurt cries.
+    pub pianta_captains: HashSet<u32>,
     /// The output's rate and channels, for the log.
     pub rate: u32,
     pub channels: u16,
@@ -159,6 +162,7 @@ impl Audio {
             climbing: HashSet::new(),
             pad_voice: None,
             listener: None,
+            pianta_captains: HashSet::new(),
             rate,
             channels,
         })
@@ -374,6 +378,7 @@ impl Audio {
         // (pikiState.cpp) plays `SE_PIKI_FLY` as each Pikmin goes airborne. Pikmin leave the
         // pad over several ticks, so they share one cry per few ticks.
         let listener = self.listener;
+        let pianta = self.pianta_captains.clone();
         // True for the listener's own captain, and for everyone when no listener is set.
         let mine = move |c: libpikmin::CaptainId| listener.is_none_or(|l| l == c.0 as usize);
         let pad_voice = match *e {
@@ -399,7 +404,9 @@ impl Audio {
             Event::Thrown { piki, captain } => {
                 // `NaviThrowState` (naviState.cpp) and `PikiFlyingState::init` (pikiState.cpp).
                 if mine(captain) {
-                    s.play("SE_THROW", Vec3::ZERO);
+                    if !pianta.contains(&captain.0) {
+                        s.play("SE_THROW", Vec3::ZERO);
+                    }
                     s.play("SE_PIKI_FLY", Vec3::ZERO);
                 } else {
                     s.play("SE_PIKI_FLY", piki_pos(piki));
@@ -464,7 +471,7 @@ impl Audio {
             }
             // `Navi` damage handlers (navi.cpp).
             Event::CaptainHurt { captain, .. } => {
-                if mine(captain) {
+                if mine(captain) && !pianta.contains(&captain.0) {
                     s.play("SE_DAMAGED", Vec3::ZERO);
                 }
             }
