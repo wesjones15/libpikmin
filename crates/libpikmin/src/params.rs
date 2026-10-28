@@ -288,9 +288,87 @@ parms! {
     }
 }
 
+/// What Pikmin 2 adds with Purple and White: `PikiParms::Parms` (PikiParms.h, the `P0xx` ids) and `NaviParms`
+/// (none yet: Purple and White are thrown like the rest, since the host relies on far throws and lock-ons). Defaults are the decomp's code defaults; Pikmin 2's `pikiParms.txt` and `naviParms.txt` hold the
+/// shipped values ([`Params::load_pikmin2_dir`], [`Params::apply_pikmin2_text`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pikmin2Params {
+    /// `mPurpleAttackDamage` (P003) and `mWhiteAttackDamage` (P004).
+    pub purple_attack_power: f32,
+    pub white_attack_power: f32,
+    /// `mWhiteRunSpeedMultiplier` (P001), `mPurpleRunSpeedMultiplier` (P002): `Piki::getSpeed`.
+    pub white_speed_multiplier: f32,
+    pub purple_speed_multiplier: f32,
+    /// `mPurpleCarryPower` (P005), `mWhiteCarryPower` (P006): `Piki::getPelletCarryPower`'s base, 1 for the rest.
+    pub purple_carry_power: f32,
+    pub white_carry_power: f32,
+    /// `mBudCarrySpeedBonus` (P020), `mFlowerCarrySpeedBonus` (P021).
+    pub bud_carry_bonus: f32,
+    pub flower_carry_bonus: f32,
+    /// `mPoundAOERange` (P017) and `mPoundDamage` (P022): Purple's hip drop (`PikiHipDropState`).
+    pub pound_radius: f32,
+    pub pound_damage: f32,
+    /// `mNewColorScale` (P000): the model scale of Purple and White against a Pikmin 1 colour.
+    pub new_colour_scale: f32,
+}
+
+impl Default for Pikmin2Params {
+    fn default() -> Self {
+        Self {
+            purple_attack_power: 10.0,
+            white_attack_power: 1.0,
+            white_speed_multiplier: 2.0,
+            purple_speed_multiplier: 0.6,
+            purple_carry_power: 0.5,
+            white_carry_power: 1.5,
+            bud_carry_bonus: 0.5,
+            flower_carry_bonus: 1.0,
+            pound_radius: 60.0,
+            pound_damage: 100.0,
+            new_colour_scale: 1.2,
+        }
+    }
+}
+
+impl Pikmin2Params {
+    /// Reads a Pikmin 2 text parms file: blocks of lines like `{P003} 4 20.000000 # comment`
+    /// (id, type, value; Shift-JIS comments, so it is read as bytes). Unknown ids are skipped.
+    pub fn apply_text(&mut self, data: &[u8]) {
+        for line in data.split(|&b| b == b'\n') {
+            let line = String::from_utf8_lossy(line);
+            let line = line.split('#').next().unwrap_or("");
+            let (Some(open), Some(close)) = (line.find('{'), line.find('}')) else { continue };
+            if close < open {
+                continue;
+            }
+            let id = &line[open + 1..close];
+            let mut rest = line[close + 1..].split_whitespace();
+            let (Some(_ty), Some(value)) = (rest.next(), rest.next()) else { continue };
+            let Ok(value) = value.parse::<f32>() else { continue };
+            let slot = match id {
+                "P003" => &mut self.purple_attack_power,
+                "P004" => &mut self.white_attack_power,
+                "P001" => &mut self.white_speed_multiplier,
+                "P002" => &mut self.purple_speed_multiplier,
+                "P005" => &mut self.purple_carry_power,
+                "P006" => &mut self.white_carry_power,
+                "P020" => &mut self.bud_carry_bonus,
+                "P021" => &mut self.flower_carry_bonus,
+                "P017" => &mut self.pound_radius,
+                "P022" => &mut self.pound_damage,
+                "P000" => &mut self.new_colour_scale,
+                _ => continue,
+            };
+            *slot = value;
+        }
+    }
+}
+
 /// Everything the sim reads.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Params {
+    /// Purple and White (Pikmin 2).
+    pub p2: Pikmin2Params,
     pub navi_creature: CreatureParams,
     pub navi: NaviParams,
     pub piki_creature: CreatureParams,
@@ -325,6 +403,7 @@ impl Default for Extras {
 impl Default for Params {
     fn default() -> Self {
         Self {
+            p2: Pikmin2Params::default(),
             // NaviProp::NaviProp (navi.cpp)
             navi_creature: CreatureParams {
                 friction: 1.0,
@@ -373,6 +452,23 @@ impl Params {
     /// `parms/aiconst.bin`
     pub fn apply_aiconst_bin(&mut self, data: &[u8]) -> Result<(), ParmError> {
         self.ai.read_block(data, &mut 0)
+    }
+
+    /// Pikmin 2's `pikiParms.txt` / `naviParms.txt` text: Purple's and White's tuning ([`Pikmin2Params::apply_text`]).
+    pub fn apply_pikmin2_text(&mut self, data: &[u8]) {
+        self.p2.apply_text(data);
+    }
+
+    /// Loads `pikiParms.txt` from `dir` (`<p2 cache>/parms`). Returns what it applied.
+    pub fn load_pikmin2_dir(&mut self, dir: &std::path::Path) -> Vec<&'static str> {
+        let mut applied = Vec::new();
+        for name in ["pikiParms.txt"] {
+            if let Ok(data) = std::fs::read(dir.join(name)) {
+                self.apply_pikmin2_text(&data);
+                applied.push(name);
+            }
+        }
+        applied
     }
 
     /// Loads whichever of the four files exist in `dir` (e.g. a folder extracted from the

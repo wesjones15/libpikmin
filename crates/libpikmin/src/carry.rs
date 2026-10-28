@@ -14,7 +14,7 @@ use crate::event::Event;
 use crate::host::CreatureId;
 use crate::math::{ang_dist, dist_xz, rotate_y, round_ang, yaw_of};
 use crate::onion::OnionId;
-use crate::piki::{Happa, PikiColor, PikiState};
+use crate::piki::{COLOUR_COUNT, Happa, PikiColor, PikiState};
 use crate::sim::Sim;
 use crate::{Host, PikiId};
 
@@ -116,7 +116,8 @@ impl PelletDesc {
         let n = PELLET_NUMBERS[i];
         let letter = match color {
             PikiColor::Blue => 'b',
-            PikiColor::Red => 'r',
+            // Pikmin 1 has no Purple or White pellets: they take the Red config.
+            PikiColor::Red | PikiColor::Purple | PikiColor::White => 'r',
             PikiColor::Yellow => 'y',
         };
         let cfg = crate::pellet_config::find(&params.pellets, &format!("p{letter}{n:02}"));
@@ -488,23 +489,38 @@ impl Sim {
         true
     }
 
-    /// Carrier weight for speed: leaf 1, bud 1.5, flower 2 (`ActTransport::getCarriers`).
+    /// Carrier weight for speed: leaf 1, bud 1.5, flower 2 (`ActTransport::getCarriers`); Pikmin 2's
+    /// `Piki::getPelletCarryPower` for the rest: White and Purple start from their own carry power, and a bud or
+    /// flower adds `mBudCarrySpeedBonus` / `mFlowerCarrySpeedBonus`.
     fn carrier_weight(&self, pellet: &Pellet) -> f32 {
+        let p2 = &self.params.p2;
         pellet
             .carriers
             .iter()
             .map(|id| {
-                1.0 + 0.5
-                    * match self.pikis[id.0 as usize].happa {
-                        Happa::Leaf => 0.0,
-                        Happa::Bud => 1.0,
-                        Happa::Flower => 2.0,
-                    }
+                let p = &self.pikis[id.0 as usize];
+                let base = match p.color {
+                    PikiColor::White => p2.white_carry_power,
+                    PikiColor::Purple => p2.purple_carry_power,
+                    _ => 1.0,
+                };
+                base + match p.happa {
+                    Happa::Leaf => 0.0,
+                    Happa::Bud => p2.bud_carry_bonus,
+                    Happa::Flower => p2.flower_carry_bonus,
+                }
             })
             .sum()
     }
 
-    /// Lifted carriers (PICKLOOP `KEY_Action0` reached), as counted by `ActTransport::doLift`.
+    /// Carriers counted the way `ActTransport` counts them toward lifting: `PikiMgr::getColorTransportScale`
+    /// (a Purple is ten).
+    fn carry_count(&self, pellet: &Pellet) -> u32 {
+        pellet.carriers.iter().map(|id| self.pikis[id.0 as usize].color.transport_scale()).sum()
+    }
+
+    /// Lifted carriers (PICKLOOP `KEY_Action0` reached), as counted by `ActTransport::doLift`, each by its
+    /// [`PikiColor::transport_scale`].
     fn lifted_carriers(&self, pellet: &Pellet) -> u32 {
         pellet
             .carriers
@@ -520,7 +536,8 @@ impl Sim {
                 }) => true,
                 _ => false,
             })
-            .count() as u32
+            .map(|id| self.pikis[id.0 as usize].color.transport_scale())
+            .sum()
     }
 
     /// `ActTransport::decideGoal`: the carriers' majority colour (ties at random) picks the Onion.
@@ -545,14 +562,14 @@ impl Sim {
                 .find(|o| self.ship_part_delivery == 0 || (host.carry_path(pos, o.goal_pos(), &mut route) && !route.is_empty()))
                 .map(|o| (o.id, color));
         }
-        let mut counts = [0u32; 3];
+        let mut counts = [0u32; COLOUR_COUNT];
         for id in &pellet.carriers {
             counts[self.pikis[id.0 as usize].color.index()] += 1;
         }
         let max = *counts.iter().max()?;
-        let options: Vec<usize> = (0..3).filter(|&i| counts[i] == max).collect();
+        let options: Vec<usize> = (0..COLOUR_COUNT).filter(|&i| counts[i] == max).collect();
         let pick = ((self.rng.f32() * options.len() as f32) as usize).min(options.len() - 1);
-        let color = PikiColor::from_index(options[pick]);
+        let color = PikiColor::EVERY[options[pick]];
 
         let pos = self.pellets[pi].pos;
         let nearest = |accepting: bool| {
@@ -582,15 +599,15 @@ impl Sim {
             return self.onions[onion.0 as usize].grounded() && (self.ship_part_delivery != 3 ||
                 self.competitive_receiver(onion, self.carrying_captain(pi), self.pellets[pi].desc.ship_part.unwrap()));
         }
-        let mut counts = [0u32; 3];
+        let mut counts = [0u32; COLOUR_COUNT];
         for id in &self.pellets[pi].carriers {
             counts[self.pikis[id.0 as usize].color.index()] += 1;
         }
         let max = counts.iter().copied().max().unwrap_or(0);
         let o = &self.onions[onion.0 as usize];
-        (0..3).any(|c| counts[c] == max && o.accepts(PikiColor::from_index(c)))
+        (0..COLOUR_COUNT).any(|c| counts[c] == max && o.accepts(PikiColor::EVERY[c]))
             || !self.onions.iter().filter(|o| o.ship.is_none() && o.takes_deliveries()).any(|other| {
-                (0..3).any(|c| counts[c] == max && other.accepts(PikiColor::from_index(c)))
+                (0..COLOUR_COUNT).any(|c| counts[c] == max && other.accepts(PikiColor::EVERY[c]))
             })
     }
 
@@ -754,7 +771,7 @@ impl Sim {
         let gone = !self.onions[onion.0 as usize].takes_deliveries()
             || (self.pellets[i].desc.ship_part.is_some() && (!self.onions[onion.0 as usize].grounded()
                 || (self.ship_part_delivery == 3 && !self.goal_still_majority(i, onion))));
-        if (self.pellets[i].carriers.len() as u32) < min || gone {
+        if self.carry_count(&self.pellets[i]) < min || gone {
             // "小人数!!!": too few, put it down. The rest keep hold and struggle (Lift).
             let p = &mut self.pellets[i];
             p.state = PelletState::Idle;
@@ -805,7 +822,8 @@ impl Sim {
         let min_speed = 0.5 * max_speed;
         let maxc = self.pellets[i].desc.max_carriers.max(1) as f32;
         let weight = self.carrier_weight(&self.pellets[i]);
-        let speed = min_speed + (weight + 1.0 - min as f32) / maxc * (max_speed - min_speed);
+        // A Purple counts for ten toward `min` but carries at its own (low) power, so a lone one can fall under it.
+        let speed = (min_speed + (weight + 1.0 - min as f32) / maxc * (max_speed - min_speed)).max(0.25 * min_speed);
 
         // Get above rising ground before testing walls, so a slope isn't treated as a wall
         // merely because the carry sphere still has the previous tick's lower height.

@@ -445,7 +445,7 @@ fn w_color(w: &mut Writer, c: PikiColor) {
 
 fn r_color(r: &mut Reader) -> Option<PikiColor> {
     let i = r.u8()? as usize;
-    (i < 3).then(|| PikiColor::from_index(i))
+    PikiColor::from_id(i)
 }
 
 fn w_happa(w: &mut Writer, h: Happa) {
@@ -1339,7 +1339,7 @@ fn r_onion(r: &mut Reader) -> Option<Onion> {
     let pos = r.vec3()?;
     let n = r.len()?;
     let colors = (0..n).map(|_| r_color(r)).collect::<Option<Vec<_>>>()?;
-    let mut stored = [[0u32; 3]; 3];
+    let mut stored = [[0u32; 3]; crate::piki::COLOUR_COUNT];
     for row in &mut stored {
         for n in row {
             *n = r.u32()?;
@@ -1757,6 +1757,21 @@ fn w_event(w: &mut Writer, e: &Event) {
             w.u32(piki.0);
             w.u32(captain.0);
         }
+        Pounded { piki, pos } => {
+            w.u8(47);
+            w.u32(piki.0);
+            w.vec3(pos);
+        }
+        Grounded { creature, piki } => {
+            w.u8(48);
+            w.u64(creature);
+            w.u32(piki.0);
+        }
+        PoisonedEater { piki, creature } => {
+            w.u8(49);
+            w.u32(piki.0);
+            w.u64(creature);
+        }
     }
 }
 
@@ -1815,6 +1830,9 @@ fn r_event(r: &mut Reader) -> Option<Event> {
         44 => CaptainLanded { captain: cap(r)?, drop: r.f32()?, stomp: r.bool()? },
         45 => PikiStomped { piki: piki(r)?, captain: cap(r)?, pos: r.vec3()? },
         46 => PikiLaunched { piki: piki(r)?, captain: cap(r)? },
+        47 => Pounded { piki: piki(r)?, pos: r.vec3()? },
+        48 => Grounded { creature: r.u64()?, piki: piki(r)? },
+        49 => PoisonedEater { piki: piki(r)?, creature: r.u64()? },
         _ => return None,
     })
 }

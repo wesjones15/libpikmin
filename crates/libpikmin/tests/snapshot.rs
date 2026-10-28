@@ -44,11 +44,11 @@ fn busy() -> (Sim, Vec<Event>) {
     let a = sim.add_captain(Vec3::ZERO);
     let b = sim.add_captain(Vec3::new(-200.0, 0.0, 80.0));
     for i in 0..60 {
-        let color = PikiColor::from_index(i);
+        let color = PikiColor::EVERY[i % 5];
         let at = Vec3::new(-30.0 - (i % 10) as f32 * 9.0, 0.0, (i / 10) as f32 * 11.0);
         sim.spawn_piki_in_squad(color, at, if i % 3 == 0 { b } else { a });
     }
-    sim.add_onion(Vec3::new(-300.0, 0.0, -100.0), &[PikiColor::Red, PikiColor::Yellow, PikiColor::Blue]);
+    sim.add_onion(Vec3::new(-300.0, 0.0, -100.0), &PikiColor::EVERY);
     sim.add_ship(Vec3::new(-460.0, 0.0, 40.0), Vec3::new(-340.0, 0.0, 40.0), Vec3::new(-440.0, 80.0, 40.0));
     let params = sim.params().clone();
     sim.spawn_pellet(PelletDesc::numbered(&params, 5, PikiColor::Red, Vec3::new(60.0, 0.0, -40.0), 0.7));
@@ -125,7 +125,7 @@ fn many_moments_round_trip() {
     for i in 0..30 {
         sim.spawn_piki_in_squad(PikiColor::from_index(i), Vec3::new(-20.0 - i as f32 * 3.0, 0.0, (i % 5) as f32 * 8.0), a);
     }
-    sim.add_onion(Vec3::new(-250.0, 0.0, 0.0), &[PikiColor::Red, PikiColor::Yellow, PikiColor::Blue]);
+    sim.add_onion(Vec3::new(-250.0, 0.0, 0.0), &PikiColor::EVERY);
     let params = sim.params().clone();
     sim.spawn_pellet(PelletDesc::numbered(&params, 5, PikiColor::Red, Vec3::new(70.0, 0.0, 0.0), 0.0));
     let mut host = Arena;

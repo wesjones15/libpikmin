@@ -181,7 +181,7 @@ fn struct_sizes_are_what_hosts_mirror() {
     );
     assert_eq!(
         (s.captain, s.piki, s.pellet, s.onion, s.sprout, s.event, s.onion_counts),
-        (60, 72, 64, 36, 20, 48, 16)
+        (60, 72, 64, 44, 20, 48, 16)
     );
     assert_eq!((s.model_info, s.batch, s.texture, s.draw, s.view_frame, s.particle), (40, 24, 12, 64, 52, 72));
 }
@@ -441,7 +441,7 @@ fn pellets_onions_and_bad_arguments() {
         assert_eq!(pik_sim_spawn_pellet(sim, &desc), 0);
         // 7 rounds down to a 5 pellet: five to lift it, the disc's defaults otherwise.
         assert_eq!(pik_sim_spawn_numbered_pellet(sim, 7, 1, &at, 0.0), 1);
-        assert_eq!(pik_sim_spawn_numbered_pellet(sim, 1, 3, &at, 0.0), -1, "no such colour");
+        assert_eq!(pik_sim_spawn_numbered_pellet(sim, 1, 5, &at, 0.0), -1, "no such colour");
 
         // A creature whose parts run past the array is kept but given no parts.
         let bad = [PikCreature { id: 1, alive: 1, parts_start: 3, parts_len: 2, ..Default::default() }];
@@ -522,7 +522,7 @@ fn unified_onion_flight_allows_call_out_but_blocks_put_away() {
             pik_sim_set_onion_pose(sim, o, &air, 1);
             let mut onion = PikOnion::default();
             assert_eq!(pik_sim_onions(sim, &mut onion, 1), 1);
-            assert_eq!((onion.colors, onion.anim, onion.stored), (7, 6, [4; 3]));
+            assert_eq!((onion.colors, onion.anim, onion.stored), (7, 6, [4, 4, 4, 0, 0]));
             assert_eq!(pik_sim_onion_in_reach(sim, c), -1);
             assert_eq!(pik_sim_onion_call_out(sim, c, o, color, 1), 1);
         }
@@ -1039,6 +1039,75 @@ fn the_louie_skin_draws_through_the_abi() {
                 if input.stick_y == 0.0 && input.jump == 0 && input.whistle == 0 {
                     assert!((20.0..31.0).contains(&hi), "idle Louie is {hi} tall");
                 }
+            }
+        }
+        pik_view_free(view);
+    }
+}
+
+/// Purple and White Pikmin draw as Pikmin 2's bodies, feet on the ground, about a Pikmin tall; without the
+/// Pikmin 2 files they are still drawn (tinted Pikmin 1 bodies).
+#[test]
+fn purple_and_white_pikmin_draw_through_the_abi() {
+    let _views = VIEWS.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else {
+        eprintln!("SKIP: no extracted assets");
+        return;
+    };
+    let p2 = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../libsms/assets/p2");
+    let p2s = CString::new(p2.to_string_lossy().as_bytes()).unwrap();
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+        let with_p2 = pik_p2_complete(p2s.as_ptr()) != 0;
+        let view = pik_view_new(dir.as_ptr(), 0);
+        assert!(!view.is_null());
+        let before = pik_view_model_count(view);
+        let purple_model = if with_p2 { pik_view_load_pikmin2(view, p2s.as_ptr()) } else { -1 };
+        if with_p2 {
+            assert_eq!(purple_model as u32, before);
+            assert_eq!(pik_view_model_count(view), before + 2);
+        } else {
+            eprintln!("no Pikmin 2 cache: checking the fallback only");
+        }
+        let sim = pik_sim_new(dir.as_ptr(), 1);
+        let c = pik_sim_add_captain(sim, &PikVec3::default());
+        for (k, color) in [PikiColor::Blue, PikiColor::Purple, PikiColor::White].into_iter().enumerate() {
+            let at = PikVec3 { x: -20.0 - k as f32 * 6.0, y: 0.0, z: 0.0 };
+            assert!(pik_sim_spawn_piki(sim, color.index() as u32, &at, c) >= 0);
+        }
+        let mut world = World::default();
+        let h = host(&mut world);
+        let frame = PikViewFrame {
+            dt: 1.0 / 60.0,
+            forward: PikVec3 { x: 0.0, y: 0.0, z: 1.0 },
+            up: PikVec3 { x: 0.0, y: 1.0, z: 0.0 },
+            listener: -1,
+            volume: 1.0,
+            ..Default::default()
+        };
+        pik_sim_set_input(sim, 0, &PikInput { stick_y: 0.6, ..Default::default() });
+        for _ in 0..90 {
+            pik_sim_advance(sim, &h, 1.0 / 60.0);
+            pik_view_update(view, sim, &frame);
+        }
+        let n = pik_view_draws(view, std::ptr::null_mut(), 0);
+        let mut draws = vec![PikDraw::default(); n as usize];
+        pik_view_draws(view, draws.as_mut_ptr(), n);
+        let pikmin: Vec<_> = draws.iter().filter(|d| d.kind == 1).collect();
+        assert_eq!(pikmin.len(), 3);
+        if with_p2 {
+            let mut vc = 0u32;
+            let pos = std::slice::from_raw_parts(pik_view_positions(view, &mut vc), vc as usize);
+            for model in [purple_model as u32, purple_model as u32 + 1] {
+                let d = pikmin.iter().find(|d| d.model == model).unwrap_or_else(|| panic!("no Pikmin on model {model}"));
+                let mut info = PikModelInfo::default();
+                assert_eq!(pik_view_model(view, model, &mut info), 1);
+                let mine = &pos[d.first_vertex as usize..(d.first_vertex + info.vertex_count) as usize];
+                assert!(mine.iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()));
+                let (lo, hi) = mine.iter().fold((f32::MAX, f32::MIN), |(l, h), p| (l.min(p.y), h.max(p.y)));
+                assert!(lo.abs() < 0.01, "feet at {lo}");
+                assert!(hi > 4.0 && hi < 40.0, "stands {hi} tall");
             }
         }
         pik_view_free(view);

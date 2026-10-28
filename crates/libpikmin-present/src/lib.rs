@@ -12,6 +12,7 @@ pub mod effects;
 pub mod louie;
 pub mod pikachu;
 pub mod pianta;
+pub mod pikmin2;
 pub mod stings;
 pub mod teki;
 pub mod tev;

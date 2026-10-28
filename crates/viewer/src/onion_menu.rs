@@ -28,6 +28,8 @@ fn rgb(c: PikiColor) -> Color {
         PikiColor::Red => Color::from_rgba(225, 45, 45, 255),
         PikiColor::Yellow => Color::from_rgba(245, 205, 40, 255),
         PikiColor::Blue => Color::from_rgba(55, 100, 235, 255),
+        PikiColor::Purple => Color::from_rgba(150, 60, 215, 255),
+        PikiColor::White => Color::from_rgba(240, 240, 240, 255),
     }
 }
 
@@ -102,6 +104,8 @@ impl OnionMenu {
             PikiColor::Red => "Red",
             PikiColor::Yellow => "Yellow",
             PikiColor::Blue => "Blue",
+            PikiColor::Purple => "Purple",
+            PikiColor::White => "White",
         };
         let ncolors = sim.onions()[self.onion.0 as usize].colors.len();
         let title = if ncolors > 1 { format!("< {name} Onion >") } else { format!("{name} Onion") };

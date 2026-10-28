@@ -57,7 +57,7 @@ pub struct Onion {
     pub pos: Vec3,
     pub colors: Vec<PikiColor>,
     /// Pikmin inside (`mHeldPikis`), by colour index then leaf stage (`Happa as usize`).
-    pub stored: [[u32; 3]; 3],
+    pub stored: [[u32; 3]; crate::piki::COLOUR_COUNT],
     /// Pikmin waiting to come out for a captain (`mPikisToExit`), in order.
     pub exits: VecDeque<(PikiColor, crate::CaptainId)>,
     pub(crate) exit_timer: f32,
@@ -235,7 +235,7 @@ impl Sim {
             id,
             pos,
             colors: colors.to_vec(),
-            stored: [[0; 3]; 3],
+            stored: [[0; 3]; crate::piki::COLOUR_COUNT],
             exits: VecDeque::new(),
             exit_timer: 0.0,
             anim: OnionAnim::Idle,
@@ -258,7 +258,7 @@ impl Sim {
             id,
             pos,
             colors: Vec::new(),
-            stored: [[0; 3]; 3],
+            stored: [[0; 3]; crate::piki::COLOUR_COUNT],
             exits: VecDeque::new(),
             exit_timer: 0.0,
             anim: OnionAnim::Idle,

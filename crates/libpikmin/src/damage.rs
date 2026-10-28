@@ -244,6 +244,10 @@ impl Sim {
                     piki: id,
                     cause: DeathCause::Eaten,
                 });
+                // `EnemyBase::eatWhitePikminCallBack`: a White Pikmin poisons what eats it.
+                if self.pikis[pi].color == crate::PikiColor::White {
+                    self.events.push(Event::PoisonedEater { piki: id, creature });
+                }
                 n += 1;
             }
         }

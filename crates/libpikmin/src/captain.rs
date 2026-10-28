@@ -881,7 +881,8 @@ impl Sim {
     }
 
     /// The order the colour switch goes in.
-    const CYCLE: [PikiColor; 3] = [PikiColor::Red, PikiColor::Yellow, PikiColor::Blue];
+    const CYCLE: [PikiColor; 5] =
+        [PikiColor::Red, PikiColor::Yellow, PikiColor::Blue, PikiColor::Purple, PikiColor::White];
 
     /// The colours among `ci`'s squad (formed up, walking to his hand or held), as bits by
     /// [`PikiColor::index`].

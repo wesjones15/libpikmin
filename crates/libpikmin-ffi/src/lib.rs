@@ -42,7 +42,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 49;
+pub const PIK_ABI_VERSION: u32 = 50;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
@@ -351,7 +351,7 @@ pub struct PikOnion {
     /// Bit `PikiColor::index` set for each colour it takes.
     pub colors: u32,
     /// Pikmin inside, by colour index (all leaf stages).
-    pub stored: [u32; 3],
+    pub stored: [u32; 5],
     /// 0 idle, 1 suction, 2 seeds, 3 takeoff, 4 away, 5 landing, 6 hover, 7 dormant, 8 reviving.
     pub anim: u8,
     pub is_ship: u8,
@@ -442,6 +442,12 @@ pub mod event_kind {
     pub const STRIKE_STARTED: u32 = 45;
     /// `a` the Pikmin, `b` its captain: it took off to repeat his jump-pad throw.
     pub const PIKI_LAUNCHED: u32 = 46;
+    /// `a` the Purple Pikmin, `pos` where it came down on something or the ground.
+    pub const POUNDED: u32 = 47;
+    /// `a` the Pikmin that pounded; the creature fields name the flying creature it brought down.
+    pub const GROUNDED: u32 = 48;
+    /// `a` the White Pikmin that was eaten; the creature fields name the creature that ate it.
+    pub const POISONED_EATER: u32 = 49;
 }
 
 /// One [`Event`]. `a` is the Pikmin, pellet, sprout or captain it's about (the first id in the
@@ -1003,6 +1009,10 @@ pub unsafe extern "C" fn pik_sim_new(assets_dir: *const c_char, seed: u64) -> *m
                 }
             },
         };
+        // Purple and White's tuning, when the Pikmin 2 files were extracted beside the Pikmin 1 ones (Louie's skin).
+        if let Some(dir) = dir.as_ref() {
+            params.load_pikmin2_dir(&dir.join("p2").join("parms"));
+        }
         let part_specs = load_part_specs(&params, dir.as_deref());
         (Sim::new(params, seed), source, part_specs)
     });
@@ -1368,7 +1378,7 @@ pub unsafe extern "C" fn pik_sim_add_onion(sim: *mut PikSim, pos: *const PikVec3
     let Some(pos) = (unsafe { pos.as_ref() }).copied() else {
         return -1;
     };
-    let colors: Vec<PikiColor> = (0..3).filter(|i| colors & (1 << i) != 0).map(PikiColor::from_index).collect();
+    let colors: Vec<PikiColor> = (0..5).filter(|i| colors & (1 << i) != 0).filter_map(PikiColor::from_id).collect();
     if colors.is_empty() {
         return -1;
     }
@@ -2275,7 +2285,7 @@ unsafe fn slice<'a, T>(p: *const T, n: u32) -> &'a [T] {
 }
 
 fn color_arg(i: u32) -> Option<PikiColor> {
-    (i < 3).then(|| PikiColor::from_index(i as usize))
+    PikiColor::from_id(i as usize)
 }
 
 fn happa_arg(i: u32) -> Option<Happa> {
@@ -2425,6 +2435,15 @@ fn event(e: Event) -> PikEvent {
             (v.kind, v.a, v.b, v.pos) = (PIKI_STOMPED, piki.0, captain.0 as i32, pos.into())
         }
         Event::PikiLaunched { piki, captain } => (v.kind, v.a, v.b) = (PIKI_LAUNCHED, piki.0, captain.0 as i32),
+        Event::Pounded { piki, pos } => (v.kind, v.a, v.pos) = (POUNDED, piki.0, pos.into()),
+        Event::Grounded { creature: c, piki } => {
+            (v.kind, v.a) = (GROUNDED, piki.0);
+            creature(&mut v, c);
+        }
+        Event::PoisonedEater { piki, creature: c } => {
+            (v.kind, v.a) = (POISONED_EATER, piki.0);
+            creature(&mut v, c);
+        }
     }
     v
 }
@@ -2534,17 +2553,17 @@ pub unsafe extern "C" fn pik_sim_credit_kill(sim: *mut PikSim, creature: u64) ->
 }
 
 /// [`Sim::attackers_by_colour`]: how many living Pikmin of each colour (blue, red, yellow, written to
-/// `out[0..3]`) attacked `creature`. Returns their total. Ask before [`pik_sim_credit_kill`].
+/// `out[0..5]`, then purple and white) attacked `creature`. Returns their total. Ask before [`pik_sim_credit_kill`].
 ///
 /// # Safety
-/// `sim` from [`pik_sim_new`]; `out` is null or has room for 3 values.
+/// `sim` from [`pik_sim_new`]; `out` is null or has room for 5 values.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_attackers(sim: *mut PikSim, creature: u64, out: *mut u32) -> u32 {
     // SAFETY: as documented.
-    let by_colour = unsafe { with(sim, [0; 3], |s| s.sim.attackers_by_colour(creature)) };
+    let by_colour = unsafe { with(sim, [0; 5], |s| s.sim.attackers_by_colour(creature)) };
     if !out.is_null() {
-        // SAFETY: the caller promised room for 3.
-        unsafe { std::ptr::copy_nonoverlapping(by_colour.as_ptr(), out, 3) };
+        // SAFETY: the caller promised room for 5.
+        unsafe { std::ptr::copy_nonoverlapping(by_colour.as_ptr(), out, 5) };
     }
     by_colour.iter().sum()
 }

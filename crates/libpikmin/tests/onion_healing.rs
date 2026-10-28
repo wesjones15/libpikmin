@@ -13,7 +13,7 @@ fn healing_prefers_leaves_then_buds_then_flowers_and_never_touches_squad() {
     let (count, fraction) = sim.sacrifice_onion_stock(onion, 0.52);
     assert_eq!(count, 8);
     assert!((fraction - 0.52).abs() < 1e-6);
-    assert_eq!(sim.onions()[0].stored, [[0, 0, 0], [0, 0, 0], [0, 0, 1]]);
+    assert_eq!(sim.onions()[0].stored, [[0, 0, 0], [0, 0, 0], [0, 0, 1], [0, 0, 0], [0, 0, 0]]);
     assert_eq!(sim.captain(captain).plate.len(), 3);
     assert_eq!(sim.sacrifice_onion_stock(onion, 1.0), (0, 0.0));
 }

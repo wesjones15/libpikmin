@@ -321,6 +321,8 @@ fn piki_color(c: PikiColor) -> Color {
         PikiColor::Red => Color::from_rgba(225, 45, 45, 255),
         PikiColor::Yellow => Color::from_rgba(245, 215, 40, 255),
         PikiColor::Blue => Color::from_rgba(55, 100, 235, 255),
+        PikiColor::Purple => Color::from_rgba(150, 60, 215, 255),
+        PikiColor::White => Color::from_rgba(240, 240, 240, 255),
     }
 }
 

@@ -336,6 +336,24 @@ pub unsafe extern "C" fn pik_view_load_louie(view: *mut PikView, dir: *const c_c
     }
 }
 
+/// Loads Purple and White Pikmin from the Pikmin 2 cache `dir` ([`pik_p2_extract`]), appending their two models
+/// (purple, then white) to the table: call it before reading the table. Returns the purple model's index, or -1
+/// when the cache is missing (they are then drawn as tinted Pikmin 1 bodies).
+/// # Safety
+/// `view` is a live handle; `dir` a NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_load_pikmin2(view: *mut PikView, dir: *const c_char) -> i32 {
+    if dir.is_null() { return -1; }
+    // SAFETY: as documented.
+    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+    unsafe {
+        with_view(view, -1, |v| match v.view.load_pikmin2(std::path::Path::new(&dir)) {
+            Ok(m) => m as i32,
+            Err(_) => -1,
+        })
+    }
+}
+
 /// How tall Louie stands as a multiple of Olimar (1 by default).
 /// # Safety
 /// `view` is a live handle.

@@ -15,20 +15,48 @@ pub enum PikiColor {
     Blue,
     Red,
     Yellow,
+    /// Pikmin 2's Purple (`Game::Purple`, "black"). Not in Pikmin 1.
+    Purple,
+    /// Pikmin 2's White (`Game::White`). Not in Pikmin 1.
+    White,
 }
 
 impl PikiColor {
+    /// Pikmin 1's three colours: what an Onion takes by default and what the plain squad cycles through.
     pub const ALL: [PikiColor; 3] = [PikiColor::Blue, PikiColor::Red, PikiColor::Yellow];
 
-    /// The decomp's colour index (Blue 0, Red 1, Yellow 2).
+    /// Every colour, Pikmin 2's two included.
+    pub const EVERY: [PikiColor; COLOUR_COUNT] =
+        [PikiColor::Blue, PikiColor::Red, PikiColor::Yellow, PikiColor::Purple, PikiColor::White];
+
+    /// The colour index (Blue 0, Red 1, Yellow 2 as in the decomp; Purple 3, White 4).
     pub fn index(self) -> usize {
         self as usize
     }
 
+    /// One of Pikmin 1's three, cycling (`i % 3`). Use [`PikiColor::from_id`] for Purple and White.
     pub fn from_index(i: usize) -> Self {
         Self::ALL[i % 3]
     }
+
+    /// The colour with index `i`, if there is one.
+    pub fn from_id(i: usize) -> Option<Self> {
+        Self::EVERY.get(i).copied()
+    }
+
+    /// Whether Pikmin 2 added it.
+    pub fn is_pikmin2(self) -> bool {
+        matches!(self, PikiColor::Purple | PikiColor::White)
+    }
+
+    /// `PikiMgr::getColorTransportScale`: how many carriers it counts as toward lifting.
+    pub fn transport_scale(self) -> u32 {
+        if self == PikiColor::Purple { 10 } else { 1 }
+    }
 }
+
+/// How many [`PikiColor`]s there are.
+pub const COLOUR_COUNT: usize = 5;
 
 /// Leaf / bud / flower stage (`mHappa`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -366,7 +394,7 @@ impl Sim {
             let c = &self.captains[cid.0 as usize];
             let top = self.params.navi.run_speed * c.speed_scale * pace[self.pikis[pi].happa as usize];
             let min = pp.min_move_speed.min(top);
-            return (top - min) * ratio + min;
+            return ((top - min) * ratio + min) * self.colour_speed(pi);
         }
         let scale = self.params.ai.do_scale_happa_move_speed != 0;
         let max = match self.pikis[pi].happa {
@@ -374,7 +402,7 @@ impl Sim {
             Happa::Bud if scale => pp.max_bud_move_speed,
             _ => pp.max_leaf_move_speed,
         };
-        ((max - pp.min_move_speed) * ratio + pp.min_move_speed) * self.squad_speed_of(pi)
+        ((max - pp.min_move_speed) * ratio + pp.min_move_speed) * self.squad_speed_of(pi) * self.colour_speed(pi)
     }
 
     /// Its captain's [`crate::Captain::squad_speed`].
@@ -394,6 +422,18 @@ impl Sim {
             PikiColor::Blue => pp.blue_attack_power,
             PikiColor::Red => pp.red_attack_power,
             PikiColor::Yellow => pp.yellow_attack_power,
+            PikiColor::Purple => self.params.p2.purple_attack_power,
+            PikiColor::White => self.params.p2.white_attack_power,
+        }
+    }
+
+    /// `Piki::getSpeed`'s colour factor: White runs faster, Purple slower (`mWhiteRunSpeedMultiplier`,
+    /// `mPurpleRunSpeedMultiplier`).
+    pub(crate) fn colour_speed(&self, pi: usize) -> f32 {
+        match self.pikis[pi].color {
+            PikiColor::White => self.params.p2.white_speed_multiplier,
+            PikiColor::Purple => self.params.p2.purple_speed_multiplier,
+            _ => 1.0,
         }
     }
 
@@ -629,6 +669,9 @@ impl Sim {
         self.physics(pi, host, dt);
 
         if let Some((target, part, surface)) = self.touching_part(pi, None) {
+            if self.pikis[pi].color == PikiColor::Purple {
+                self.pound(pi, host, Some((target, part)));
+            }
             if self.creatures.parts[part as usize].stickable {
                 self.latch(pi, target, part, surface);
             } else {
@@ -652,6 +695,9 @@ impl Sim {
             return;
         }
 
+        if self.pikis[pi].on_ground && self.pikis[pi].color == PikiColor::Purple {
+            self.pound(pi, host, None);
+        }
         let p = &mut self.pikis[pi];
         if p.on_ground {
             // `procBounceMsg` → `Piki::actOnSituaton`.
@@ -659,6 +705,39 @@ impl Sim {
             p.target_vel = Vec3::ZERO;
             self.events.push(Event::Landed { piki: p.id });
             self.act_on_situation(pi);
+        }
+    }
+
+    /// A thrown Purple comes down: `PikiHipDropState::collisionCallback` hits the creature it landed on with
+    /// `mPoundDamage`, and `earthquake` (`mPoundAOERange`) reaches the rest, flying ones included, which the host
+    /// brings to the ground ([`Event::Grounded`]). Unlike Pikmin 2, the throw is not shortened or stopped at its peak:
+    /// the host relies on far throws and lock-ons, so it lands where it was thrown and pounds there.
+    fn pound(&mut self, pi: usize, host: &mut dyn Host, hit: Option<(CreatureId, u32)>) {
+        let (id, pos) = (self.pikis[pi].id, self.pikis[pi].pos);
+        self.events.push(Event::Pounded { piki: id, pos });
+        if let Some((target, global)) = hit
+            && let Some(c) = self.creatures.get(target).copied()
+        {
+            let damage = self.params.p2.pound_damage;
+            if host.damage(target, damage, Some(global - c.parts_start), crate::host::DamageSource::Piki(id)) {
+                self.note_attack(pi, target);
+                self.events.push(Event::Hit { piki: id, creature: target, damage, latched: false });
+            }
+        }
+        let radius = self.params.p2.pound_radius;
+        let fliers: Vec<CreatureId> = self
+            .creatures
+            .creatures
+            .iter()
+            .filter(|c| c.alive && c.flying && c.parts_len > 0)
+            .filter(|c| {
+                let (centre, size) = self.creatures.bounds(c);
+                dist_xz(pos, centre) <= radius + size
+            })
+            .map(|c| c.id)
+            .collect();
+        for creature in fliers {
+            self.events.push(Event::Grounded { creature, piki: id });
         }
     }
 

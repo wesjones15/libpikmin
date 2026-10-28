@@ -534,6 +534,8 @@ pub struct View {
     pub(crate) pianta: Option<crate::pianta::PiantaSkin>,
     /// The Louie body some captains wear ([`View::load_louie`]).
     pub(crate) louie: Option<crate::louie::LouieSkin>,
+    /// Purple and White Pikmin (Pikmin 2, [`View::load_pikmin2`]).
+    pub(crate) pikmin2: Option<std::sync::Arc<crate::pikmin2::Pikmin2Skin>>,
     /// Pikachu and his Ice Climbers ([`View::load_pikachu`]).
     pub(crate) pikachu: Option<std::sync::Arc<crate::pikachu::PikachuSkin>>,
     captain_skins: HashMap<u32, u8>,
@@ -735,6 +737,7 @@ impl View {
             sparkled: HashMap::new(),
             pianta: None,
             louie: None,
+            pikmin2: None,
             pikachu: None,
             captain_skins: HashMap::new(),
             pianta_voices: Vec::new(),
@@ -1037,21 +1040,21 @@ impl View {
     /// ground, and queues him as a captain draw.
     fn push_pianta(&mut self, k: u64, pos: Vec3, rot: Quat, root: Mat4, joints: &[Mat4], alpha: f32, flags: u8) {
         let Some(skin) = self.pianta.take() else { return };
-        self.push_body(&skin.body.model, skin.model, skin.tex_base, skin.scale, k, pos, rot, root, joints, alpha, flags);
+        self.push_body(&skin.body.model, skin.model, skin.tex_base, skin.scale, kinds::CAPTAIN, k, pos, rot, root, joints, alpha, flags);
         self.pianta = Some(skin);
     }
 
     /// The same for Louie.
     fn push_louie(&mut self, k: u64, pos: Vec3, rot: Quat, root: Mat4, joints: &[Mat4], alpha: f32, flags: u8) {
         let Some(skin) = self.louie.take() else { return };
-        self.push_body(&skin.body.model, skin.model, skin.tex_base, skin.scale, k, pos, rot, root, joints, alpha, flags);
+        self.push_body(&skin.body.model, skin.model, skin.tex_base, skin.scale, kinds::CAPTAIN, k, pos, rot, root, joints, alpha, flags);
         self.louie = Some(skin);
     }
 
     /// Skins a Sunshine-style body (`model`, baked into the view's textures from `tex_base` and listed as
     /// model `index`) from `joints` in its own units, `scale` and `root` over them, lowest vertex on the
     /// ground, and queues it as a captain draw.
-    fn push_body(&mut self, m: &libsms_present::view::Model, index: u32, tex_base: i32, scale: f32, k: u64, pos: Vec3,
+    fn push_body(&mut self, m: &libsms_present::view::Model, index: u32, tex_base: i32, scale: f32, kind: u8, k: u64, pos: Vec3,
         rot: Quat, root: Mat4, joints: &[Mat4], alpha: f32, flags: u8) {
         let pose = libsms_assets::Pose::new(&m.bmd, root * Mat4::from_scale(Vec3::splat(scale)), joints);
         let low = m.batches.iter().flat_map(|b| &b.vertices).map(|v| pose.skin(v).0.y).fold(f32::INFINITY, f32::min);
@@ -1084,7 +1087,7 @@ impl View {
             self.colors.push(c);
             self.texture_ids.push(id);
         }
-        self.draws.push(Draw { key: k, kind: kinds::CAPTAIN, flags, model: index, pos, rot, first_vertex, first_color, alpha });
+        self.draws.push(Draw { key: k, kind, flags, model: index, pos, rot, first_vertex, first_color, alpha });
     }
 
     /// Loads Pikachu and the Ice Climbers from the Melee cache `dir` (with `PlPp.dat`/`PlNn.dat`, see
@@ -1174,6 +1177,33 @@ impl View {
         ));
         self.louie = Some(skin);
         Ok(model)
+    }
+
+    /// Loads Purple and White Pikmin from the Pikmin 2 cache `dir` (`libsms::extract::p2`), appending two models
+    /// to the table (purple, then white); returns the purple one's index. Call before the host reads the table.
+    /// Without it they are drawn as tinted Pikmin 1 bodies.
+    pub fn load_pikmin2(&mut self, dir: &std::path::Path) -> Result<u32, String> {
+        if let Some(p) = &self.pikmin2 { return Ok(p.purple.model); }
+        let height = crate::louie::olimar_height(&self.models[models::PIKMIN[0] as usize].model);
+        let first = self.models.len() as u32;
+        let tex_base = self.textures.list.len() as i32;
+        let skin = crate::pikmin2::Pikmin2Skin::load(dir, first, tex_base, height)?;
+        let scale = libpikmin::Params::default().p2.new_colour_scale;
+        for color in [libpikmin::PikiColor::Purple, libpikmin::PikiColor::White] {
+            let b = skin.body(color).expect("both bodies");
+            let m = &b.body.model;
+            let (lo, hi) = skin.bounds(color, scale);
+            self.textures.list.extend(skin.textures(color));
+            self.models.push(ViewModel::external(
+                skin.batches(color, scale), lo, hi,
+                m.batch_texture.iter().map(|&t| if t >= 0 { t + b.tex_base } else { -1 }).collect(),
+                m.batch_blend.clone(),
+                m.batch_env.clone(),
+                m.batch_lit.iter().map(|l| l & 3).collect(),
+            ));
+        }
+        self.pikmin2 = Some(std::sync::Arc::new(skin));
+        Ok(first)
     }
 
     /// How tall Louie stands, as a multiple of Olimar.
@@ -1747,7 +1777,31 @@ impl View {
                 libpikmin_assets::motion::Motion::RotJump.anim_index().and_then(|i| self.piki_anims.get(i))
                     .map(|(info, a)| (a, (self.time * 30.0 + p.id.0 as f32 * 7.0) % info.keys.last().copied().unwrap_or(1).max(1) as f32))
             } else { self.animator.piki(&self.piki_anims, p, &look, if frozen { 0.0 } else { dt }) };
-            let model = models::PIKMIN[p.color.index()];
+            // Purple and White: Pikmin 2's bodies on their own motions, the Pikmin 1 clip's progress choosing the frame.
+            let phase = anim.map(|(_, f)| {
+                let len = look.motion.anim_index().and_then(|i| self.piki_anims.get(i))
+                    .and_then(|(info, _)| info.keys.last().copied()).unwrap_or(1).max(1) as f32;
+                (f / len).clamp(0.0, 1.0)
+            }).unwrap_or(0.0);
+            let skin2 = self.pikmin2.clone().filter(|_| p.color.is_pikmin2());
+            if let Some(sk) = skin2 {
+                let joints = sk.joints(p.color, look.motion, phase);
+                let b = sk.body(p.color).expect("a Pikmin 2 colour");
+                let s = sk.scale(p.color, params.p2.new_colour_scale);
+                let (index, tex_base) = (b.model, b.tex_base);
+                let root = Mat4::from_scale(look.scale);
+                self.push_body(&b.body.model, index, tex_base, s, kinds::PIKI, k, pos, rot, root, &joints, look.fade, 0);
+                if let Some(j) = joints.get(crate::pikmin2::HAPPA_JOINT).copied()
+                    && !matches!(p.state, PikiState::Pressed { .. })
+                {
+                    let model = models::HAPPA[p.happa as usize];
+                    let pose = self.models[model as usize].skel.pose(root * Mat4::from_scale(Vec3::splat(s)) * j, None);
+                    let k = key(kinds::HAPPA, crate::animator::piki_key(p));
+                    self.push(k, kinds::HAPPA, model, pos, rot, pose, &no_inputs, look.fade, 0);
+                }
+                continue;
+            }
+            let model = models::PIKMIN[p.color.index().min(2)];
             let pose = self.models[model as usize].skel.pose(srt_matrix(look.scale, Vec3::ZERO, Vec3::ZERO), anim);
             let head = pose.joints.get(6).copied();
             let tint = if frozen { icy(piki_rgb(p.color)) } else { piki_rgb(p.color) };

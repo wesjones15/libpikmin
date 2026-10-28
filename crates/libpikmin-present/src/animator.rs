@@ -145,6 +145,9 @@ pub fn piki_rgb(c: PikiColor) -> [u8; 4] {
         PikiColor::Blue => [0, 50, 255, 255],
         PikiColor::Red => [255, 30, 0, 255],
         PikiColor::Yellow => [255, 210, 0, 255],
+        // Pikmin 2's colours: not in `Piki::pikiColors`, matched to their models.
+        PikiColor::Purple => [150, 50, 220, 255],
+        PikiColor::White => [255, 255, 255, 255],
     }
 }
 

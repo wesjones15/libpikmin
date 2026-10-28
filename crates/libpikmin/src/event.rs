@@ -213,6 +213,13 @@ pub enum Event {
     },
     /// Host extension: one of `captain`'s Pikmin took off to repeat his jump-pad throw.
     PikiLaunched { piki: PikiId, captain: CaptainId },
+    /// A thrown Purple came down on something (`PikiHipDropState::collisionCallback`) or on the ground, at `pos`.
+    Pounded { piki: PikiId, pos: Vec3 },
+    /// The pound brought a flying `creature` down (`InteractEarthquake` reaches the flying too): the host
+    /// puts it on the ground for a while.
+    Grounded { creature: CreatureId, piki: PikiId },
+    /// A White Pikmin was eaten: `creature` swallowed poison (`EnemyBase::eatWhitePikminCallBack`).
+    PoisonedEater { piki: PikiId, creature: CreatureId },
 }
 
 impl Event {
@@ -228,7 +235,8 @@ impl Event {
             | CarrierGrabbed { piki, .. } | Deflowered { piki } | PikiGone { piki, .. }
             | PikiDied { piki, .. } | Swallowed { piki, .. } | SpitOut { piki }
             | Plucked { piki, .. } | PluckerOut { piki, .. } | PikiGrew { piki, .. }
-            | PikiStomped { piki, .. } | PikiLaunched { piki, .. } => [Some(piki), None],
+            | PikiStomped { piki, .. } | PikiLaunched { piki, .. } | Pounded { piki, .. }
+            | Grounded { piki, .. } | PoisonedEater { piki, .. } => [Some(piki), None],
             _ => [None, None],
         };
         ids.into_iter().flatten()

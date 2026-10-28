@@ -47,8 +47,8 @@ impl Sim {
     /// How many living Pikmin of each colour ([`PikiColor`] order) attacked `creature` and have not been
     /// credited for it yet: the ones that fought it, for the host to colour its corpse by. Ask before
     /// [`Sim::credit_kill`], which forgets them.
-    pub fn attackers_by_colour(&self, creature: CreatureId) -> [u32; 3] {
-        let mut by_colour = [0; 3];
+    pub fn attackers_by_colour(&self, creature: CreatureId) -> [u32; crate::piki::COLOUR_COUNT] {
+        let mut by_colour = [0; crate::piki::COLOUR_COUNT];
         for p in &self.pikis {
             if p.is_alive() && p.hit_log.contains(&Some(creature)) {
                 by_colour[p.color as usize] += 1;
@@ -129,15 +129,15 @@ mod tests {
         sim.spawn_piki_in_squad(PikiColor::Blue, Vec3::new(40.0, 0.0, 0.0), c);
         sim.spawn_piki_in_squad(PikiColor::Blue, Vec3::new(50.0, 0.0, 0.0), c);
         sim.step(&mut FlatHost);
-        assert_eq!(sim.attackers_by_colour(7), [0, 0, 0]);
+        assert_eq!(sim.attackers_by_colour(7), [0; 5]);
         sim.note_attack(0, 7);
         sim.note_attack(1, 7);
         sim.note_attack(2, 7);
         sim.note_attack(1, 8);
-        assert_eq!(sim.attackers_by_colour(7), [2, 1, 0], "blue, red, yellow");
-        assert_eq!(sim.attackers_by_colour(8), [1, 0, 0]);
+        assert_eq!(sim.attackers_by_colour(7), [2, 1, 0, 0, 0], "blue, red, yellow");
+        assert_eq!(sim.attackers_by_colour(8), [1, 0, 0, 0, 0]);
         sim.credit_kill(7);
-        assert_eq!(sim.attackers_by_colour(7), [0, 0, 0], "credited: forgotten");
+        assert_eq!(sim.attackers_by_colour(7), [0; 5], "credited: forgotten");
     }
 
     #[test]
