@@ -9,6 +9,7 @@
 pub mod animator;
 pub mod audio;
 pub mod effects;
+pub mod hocotate;
 pub mod louie;
 pub mod navilight;
 pub mod pikachu;

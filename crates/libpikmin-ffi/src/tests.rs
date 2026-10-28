@@ -991,7 +991,7 @@ fn the_louie_skin_draws_through_the_abi() {
         assert!(!view.is_null());
         let model = pik_view_load_louie(view, p2s.as_ptr());
         assert_eq!(model, 19);
-        assert_eq!(pik_view_model_count(view), 20);
+        assert_eq!(pik_view_model_count(view), 21);
         let mut info = PikModelInfo::default();
         assert_eq!(pik_view_model(view, 19, &mut info), 1);
         let mut idx = vec![0u32; info.index_count as usize];
@@ -1041,6 +1041,25 @@ fn the_louie_skin_draws_through_the_abi() {
                 }
             }
         }
+        // His ship: an Onion that is a ship draws as the Hocotate Ship when asked to.
+        let ship = pik_sim_add_ship(sim, &PikVec3 { x: 120.0, y: 0.0, z: 0.0 }, 0.0);
+        assert!(ship >= 0);
+        let mut draw_ship = |on: u8| {
+            pik_view_set_ship_hocotate(view, ship as u32, on);
+            for _ in 0..4 {
+                pik_sim_advance(sim, &h, 1.0 / 60.0);
+                frame.lag = 1.0 - pik_sim_alpha(sim);
+                pik_view_update(view, sim, &frame);
+            }
+            let n = pik_view_draws(view, std::ptr::null_mut(), 0);
+            let mut draws = vec![PikDraw::default(); n as usize];
+            pik_view_draws(view, draws.as_mut_ptr(), n);
+            draws.iter().find(|d| d.kind == 9).map(|d| d.model)
+        };
+        let dolphin = draw_ship(0);
+        let hocotate = draw_ship(1);
+        assert!(dolphin.is_some(), "no ship drawn");
+        assert!(hocotate.is_some_and(|m| m != dolphin.unwrap() && m >= 19), "{dolphin:?} {hocotate:?}");
         // His navi light burns over him: four additive glow layers among the particles.
         let mut lights = 0u32;
         pik_view_particles(view, &mut lights);

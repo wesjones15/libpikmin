@@ -364,6 +364,15 @@ pub unsafe extern "C" fn pik_view_load_pikmin2(view: *mut PikView, dir: *const c
     }
 }
 
+/// Draws the ship of Onion `onion` as Louie's Hocotate Ship (`on` 1; it loads with Louie, [`pik_view_load_louie`]) or as
+/// the Dolphin again (0). Does nothing for Onions that are not ships or when the Pikmin 2 ship files were missing.
+/// # Safety
+/// `view` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_ship_hocotate(view: *mut PikView, onion: u32, on: u8) {
+    if let Some(v) = unsafe { view.as_mut() } { v.view.set_ship_hocotate(onion, on != 0); }
+}
+
 /// How tall Louie stands as a multiple of Olimar (1 by default).
 /// # Safety
 /// `view` is a live handle.

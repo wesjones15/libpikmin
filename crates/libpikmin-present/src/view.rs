@@ -536,6 +536,11 @@ pub struct View {
     pub(crate) louie: Option<crate::louie::LouieSkin>,
     /// Louie's navi light (a stand-in for the JPA2 effect) and where it burns this frame: (feet, height).
     navi_light: Option<crate::navilight::NaviLight>,
+    /// Louie's ship, drawn in place of the Dolphin for the Onions listed in `hocotate_ships` ([`View::set_ship_hocotate`]).
+    hocotate: Option<std::sync::Arc<crate::hocotate::HocotateSkin>>,
+    hocotate_ships: HashSet<u32>,
+    /// The Dolphin's height standing upright, which the Hocotate Ship is sized to.
+    dolphin_height: Option<f32>,
     light_spots: Vec<(Vec3, f32)>,
     /// Purple and White Pikmin (Pikmin 2, [`View::load_pikmin2`]).
     pub(crate) pikmin2: Option<std::sync::Arc<crate::pikmin2::Pikmin2Skin>>,
@@ -741,6 +746,9 @@ impl View {
             pianta: None,
             louie: None,
             navi_light: None,
+            hocotate: None,
+            hocotate_ships: HashSet::new(),
+            dolphin_height: None,
             light_spots: Vec::new(),
             pikmin2: None,
             pikachu: None,
@@ -1202,6 +1210,10 @@ impl View {
             m.batch_lit.iter().map(|l| l & 3).collect(),
         ));
         self.louie = Some(skin);
+        // His ship comes with him, when the cache has it.
+        if let Err(e) = self.load_hocotate(dir) {
+            eprintln!("Louie's ship: {e}");
+        }
         // His navi light is optional: the same cache, the effects file.
         match crate::navilight::NaviLight::load(dir) {
             Ok(light) => self.navi_light = Some(light),
@@ -1235,6 +1247,32 @@ impl View {
         }
         self.pikmin2 = Some(std::sync::Arc::new(skin));
         Ok(first)
+    }
+
+    /// Loads Louie's ship from the Pikmin 2 cache `dir`, appending its model to the table; returns the model index.
+    /// Call before the host reads the table.
+    pub fn load_hocotate(&mut self, dir: &std::path::Path) -> Result<u32, String> {
+        if let Some(h) = &self.hocotate { return Ok(h.model); }
+        let model = self.models.len() as u32;
+        let tex_base = self.textures.list.len() as i32;
+        let skin = crate::hocotate::HocotateSkin::load(dir, model, tex_base)?;
+        let m = &skin.body.model;
+        let (lo, hi) = skin.bounds();
+        self.textures.list.extend(skin.textures());
+        self.models.push(ViewModel::external(
+            skin.batches(), lo, hi,
+            m.batch_texture.iter().map(|&t| if t >= 0 { t + tex_base } else { -1 }).collect(),
+            m.batch_blend.clone(),
+            m.batch_env.clone(),
+            m.batch_lit.iter().map(|l| l & 3).collect(),
+        ));
+        self.hocotate = Some(std::sync::Arc::new(skin));
+        Ok(model)
+    }
+
+    /// The ship of Onion `onion` is Louie's Hocotate Ship (`on`) or the Dolphin again; ignored when it did not load.
+    pub fn set_ship_hocotate(&mut self, onion: u32, on: bool) {
+        if on { self.hocotate_ships.insert(onion); } else { self.hocotate_ships.remove(&onion); }
     }
 
     /// How tall Louie stands, as a multiple of Olimar.
@@ -1527,7 +1565,32 @@ impl View {
                         if let Some(at) = sphere(id) { e.move_attached(fx_key | slot as u64, at); }
                     }
                 }
+                // Louie's ship stands in for the Dolphin's body: sized to the upright Dolphin.
+                let hocotate = self.hocotate.clone().filter(|_| self.hocotate_ships.contains(&o.id.0));
+                let dolphin_h = if hocotate.is_some() {
+                    Some(*self.dolphin_height.get_or_insert_with(|| {
+                        let rest = vm.skel.pose_by(Mat4::IDENTITY, |j| {
+                            let ctx = self.ship_contexts[j];
+                            let (motion, frame) = if ctx == 0 { (11, 0.0) } else { animator.context(ctx) };
+                            self.ship_anims.get(motion).map(|(_, a)| (a, frame))
+                        });
+                        let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+                        for v in vm.batches.iter().flat_map(|b| &b.vertices) {
+                            let y = rest.skin(v).0.y;
+                            lo = lo.min(y);
+                            hi = hi.max(y);
+                        }
+                        if hi > lo { hi - lo } else { 100.0 }
+                    }))
+                } else { None };
                 let at = self.place(key(kinds::SHIP, i as u64), o.pos, tick, alpha);
+                if let (Some(h), Some(dh)) = (hocotate, dolphin_h) {
+                    let joints = h.joints(sucking, self.time);
+                    let scale = dh / h.height().max(1.0);
+                    let root = Mat4::from_rotation_y(-h.goal_yaw);
+                    self.push_body(&h.body.model, h.model, h.tex_base, scale, kinds::SHIP, key(kinds::SHIP, i as u64), at, rot, root, &joints, 1.0, 0);
+                    continue;
+                }
                 let lit = |m: usize| Inputs { frame: Some(light_frames.get(m).copied().unwrap_or(0.0)), ..Inputs::default() };
                 self.push(key(kinds::SHIP, i as u64), kinds::SHIP, models::SHIP, at, rot, pose, &lit, 1.0, 0);
                 for (part, model, ppose) in part_poses {
