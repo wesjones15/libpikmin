@@ -177,37 +177,12 @@ impl PiantaSkin {
     /// The model-table entry and batches for the host (vertices in the order of the Pianta's own
     /// batches, so the posed ones line up).
     pub fn batches(&self) -> Vec<Batch> {
-        let bind = self.body.bind_world();
-        let pose = PiantaPose::new(&self.body.model.bmd, Mat4::from_scale(Vec3::splat(self.scale)), &bind);
-        self.body.model.batches.iter().enumerate().map(|(bi, b)| Batch {
-            material: b.material,
-            cull: match self.body.model.batch_cull[bi] { 0 => Cull::Back, 1 => Cull::Front, _ => Cull::None },
-            vertices: b.vertices.iter().map(|v| {
-                let (p, n) = pose.skin(v);
-                BatchVertex {
-                    position: p,
-                    normal: n.normalize_or_zero(),
-                    uv: Vec2::new(v.uv[0].x, v.uv[0].y),
-                    color: [255; 4],
-                    skin: match v.skin {
-                        libsms_assets::bmd::Skin::Joint(j) => Skin::Joint(j),
-                        libsms_assets::bmd::Skin::Envelope(e) => Skin::Envelope(e),
-                    },
-                }
-            }).collect(),
-            indices: b.indices.clone(),
-        }).collect()
+        batches_of(&self.body.model, &self.body.bind_world(), self.scale)
     }
 
     /// His baked textures as the view's, in order.
     pub fn textures(&self) -> Vec<tev::Baked> {
-        self.body.textures.list.iter().map(|t| tev::Baked {
-            width: t.width,
-            height: t.height,
-            wrap: t.wrap,
-            rgba: t.rgba.clone(),
-            env: t.env,
-        }).collect()
+        textures_of(&self.body.textures)
     }
 
     /// Bind-pose bounds in sim units, for the model table.
@@ -218,6 +193,41 @@ impl PiantaSkin {
     pub fn olimar_joints(&self) -> usize {
         self.olimar.len()
     }
+}
+
+/// A libsms-present model as libpikmin-assets batches (bind-skinned vertices, in the model's own batch order),
+/// for the host's model table.
+pub(crate) fn batches_of(model: &libsms_present::view::Model, bind: &[Mat4], scale: f32) -> Vec<Batch> {
+    let pose = PiantaPose::new(&model.bmd, Mat4::from_scale(Vec3::splat(scale)), bind);
+    model.batches.iter().enumerate().map(|(bi, b)| Batch {
+        material: b.material,
+        cull: match model.batch_cull[bi] { 0 => Cull::Back, 1 => Cull::Front, _ => Cull::None },
+        vertices: b.vertices.iter().map(|v| {
+            let (p, n) = pose.skin(v);
+            BatchVertex {
+                position: p,
+                normal: n.normalize_or_zero(),
+                uv: Vec2::new(v.uv[0].x, v.uv[0].y),
+                color: [255; 4],
+                skin: match v.skin {
+                    libsms_assets::bmd::Skin::Joint(j) => Skin::Joint(j),
+                    libsms_assets::bmd::Skin::Envelope(e) => Skin::Envelope(e),
+                },
+            }
+        }).collect(),
+        indices: b.indices.clone(),
+    }).collect()
+}
+
+/// A body's baked textures as the view's.
+pub(crate) fn textures_of(textures: &libsms_present::view::Textures) -> Vec<tev::Baked> {
+    textures.list.iter().map(|t| tev::Baked {
+        width: t.width,
+        height: t.height,
+        wrap: t.wrap,
+        rgba: t.rgba.clone(),
+        env: t.env,
+    }).collect()
 }
 
 /// Convenience for tests: Olimar's disc skeleton in pikmin-assets form.

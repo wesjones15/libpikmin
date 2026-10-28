@@ -532,6 +532,8 @@ pub struct View {
     sparkled: HashMap<libpikmin::SproutId, libpikmin::Happa>,
     /// The Pianta body some captains wear ([`View::load_pianta`]) and who wears it.
     pub(crate) pianta: Option<crate::pianta::PiantaSkin>,
+    /// The Louie body some captains wear ([`View::load_louie`]).
+    pub(crate) louie: Option<crate::louie::LouieSkin>,
     captain_skins: HashMap<u32, u8>,
     /// Cries a Pianta captain made since the host last took them ([`View::take_pianta_voices`]).
     pianta_voices: Vec<(u32, crate::pianta::Voice)>,
@@ -730,6 +732,7 @@ impl View {
             grown: Vec::new(),
             sparkled: HashMap::new(),
             pianta: None,
+            louie: None,
             captain_skins: HashMap::new(),
             pianta_voices: Vec::new(),
         })
@@ -1031,8 +1034,23 @@ impl View {
     /// ground, and queues him as a captain draw.
     fn push_pianta(&mut self, k: u64, pos: Vec3, rot: Quat, root: Mat4, joints: &[Mat4], alpha: f32, flags: u8) {
         let Some(skin) = self.pianta.take() else { return };
-        let m = &skin.body.model;
-        let pose = libsms_assets::Pose::new(&m.bmd, root * Mat4::from_scale(Vec3::splat(skin.scale)), joints);
+        self.push_body(&skin.body.model, skin.model, skin.tex_base, skin.scale, k, pos, rot, root, joints, alpha, flags);
+        self.pianta = Some(skin);
+    }
+
+    /// The same for Louie.
+    fn push_louie(&mut self, k: u64, pos: Vec3, rot: Quat, root: Mat4, joints: &[Mat4], alpha: f32, flags: u8) {
+        let Some(skin) = self.louie.take() else { return };
+        self.push_body(&skin.body.model, skin.model, skin.tex_base, skin.scale, k, pos, rot, root, joints, alpha, flags);
+        self.louie = Some(skin);
+    }
+
+    /// Skins a Sunshine-style body (`model`, baked into the view's textures from `tex_base` and listed as
+    /// model `index`) from `joints` in its own units, `scale` and `root` over them, lowest vertex on the
+    /// ground, and queues it as a captain draw.
+    fn push_body(&mut self, m: &libsms_present::view::Model, index: u32, tex_base: i32, scale: f32, k: u64, pos: Vec3,
+        rot: Quat, root: Mat4, joints: &[Mat4], alpha: f32, flags: u8) {
+        let pose = libsms_assets::Pose::new(&m.bmd, root * Mat4::from_scale(Vec3::splat(scale)), joints);
         let low = m.batches.iter().flat_map(|b| &b.vertices).map(|v| pose.skin(v).0.y).fold(f32::INFINITY, f32::min);
         let low = if low.is_finite() { low } else { 0.0 };
         let first_vertex = self.positions.len() as u32;
@@ -1055,7 +1073,7 @@ impl View {
                 });
             }
             let id = match m.batch_texture.get(bi).copied() {
-                Some(t) if t >= 0 => t + skin.tex_base,
+                Some(t) if t >= 0 => t + tex_base,
                 _ => -1,
             };
             let mut c = if id >= 0 { [1.0; 4] } else { m.batch_color_of(bi) };
@@ -1063,8 +1081,34 @@ impl View {
             self.colors.push(c);
             self.texture_ids.push(id);
         }
-        self.draws.push(Draw { key: k, kind: kinds::CAPTAIN, flags, model: skin.model, pos, rot, first_vertex, first_color, alpha });
-        self.pianta = Some(skin);
+        self.draws.push(Draw { key: k, kind: kinds::CAPTAIN, flags, model: index, pos, rot, first_vertex, first_color, alpha });
+    }
+
+    /// Loads the Louie body some captains can wear from the Pikmin 2 cache `dir` (`libsms::extract::p2`),
+    /// appending it to the model table; returns its model index. Call before the host reads the table.
+    pub fn load_louie(&mut self, dir: &std::path::Path) -> Result<u32, String> {
+        if let Some(l) = &self.louie { return Ok(l.model); }
+        let height = crate::louie::olimar_height(&self.models[models::OLIMAR as usize].model);
+        let model = self.models.len() as u32;
+        let tex_base = self.textures.list.len() as i32;
+        let skin = crate::louie::LouieSkin::load(dir, model, tex_base, height)?;
+        let m = &skin.body.model;
+        let (lo, hi) = skin.bounds();
+        self.textures.list.extend(skin.textures());
+        self.models.push(ViewModel::external(
+            skin.batches(), lo, hi,
+            m.batch_texture.iter().map(|&t| if t >= 0 { t + tex_base } else { -1 }).collect(),
+            m.batch_blend.clone(),
+            m.batch_env.clone(),
+            m.batch_lit.iter().map(|l| l & 3).collect(),
+        ));
+        self.louie = Some(skin);
+        Ok(model)
+    }
+
+    /// How tall Louie stands, as a multiple of Olimar.
+    pub fn set_louie_height(&mut self, ratio: f32) {
+        if let Some(l) = self.louie.as_mut() { l.set_height_ratio(ratio); }
     }
 
     /// Captain `captain` is appearing in a beam, `progress` 0 (a thin column) to 1 (himself); 1 or more
@@ -1661,7 +1705,8 @@ impl View {
             } else { self.animator.captain(&self.piki_anims, &params, c, dt) };
             let mut root = crate::animator::captain_root(&params, c);
             let pianta_body = self.pianta.is_some() && self.captain_skins.get(&c.id.0) == Some(&crate::pianta::SKIN_PIANTA);
-            if pianta_body {
+            let louie_body = self.louie.is_some() && self.captain_skins.get(&c.id.0) == Some(&crate::louie::SKIN_LOUIE);
+            if pianta_body || louie_body {
                 // The Pianta jumps in Mario's clips, not tipped over on Olimar's geyser ride.
                 root = Mat4::IDENTITY;
             }
@@ -1758,8 +1803,11 @@ impl View {
                 captain_pos: pos,
                 radius: c.whistle_radius(&params),
             });
+            let louie_joints = if louie_body { self.louie.as_ref().map(|l| l.joints(c, motion, phase)) } else { None };
             if let Some(joints) = pianta_joints {
                 self.push_pianta(k, pos, rot, root, &joints, 1.0, f);
+            } else if let Some(joints) = louie_joints {
+                self.push_louie(k, pos, rot, root, &joints, 1.0, f);
             } else {
                 self.push(k, kinds::CAPTAIN, models::OLIMAR, pos, rot, pose, &no_inputs, 1.0, f);
             }

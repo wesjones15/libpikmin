@@ -968,3 +968,79 @@ fn the_pianta_skin_draws_through_the_abi() {
         pik_view_free(view);
     }
 }
+
+/// Olimar's Louie skin: his Pikmin 2 body joins the table and draws on a captain through standing, walking,
+/// running, jumping and whistling, feet on the ground, as tall as Olimar.
+#[test]
+fn the_louie_skin_draws_through_the_abi() {
+    let _views = VIEWS.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else {
+        eprintln!("SKIP: no extracted assets");
+        return;
+    };
+    let p2 = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../libsms/assets/p2");
+    let p2s = CString::new(p2.to_string_lossy().as_bytes()).unwrap();
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        if pik_p2_complete(p2s.as_ptr()) == 0 {
+            eprintln!("SKIP: no Pikmin 2 cache");
+            return;
+        }
+        let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+        let view = pik_view_new(dir.as_ptr(), 0);
+        assert!(!view.is_null());
+        let model = pik_view_load_louie(view, p2s.as_ptr());
+        assert_eq!(model, 19);
+        assert_eq!(pik_view_model_count(view), 20);
+        let mut info = PikModelInfo::default();
+        assert_eq!(pik_view_model(view, 19, &mut info), 1);
+        let mut idx = vec![0u32; info.index_count as usize];
+        assert_eq!(pik_view_indices(view, 19, idx.as_mut_ptr(), info.index_count), info.index_count);
+        assert!(idx.iter().all(|&i| i < info.vertex_count));
+        let sim = pik_sim_new(dir.as_ptr(), 1);
+        let c = pik_sim_add_captain(sim, &PikVec3::default());
+        pik_view_set_captain_skin(view, c as u32, 1);
+        let mut world = World::default();
+        let h = host(&mut world);
+        let mut frame = PikViewFrame {
+            dt: 1.0 / 60.0,
+            forward: PikVec3 { x: 0.0, y: 0.0, z: 1.0 },
+            up: PikVec3 { x: 0.0, y: 1.0, z: 0.0 },
+            listener: -1,
+            volume: 1.0,
+            ..Default::default()
+        };
+        let inputs = [
+            PikInput::default(),
+            PikInput { stick_y: 0.4, ..Default::default() },
+            PikInput { stick_y: 1.0, ..Default::default() },
+            PikInput { jump: 1, ..Default::default() },
+            PikInput { whistle: 1, ..Default::default() },
+        ];
+        for input in inputs {
+            pik_sim_set_input(sim, 0, &input);
+            for _ in 0..40 {
+                pik_sim_advance(sim, &h, 1.0 / 60.0);
+                frame.lag = 1.0 - pik_sim_alpha(sim);
+                pik_view_update(view, sim, &frame);
+                let n = pik_view_draws(view, std::ptr::null_mut(), 0);
+                let mut draws = vec![PikDraw::default(); n as usize];
+                pik_view_draws(view, draws.as_mut_ptr(), n);
+                let me = draws.iter().find(|d| d.kind == 0).expect("no captain");
+                assert_eq!(me.model, 19, "the captain is not Louie");
+                let mut vc = 0u32;
+                let pos = std::slice::from_raw_parts(pik_view_positions(view, &mut vc), vc as usize);
+                let mine = &pos[me.first_vertex as usize..(me.first_vertex + info.vertex_count) as usize];
+                assert!(mine.iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()));
+                let (lo, hi) = mine.iter().fold((f32::MAX, f32::MIN), |(l, h), p| (l.min(p.y), h.max(p.y)));
+                assert!(lo.abs() < 0.01, "feet at {lo}");
+                assert!(hi > 10.0 && hi < 45.0, "stands {hi} tall, pos {:?} in {input:?}", mine.iter().fold((f32::MAX, f32::MAX, f32::MIN, f32::MIN), |a, p| (a.0.min(p.x), a.1.min(p.z), a.2.max(p.x), a.3.max(p.z))));
+                // Standing still he is about as tall as Olimar (25.1).
+                if input.stick_y == 0.0 && input.jump == 0 && input.whistle == 0 {
+                    assert!((20.0..31.0).contains(&hi), "idle Louie is {hi} tall");
+                }
+            }
+        }
+        pik_view_free(view);
+    }
+}

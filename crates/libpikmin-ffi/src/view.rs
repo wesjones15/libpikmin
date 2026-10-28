@@ -319,7 +319,60 @@ pub unsafe extern "C" fn pik_view_load_pianta(view: *mut PikView, dir: *const c_
     }
 }
 
-/// Which body a captain wears: 0 Olimar, 2 the Pianta (when loaded). Takes effect on the next update.
+/// Loads Louie (skin 1) from the Pikmin 2 cache `dir` ([`pik_p2_extract`]), appending his model to the
+/// table: call it before reading the table. Returns his model index, or -1 when the cache is missing.
+/// # Safety
+/// `view` is a live handle; `dir` a NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_load_louie(view: *mut PikView, dir: *const c_char) -> i32 {
+    if dir.is_null() { return -1; }
+    // SAFETY: as documented.
+    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+    unsafe {
+        with_view(view, -1, |v| match v.view.load_louie(std::path::Path::new(&dir)) {
+            Ok(m) => m as i32,
+            Err(_) => -1,
+        })
+    }
+}
+
+/// How tall Louie stands as a multiple of Olimar (1 by default).
+/// # Safety
+/// `view` is a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_louie_height(view: *mut PikView, ratio: f32) {
+    if let Some(v) = unsafe { view.as_mut() } { v.view.set_louie_height(ratio); }
+}
+
+/// Whether `dir` holds a complete Pikmin 2 extraction ([`pik_p2_extract`]).
+/// # Safety
+/// `dir` is a NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_p2_complete(dir: *const c_char) -> u8 {
+    if dir.is_null() { return 0; }
+    // SAFETY: as documented.
+    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+    libsms::extract::p2::is_complete(std::path::Path::new(&dir)) as u8
+}
+
+/// Extracts Pikmin 2's player files (Louie) from the user's disc image `iso` into the folder `out`; 0 when
+/// done (or already complete), else 1. A host runs it on a worker thread, once.
+/// # Safety
+/// Both arguments are NUL-terminated strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_p2_extract(iso: *const c_char, out: *const c_char) -> i32 {
+    if iso.is_null() || out.is_null() { return 1; }
+    // SAFETY: as documented.
+    let (iso, out) = unsafe {
+        (std::ffi::CStr::from_ptr(iso).to_string_lossy().into_owned(), std::ffi::CStr::from_ptr(out).to_string_lossy().into_owned())
+    };
+    match libsms::extract::p2::extract_navi(std::path::Path::new(&iso), std::path::Path::new(&out), &mut |_| {}) {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+}
+
+/// Which body a captain wears: 0 Olimar, 1 Louie, 2 the Pianta (when loaded). Takes effect on the next update.
 /// # Safety
 /// `view` is a live handle.
 #[unsafe(no_mangle)]
