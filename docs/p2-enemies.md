@@ -97,6 +97,44 @@ The first enemy to port is the **Kogane family** (Iridescent Flint Beetle, Iride
 
 'AI lines' counts the `.cpp` files of the enemy and its family (Mgr, State, Animator, Shadow, subclasses); 'States' are the `StateID` entries of the header (`-` where the enemy reuses a base class's).
 
+## Bosses (both games)
+
+Pikmin 1's bosses are not `Teki`: they are a separate system (`pikmin-main/src/plugPikiNishimura/`: `Boss.cpp`/`BossMgr.cpp` shared
+base and manager, one `*.cpp` + `*Ai.cpp` per boss, ids in `include/Boss.h`: `BOSS_Spider`, `Snake`, `Slime`, `King`, `Kogane`, `Pom`,
+`KingBack`, `Nucleus`, `CoreNucleus`, `BoxSnake`, `Mizu`, `Geyzer`; models `bosses/<name>/<name>.mod` + `parms.bin`). `libpikmin-teki`
+and `TekiRoster` kinds 0-26 cover only the regular Teki, so none of these is in. Pikmin 2's bosses are `Entities` like the rest (the tier 4
+rows above). The two games overlap: P1 Spider/Snake/King are the Beady Long Legs / Burrowing Snagret / Emperor Bulblax that Pikmin 2 also has (as
+`Damagumo`, `SnakeCrow`, `KingChappy`), so port one version of each, not both. P1's Kogane is the Iridescent Flint Beetle (a "boss" object in
+P1), the same creature as P2's `Koganemushi`: the Kogane family port serves both.
+
+| Game | Boss | Decomp (AI lines, incl. parts) | Hull and hurtboxes | Ship Repair |
+|---|---|---|---|---|
+| P1 | Kogane (Iridescent Flint Beetle) | `Kogane.cpp` + `KoganeAi.cpp`, 961 | small, 1 hurtbox | Covered by the P2 Kogane port (stage 1). |
+| P1 | Mizu (water geyser) | `Mizu*.cpp`, 475 | stationary hazard, no body | Hazard like Fire Geyser (kind 22); cheap. |
+| P1 | Pom (Pikmin-swallowing flower) | `Pom*.cpp`, 911 | stationary, 1 hurtbox | A static hazard; needs Pikmin to swallow, odd for RoR2. |
+| P1 | Spider (Beady Long Legs) | `Spider*.cpp` + `SpiderLeg.cpp`, 2205 | huge body, 4+ legs, hurtbox per leg | Possible: Golem-size hull, many hurtboxes, high cost. |
+| P1 | Snake (Burrowing Snagret, BoxSnake) | `Snake*.cpp`, 2822 | long body of joints, burrows | Hard: segmented body. |
+| P1 | King (Emperor Bulblax, KingBack) | `King*.cpp`, 2873 | very large, walks, 2 halves | Possible: a big Bulborb is the simplest boss body. |
+| P1 | Slime (Plasm Wraith, Nucleus, CoreNucleus) | `Slime*`, `Nucleus*`, `CoreNucleus*`, ~2900 | soft multi-body with cores | Hard: deforming body, three kinds of part. |
+| P2 | Queen (Empress Bulblax) | 1671 | large, walks, lays eggs/larvae | Possible; the eggs/larvae (tier 2) come first. |
+| P2 | Damagumo (Beady Long Legs) | 1615 | large, 4 legs, leg system shared with BigFoot/Houdai | Same as the P1 Spider. |
+| P2 | BigFoot (Raging Long Legs) | 1758 | huge, 2 legs | Large hull. |
+| P2 | SnakeCrow (Burrowing Snagret) | 1883 | burrows | Same as the P1 Snake. |
+| P2 | OniKurage (Greater Spotted Jellyfloat) | 1807 | floating, medium | Easiest P2 boss body; builds on Kurage (tier 3). |
+| P2 | DangoMushi (Segmented Crawbster) | 1904 | long segmented body | Hard. |
+| P2 | SnakeWhole (Pileated Snagret) | 2133 | very large, segmented | Hard. |
+| P2 | UmiMushi (Ranging Bloyster) | 2279 | stationary/water, big | Awkward (water). |
+| P2 | KingChappy (Emperor Bulblax) | 2498 | very large | Same as the P1 King. |
+| P2 | Houdai (Man-at-Legs) | 2819 | huge, legs and a cannon | Large. |
+| P2 | BlackMan + Tyre (Waterwraith) | 3883 | wraith with rolling parts | Hard. |
+| P2 | BigTreasure (Titan Dweevil) | 5063 | huge, 4 arms, 12 phases | Hardest; last. |
+
+Order for the bosses once the regular tiers are far enough along: (1) the Kogane family (not a real boss), (2) the geyser/flower hazards (Mizu, Pom),
+(3) the Bulblax body (P2 `Queen` or the P1 `King`; the Empress needs the Larva/Egg first), (4) the Jellyfloat pair (`Kurage`, then `OniKurage`),
+(5) the long-legged spiders, (6) the segmented and wraith bosses, (7) the Titan Dweevil. In Ship Repair a boss needs a Golem-sized hull, a hurtbox per
+big part and a spawn cost near the existing large kinds (300-400 credits); none is small enough to jump the queue before the first regular enemy is wired.
+No boss port was started in the first pass.
+
 ## Per enemy
 
 ### Kogane: Iridescent Flint Beetle
