@@ -550,3 +550,16 @@ No boss port was started in the first pass.
 ## Status
 
 Nothing ported yet (see the bottom of this file once stages land).
+
+## Port status (2026-10-28)
+
+Done through core, tests, draw path and Ship Repair roster wiring (staged by `ror2-olimar/build.ps1`; never played):
+- **Kogane family** (kinds 27-29: Iridescent Flint Beetle, Iridescent Glint Beetle, Doodlebug): `libpikmin-teki/src/kogane.rs` + `p2.rs`
+  (5 states, disc parms and clip keys, drops, Doodlebug gas), 7 tests in `tests/p2_kogane.rs`; enemy extractor
+  `libsms::extract::p2_enemy` (own marker `p2enemy.ok`); body loader `libsms-present::enemy`; draw via `libpikmin-present::p2enemy`;
+  sounds on the Pikmin 2 output (ids audible: `libsms-audio/tests/pikmin2_enemy_sounds.rs`); FFI `pik_p2_enemies_*`, no ABI change.
+- Not verified: anything in game; the ffi/present suites pass except `stings::intro_is_audible...`, which depends on another
+  session's uncommitted audio edits.
+- Missing: JPA2 effects (none emitted), the variants' TEV konst-colour tweak, cave treasure drops, wall normal, stone/bitter state,
+  Doodlebug panic (Pikmin in the gas die at once), spawn weights/costs untuned (2/1/2, 10/20/15).
+- Not started: every other enemy in the table above, and all bosses.
