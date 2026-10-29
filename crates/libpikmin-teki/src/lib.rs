@@ -49,6 +49,7 @@ pub mod shell;
 pub mod snagret;
 pub mod sokkuri;
 pub mod tai;
+pub mod umi;
 pub mod tank;
 pub mod wtank;
 pub mod yai;
@@ -301,6 +302,8 @@ fn p2_strategy(kind: u8) -> Strategy {
         p2::SEGMENTED_CRAWBSTER => dango::strategy(),
         p2::BURROWING_SNAGRET => snagret::strategy(),
         p2::PILEATED_SNAGRET => snagret::whole(),
+        p2::RANGING_BLOYSTER => umi::ranging(),
+        p2::TOADY_BLOYSTER => umi::blind(),
         p2::ORANGE_BULBORB | p2::HAIRY_BULBORB | p2::DWARF_ORANGE_BULBORB | p2::SNOW_BULBORB | p2::FIERY_BULBLAX => bulborb2::strategy(),
         _ => kogane::strategy(kind),
     }
