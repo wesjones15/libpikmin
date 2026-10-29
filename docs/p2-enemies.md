@@ -710,3 +710,70 @@ Remaining after this pass: the Dweevils (see the reading below), then tier 4: Da
 (`Item*` states); while it carries, blows only wear the treasure down (`damageTreasure`) until it drops it; shaken (`isStartFlick`) it charges and bursts with its element (`attackTarget` -> the subclass's `interactCreature`).
 Ship Repair places treasures as native sim pellets (`pik_sim_spawn_treasure`, `ShipRepairSession.Treasure.cs`) and scores, tracks and rescues them itself, so a Dweevil that picks one up would walk it off the map
 the scoring code expects. A port that never takes treasures is possible (a fleeing creature with an element burst), but it is most of what a Dweevil is, so it waits for the p2-treasures session to say whether a thief may touch them.
+
+## The Long Legs: leg IK, Beady Long Legs, Raging Long Legs and Man-at-Legs (kinds 47-49, 2026-10-28)
+
+Done through core, tests, ABI 52, draw path and the Ship Repair roster. **Never played in game**: what was run is headless (`cargo test -p libpikmin-teki
+-p libpikmin-ffi`, `ror2-olimar/build.ps1`, which restages `target/BepInEx/plugins/OlimarTest/`).
+
+### The decomp's system (what was read)
+`IKSystemMgr`/`IKSystemBase` (plugProjectNishimuraU/IKSystemMgr.cpp, IKSystemBase.cpp, nslibmath.cpp) are shared by all three bosses (and BigTreasure). Each boss has
+four legs of three joints (`rhand1/2/3jnt` right front, `lhand` left front, `rfoot` right back, `lfoot` left back, in that leg order 0..3), so the model has 15 or 22
+joints and four clips only (`dead`, `landing`, `wait`, `flick`; the Man-at-Legs adds `attack`). There is **no walk clip**: the walk is a programmed gait.
+- `startProgramedIK` (called when the landing clip ends): every foot's world position (the bottom joint's) becomes `mTargetPosition`; the segment lengths top-middle and
+  middle-bottom are measured from the animated joints; `mIKDistanceOffset` is the distance from the body to leg 0's foot and each leg keeps its angle round the body.
+- The gait (`IKSystemMgr::updateController`): in motion, when all legs are down (state 0) the next round starts: a goal for the body (up to `mMoveSpeed` toward the
+  target when it is within 30 degrees of the facing, else a turn on the spot of at most `mMaxTurnAngle`, `setNextCentrePosition`), a spot for each foot (the goal
+  plus its offset turned to the new facing) and leg 0 lifts; when a leg lands (state 1 swinging, 2 landed, 3 done) the next lifts: 0, 1, 2, 3, and round again while
+  `startIKMotion` holds. `finishIKMotion` lets the round end; `isFinishIKMotion` is true when all four legs are state 3.
+- A step (`IKSystemBase`): the foot follows a quadratic (`calcLagrange`) through where it lifted, a peak three quarters of the way plus `mHeightOffset` (the boss's "leg swing"),
+  and the ground; its progress speeds up on the way down (`mDownwardAccelFactor`), slows on the way up (`mRaiseSlowdownFactor`), clamped by `mMin/MaxDecelFactor`.
+  A foot below the ground after the peak stands on it.
+- The body (`calcCentrePosition`, `calcFaceDir`, `calcTraceCentrePosition`): its place is the feet's average (height: heights sorted and weighted .4 .3 .2 .1, lowest
+  most), it faces from there to the front feet's middle, and it is *drawn* at a point that follows its place like a damped spring (`mTraceMoveRate` .1, damping .7, a
+  small dip when a foot lands).
+- The pose (`IKSystemBase::makeMatrix`, from a callback while the model is posed): for each leg the knee comes from `calcJointPos` (the circle of knees keeping both
+  lengths, on the side of "up and away from the foot"), the hip's and knee's X axes run along their segments, the foot points down and tilts with a bend ratio while it is in
+  the air. While the flick plays (`startBlendMotion`) the legs keep the clip's own twist and only their positions follow.
+- Damage: `collisionCallback` hurts (`InteractPress`) Pikmin and players touched by a foot sphere (`lfsp`, `lhsp`, `rfsp`, `rhsp`: radius 15 Damagumo, 40 BigFoot) while its leg is
+  swinging down or just landed (`isCollisionCheck`). The Man-at-Legs' collision tree has no foot spheres (it does not stamp).
+
+### What was built
+- `libpikmin-teki/src/ik.rs`: the pure pose solver: `calc_lagrange`, `calc_joint_pos`, `solve_leg(LegInput) -> LegPose` (three world matrices), `bend_ratio`, `apply_leg`.
+  No model, no engine. Tests: the foot lands on its target, both segment lengths hold, the knee bends up and out, the joints are orthonormal, an out-of-reach foot lays the
+  leg straight, blending keeps the clip's twist, the step path runs through its three points.
+- `legs.rs`: the gait (`Legs`, `LegRig`, `GaitParms`, `LegEvent`, `LegsView`) as an engine-free port of `IKSystemMgr`/`IKSystemBase`. A `LegRig` is read from the
+  model (`libsms::Skeleton` and `landing.bca`, at the clip's last frame: where `startProgramedIK` reads the joints) and carries the hips, rest feet and segment lengths, the
+  Man-at-Legs' gun joint and the radius of the foot spheres from `enemyColl.txt`. Tests: steps run 0 1 2 3 in turn, the body follows its feet toward the goal and keeps
+  straight, a goal off to the side makes it turn on the spot first, finishing the walk lands every leg, feet come down on the ground height given, stomping only while coming down.
+- `longlegs.rs`: the machine Damagumo and BigFoot share (and the Man-at-Legs' base): Stay (unseen, nothing can touch it), Land (the clip, feet effects and shakes at its keys,
+  then the legs stand), Wait, Walk (the gait toward the nearest target), Flick (shakes Pikmin off, legs blended), Dead (`Out::Dying`, the clip, `Died`), plus the feet's crush
+  (`HitNavi` once per stomp per foot, Pikmin squashed). `damagumo.rs`, `bigfoot.rs` (the rage: after a flick the next walk is short and stamps about at random angles with the
+  second parm set, `fp11`..`fp17`, `fp20`, `fp21`), `houdai.rs` (the Man-at-Legs: flicks as it lands, wait/walk, after standing unhurt `fp26` seconds or after a flick the `Shot` state:
+  the attack clip pauses at its keys while the gun swings round at 0.05 radians a tick, bursts of 600 unit/second shells at the clip's loop with pauses between bursts, the gun
+  folds away and it walks on; shells hurt what their path passes, once each).
+- `libpikmin-present`: `P2Teki::fold_legs` poses the leg joints (and swings the gun joints onto the barrel direction) from the clip's pose with the solver; the view draws a Long
+  Legs body at the legs' trace point facing their way, with no "lowest vertex on the ground" lift (`View::set_teki_legs`).
+- `libpikmin-ffi`: ABI 52: `pik_tekis_legs` (the gait's `PikLegs`, 100 bytes), `pik_legs_size`, `pik_view_set_teki_legs`; the sound ids of the feet, the shot and the impact.
+- `ror2-olimar`: `Native.AbiVersion`, `PikminEnvelope.Abi`, `ShipRepairPacket.Abi` 52; `TekiAiNative.Legs`, `TekiAi.TryLegs`, `TekiDraw.Legs` fed to `PikminModels.SetTekiLegs` each frame;
+  `TekiRoster` kinds 47-49 (big, Golem hull, always drop a ship part, cost 1000/1500/1200). `build.ps1` builds and stages it.
+
+Tests that touch the disc print SKIP without the cache: `libpikmin-teki/tests/p2_longlegs.rs` (11: numbers and rig, the solver puts the knees where the model has them when the
+feet stand where the model's do (within 3 units, all 12 legs), landing and standing, each boss stands and walks, the stomp hurts a player, shaking, the rage, death, the gun fires),
+`libpikmin-present` `p2enemy` (the legs fold onto their feet whatever way the body faces; the gun swings onto its aim), `libpikmin-ffi` (a Long Legs through the ABI, drawn folded).
+
+### Host adaptations and what is not ported
+- The ground under every foot is the one height the host reports (`set_ground`), not a map query per foot: on rough ground the feet float or sink by the difference.
+- Waking: the boss lands when someone is within its **sight radius** (the decomp's private radius, 70, only fires when something walks under it); it goes after players as well as Pikmin.
+- A boss standing on its legs ignores the host's `set_position` (its feet set where it is, as `updateIKSystem` does); the host body follows `state.pos` smoothly.
+- BigFoot's calm wander uses `sin` for both axes, as the decomp does (`BigFoot.cpp getTargetPosition`).
+- Not ported: the shadow growing as it lands, the material animation of the dying body and the Shijimichou it releases, the pinch smoke, boss music, the landing's last foot key (key
+  types above 5 are not read by `TekiInfo::load_p2`), Houdai's cave-only target pattern and territory, `mScaleJoints`, BigFoot's ground sampling around its feet (`mLegCount` 12), damage to
+  other enemies (`InteractAttack` 500), the Man-at-Legs taking a quarter damage while landing, the fur effect.
+- They have no corpse (`carcass_config.txt` has none for them) so the roster marks them `NoCorpse`: when the body dies the host lets it go after the strategy's first ticks and the
+  dying clip is not shown to the end; the ship part still drops (big).
+- Multiplayer: the legs are not in the enemy state broadcast, so a client draws the body from its clip alone (no steps). Not changed; the plugin is offline-first.
+
+### Remaining
+Nothing of the three is blocked. Open: play-testing (stride and feet on real terrain, the gun's barrel axis on the model, the drawn height of the body over the host's hull, a Golem hull that
+is the right size), the dying clip for a NoCorpse boss, the legs in the client broadcast, a per-foot ground query (a new FFI callback or heights per step).
