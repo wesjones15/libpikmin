@@ -777,3 +777,33 @@ feet stand where the model's do (within 3 units, all 12 legs), landing and stand
 ### Remaining
 Nothing of the three is blocked. Open: play-testing (stride and feet on real terrain, the gun's barrel axis on the model, the drawn height of the body over the host's hull, a Golem hull that
 is the right size), the dying clip for a NoCorpse boss, the legs in the client broadcast, a per-foot ground query (a new FFI callback or heights per step).
+
+### Update after the eighth pass (2026-10-28)
+
+Ported in this pass (kinds 51-55, each with the disc's corpse, core tests, a roster line in `ror2-olimar/OlimarTest/TekiRoster.cs`; `cargo test --release -p libpikmin-teki -p libpikmin-ffi` passes, 206 tests with the unrelated `stings` failure below; the staged plugin was rebuilt after kind 55):
+
+- 51 **Segmented Crawbster** (boss, `dango.rs`, 4 tests): waits hidden until someone is inside its private radius, its shadow grows for 1.6 s, then it crashes down (`Stay`, `Appear`); walks after what it sees and rolls into a ball at it when it is in reach
+  (`Attack`: curls at the clip's third key, rolls at 200 turning slowly, crushes Pikmin and hurts players); a wall met at speed throws it on its back (`Turn`, open to blows for the flip time, 7.5 s, which the disc does not override), then it rights itself (`Recover`) and swings its arms three times (`Flick`).
+  Cost 1400, always drops a part. Not ported: the rocks and the egg that fall at the crash (`createCrashEnemy`), blend animation, the wall's normal (any wall at speed crashes it), the arm collision part (a sphere in front of it stands in), music.
+  Fix found on the way: its `attack_2` block in `enemyanimmgr.txt` has lost its `{`; `parse_anim_mgr` now starts a block at a bare source-path line (the clip list was a clip short, which shifted every later clip).
+- 52 **Burrowing Snagret** and 53 **Pileated Snagret** (`snagret.rs`, one builder for both, 5 tests each): lives underground; after the underground time, someone in its territory brings it up 120 away from them (`Stay`, `Appear1`/`Appear2`); it watches (`Wait`), strikes with its head at whoever stands in one of five zones in front of it
+  (`Attack`, one clip a zone: a Pikmin is swallowed and eaten, a player hurt), struggles while Pikmin cling to its head, and dives when nobody is in reach for the wait time or it has had enough blows (`Disappear`). The Pileated one's zones are longer, it has its body out of the ground and hops after what it sees (`Walk`) and back
+  into its territory (`Home`) with the disc's `setJumpMove` aim. Not ported: the neck bending to reach (`SnakeJointMgr`; the clip's own head path stands in, so the head may not meet the Pikmin), the bite repeating in place, the items it throws up on dying, music, joint shadows.
+- 54 **Ranging Bloyster** (boss) and 55 **Toady Bloyster** (`umi.rs`, 6 tests): the Ranging one wanders its territory, marks a player within the search range (`Find`), turns to him (`Turn`), creeps after him (`Search`), lashes out with its tongue in reach (`Attack`: Pikmin in the tongue's area are
+  caught, a player in front hurt, then everything near flicked) and eats what it caught (`Eat`), throws off Pikmin that cling (`Flick`) and loses a player who goes far (`Lost`, then home). The Toady one has no sight (never marks a player; it ambles for 200 ticks and sits for 200, turns at 0.3 of the rate, and strikes at what is within reach, a player too),
+  with the disc's 800 life. Not ported: the tail's colour change while it marks a player (`changeColor`), the cave territory.
+  Found on the way: `Kind.dead` must be the exact clip file name without its extension (`dead1` for the Hermit Crawmad and the Bloysters); the Crawmad's row said `dead`, which fell back to clip 0, now fixed.
+
+**Host caveat for every `INVINCIBLE` P2 kind** (Crawmad, Crawbster, Snagrets, Giant Breadbug and the Burrow-nit, Emperor and so on): the RoR2 body keeps taking the players' damage whatever the core's state. The host feeds the health a body lost to the core as `Event::Pressed` (when the enemy is `INVINCIBLE`), so the core
+only decides how the enemy reacts; the 'only open to blows when flipped / when carrying' rules are thus not enforced against the players (the Kogane family use `Hazard`). A fix would be the host healing the body while the core says `INVINCIBLE`; it is the host's call, and I did not change the shared damage path.
+
+Read and judged impractical for Ship Repair (reason):
+- **BlackMan + Tyre (Waterwraith)**: the wraith rides the Tyre, a second enemy that rolls along the cave's route graph (`findNextRoutePoint`, `isReachToGoal(mWaypointGoalRadius)`); the wraith has no attack of its own, the Tyre's rolling is the danger, and when the Tyre dies it runs (`Escape`).
+  With no route graph, and two cooperating bodies to spawn, place together and keep in step (the rider's position follows the wheel's), a port would be a wheel rolling aimlessly with a passenger. It needs a design for riding pairs first.
+- **BigTreasure (Titan Dweevil)**: 6,000 lines of its own (`BigTreasure`, `BigTreasureAttack` with four arm weapons: electric lightning, fire, gas cloud, water, each its own projectile or cone system; `BigTreasureShadow`; twelve states including carrying and putting down a treasure), walks on the leg-IK system (`forceFinishIKMotion`),
+  and shares the Dweevils' treasure logic. It is the last boss and deserves its own session after the Dweevils are decided and the Long Legs' leg gait is used for its legs.
+- **Dweevils**: unchanged from the seventh pass, waiting for the p2-treasures session to say whether a thief may touch the treasure pellets.
+
+Remaining list, exactly: the Dweevils (OtakaraBase: Fire, Water, Gas, Elec, Bomb), BigTreasure (Titan Dweevil), BlackMan + Tyre, and the earlier judged-impractical ones (Hanachirashi, BombSarai, MiniHoudai, Imomushi, Kurage/OniKurage, Fuefuki, ElecHiba/ElecBug, Demon/Sarai, Egg, LeafChappy). Nothing here has been played in game.
+
+`cargo test -p libpikmin-present`: still the one failure, `stings::intro_is_audible_stereo_and_reused_without_disc_banks` ("Access is denied (os error 5)" writing a temp file under the sandbox), not from this work.
