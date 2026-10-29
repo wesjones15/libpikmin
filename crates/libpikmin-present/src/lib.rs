@@ -18,6 +18,7 @@ pub mod p2enemy;
 pub mod pikmin2;
 pub mod stings;
 pub mod teki;
+pub mod treasure;
 pub mod tev;
 pub mod view;
 

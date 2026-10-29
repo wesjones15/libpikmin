@@ -20,7 +20,7 @@ pub const LOUIE_STAR: u16 = 0xDE;
 pub const LOUIE_BASE: u16 = 0xE1;
 
 /// One glow: its texture split for additive layers, and where those layers live in [`Flat::textures`].
-struct Glow {
+pub(crate) struct Glow {
     width: u32,
     height: u32,
     rgba: Vec<u8>,
@@ -37,7 +37,7 @@ pub struct NaviLight {
     star: Glow,
 }
 
-fn glow(jpc: &Jpc, id: u16, scale: f32) -> Option<Glow> {
+pub(crate) fn glow(jpc: &Jpc, id: u16, scale: f32) -> Option<Glow> {
     let (shape, tex) = jpc.look(id)?;
     let rgb = |c: [u8; 4]| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0];
     Some(Glow {
@@ -74,7 +74,7 @@ impl Glow {
         ids
     }
 
-    fn push(&mut self, flat: &mut Flat, centre: Vec3, half: f32, strength: f32, right: Vec3, up: Vec3) {
+    pub(crate) fn push(&mut self, flat: &mut Flat, centre: Vec3, half: f32, strength: f32, right: Vec3, up: Vec3) {
         let [rgb_a, inv_a] = self.textures(flat);
         let (r, u) = (right * half, up * half);
         let corners = [centre - r + u, centre + r + u, centre + r - u, centre - r - u];

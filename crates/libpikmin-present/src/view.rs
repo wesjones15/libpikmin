@@ -549,6 +549,14 @@ pub struct View {
     /// The Dolphin's height standing upright, which the Hocotate Ship is sized to.
     dolphin_height: Option<f32>,
     light_spots: Vec<(Vec3, f32)>,
+    /// Pikmin 2's treasures ([`View::load_treasures`]): their bodies, the stand-in effects, what the view remembers of
+    /// each treasure pellet, the sounds due on the host's Pikmin 2 output, and what sparkles or bursts this frame.
+    treasures: Option<std::sync::Arc<crate::treasure::TreasureSet>>,
+    treasure_fx: Option<crate::treasure::TreasureFx>,
+    treasure_tracks: crate::treasure::Tracks,
+    treasure_cues: Vec<crate::treasure::Cue>,
+    treasure_bursts: Vec<(Vec3, f32, crate::treasure::Burst, f32)>,
+    treasure_spots: Vec<(Vec3, f32, u32)>,
     /// Purple and White Pikmin (Pikmin 2, [`View::load_pikmin2`]).
     pub(crate) pikmin2: Option<std::sync::Arc<crate::pikmin2::Pikmin2Skin>>,
     /// Pikachu and his Ice Climbers ([`View::load_pikachu`]).
@@ -758,6 +766,12 @@ impl View {
             hocotate_ships: HashSet::new(),
             dolphin_height: None,
             light_spots: Vec::new(),
+            treasures: None,
+            treasure_fx: None,
+            treasure_tracks: HashMap::new(),
+            treasure_cues: Vec::new(),
+            treasure_bursts: Vec::new(),
+            treasure_spots: Vec::new(),
             pikmin2: None,
             pikachu: None,
             captain_skins: HashMap::new(),
@@ -991,6 +1005,51 @@ impl View {
             }
             self.navi_light = Some(light);
         }
+        // Treasures: a twinkle around each one on the map, and the burst of one appearing or being taken in.
+        if let Some(mut fx) = self.treasure_fx.take() {
+            for &(feet, radius, key) in &self.treasure_spots {
+                fx.sparkle(&mut self.particles, feet, radius, key, self.time, right, up);
+            }
+            for &(at, radius, kind, born) in &self.treasure_bursts {
+                fx.burst(&mut self.particles, kind, at, radius, self.time - born, right, up);
+            }
+            self.treasure_fx = Some(fx);
+        }
+    }
+
+    /// Loads all 188 of Pikmin 2's treasures from the cache `dir` (`libsms::extract::p2_treasure`, in `dir/treasure`),
+    /// appending 188 models to the table in `otakara_config.txt` order; returns the first one's index. Call before the
+    /// host reads the table. Treasure pellets ([`libpikmin::TREASURE_PART_BASE`] and up) are then drawn with them,
+    /// sparkle, and make Pikmin 2's sounds ([`View::take_treasure_cues`]).
+    pub fn load_treasures(&mut self, dir: &std::path::Path) -> Result<u32, String> {
+        if let Some(t) = &self.treasures { return Ok(t.bodies.first().map_or(0, |b| b.model)); }
+        let first = self.models.len() as u32;
+        let tex_base = self.textures.list.len() as i32;
+        let set = crate::treasure::TreasureSet::load(dir, first, tex_base)?;
+        for (i, b) in set.bodies.iter().enumerate() {
+            let m = &b.treasure.model;
+            let (lo, hi) = b.treasure.bounds();
+            self.textures.list.extend(set.textures(i));
+            self.models.push(ViewModel::external(
+                set.batches(i), lo, hi,
+                m.batch_texture.iter().map(|&t| if t >= 0 { t + b.tex_base } else { -1 }).collect(),
+                m.batch_blend.clone(),
+                m.batch_env.clone(),
+                m.batch_lit.iter().map(|l| l & 3).collect(),
+            ));
+        }
+        match crate::treasure::TreasureFx::load(dir) {
+            Ok(fx) => self.treasure_fx = Some(fx),
+            Err(e) => eprintln!("Treasure sparkles: {e}"),
+        }
+        self.treasures = Some(std::sync::Arc::new(set));
+        Ok(first)
+    }
+
+    /// The sounds treasures made since the last call (Pikmin 2's `SoundID.h` ids at places in sim units), for the host's
+    /// Pikmin 2 sound output.
+    pub fn take_treasure_cues(&mut self) -> Vec<crate::treasure::Cue> {
+        std::mem::take(&mut self.treasure_cues)
     }
 
     /// Where an object is between the last two ticks (`alpha` 0..1 into the next tick).
@@ -1347,6 +1406,8 @@ impl View {
         self.render_frame = self.render_frame.wrapping_add(1);
         self.draws.clear();
         self.light_spots.clear();
+        self.treasure_spots.clear();
+        self.treasure_bursts.retain(|b| self.time - b.3 < crate::treasure::BURST_SECONDS);
         self.positions.clear();
         self.normals.clear();
         self.colors.clear();
@@ -1782,6 +1843,35 @@ impl View {
         // (corpses too: a host's enemies have no Pikmin model). The model goes by carriers,
         // which for a numbered pellet is its number.
         for pel in sim.pellets() {
+            let treasure = pel.desc.ship_part.filter(|&p| p >= libpikmin::TREASURE_PART_BASE && self.treasures.is_some());
+            if let Some(part) = treasure {
+                // A treasure: its moments (sounds, bursts) first, so the one that is gone still gets its finish.
+                let state = match pel.state {
+                    PelletState::Carried { .. } => 1,
+                    PelletState::Sucking { .. } => 2,
+                    PelletState::Gone => 3,
+                    _ => 0,
+                };
+                let now = self.time;
+                let (cues, burst, track) = crate::treasure::moments(self.treasure_tracks.get(&pel.id.0).copied(), state, pel.pos, pel.desc.radius, now);
+                self.treasure_cues.extend(cues);
+                if let Some(kind) = burst { self.treasure_bursts.push((pel.pos, pel.desc.radius, kind, now)); }
+                match track {
+                    Some(t) => { self.treasure_tracks.insert(pel.id.0, t); }
+                    None => { self.treasure_tracks.remove(&pel.id.0); }
+                }
+                if let (Some(t), Some(set)) = (track, self.treasures.clone())
+                    && let Some(body) = set.body((part - libpikmin::TREASURE_PART_BASE) as usize)
+                {
+                    let joints = set.joints((part - libpikmin::TREASURE_PART_BASE) as usize, state != 0, now - t.carry_began);
+                    let k = key(kinds::PELLET, pel.id.0 as u64);
+                    let (pos, rot) = self.place_rot(k, pel.pos, Quat::from_rotation_y(pel.yaw), tick, alpha);
+                    self.push_body(&body.treasure.model, body.model, body.tex_base, pel.scale, kinds::PELLET, k, pos, rot,
+                        Mat4::IDENTITY, &joints, 1.0, 0);
+                    if state != 2 { self.treasure_spots.push((pel.pos, pel.desc.radius, pel.id.0)); }
+                }
+                continue;
+            }
             if pel.state == PelletState::Gone {
                 continue;
             }
