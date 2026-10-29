@@ -21,6 +21,7 @@ pub mod effects;
 pub mod info;
 pub mod kabekui;
 pub mod kabuto;
+pub mod king;
 pub mod kinoko;
 pub mod kogane;
 pub mod mar;
@@ -262,6 +263,7 @@ fn p2_strategy(kind: u8) -> Strategy {
         p2::WATERY_BLOWHOG => wtank::strategy(),
         p2::CANNON_LARVA => kabuto::strategy(),
         p2::EMPRESS_BULBLAX => queen::strategy(),
+        p2::EMPEROR_BULBLAX => king::strategy(),
         p2::ORANGE_BULBORB | p2::HAIRY_BULBORB | p2::DWARF_ORANGE_BULBORB | p2::SNOW_BULBORB | p2::FIERY_BULBLAX => bulborb2::strategy(),
         _ => kogane::strategy(kind),
     }
