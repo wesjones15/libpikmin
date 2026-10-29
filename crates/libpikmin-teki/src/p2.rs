@@ -66,6 +66,8 @@ pub const BEADY_LONG_LEGS: u8 = 47;
 pub const RAGING_LONG_LEGS: u8 = 48;
 /// Man-at-Legs (`Houdai::Obj`).
 pub const MAN_AT_LEGS: u8 = 49;
+/// Giant Breadbug (`OoPanModoki::Obj`).
+pub const GIANT_BREADBUG: u8 = 50;
 
 /// One Pikmin 2 kind: where its files are (`<cache>/enemy/...`) and what it is called.
 pub struct Kind {
@@ -85,7 +87,7 @@ pub struct Kind {
     pub dead: &'static str,
 }
 
-pub const KIND_TABLE: [Kind; 23] = [
+pub const KIND_TABLE: [Kind; 24] = [
     Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", textures: &["Kogane/kogane_s3tc.bti"], carcass: None, dead: "damage" },
     Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", textures: &["Wealthy/oogane_s3tc.bti"], carcass: None, dead: "damage" },
     Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", textures: &["Fart/babakogane_s3tc.bti"], carcass: None, dead: "damage" },
@@ -109,6 +111,7 @@ pub const KIND_TABLE: [Kind; 23] = [
     Kind { name: "Beady Long Legs", parm: "damagumo", shared: "damagumo", data: "Damagumo", textures: &[], carcass: None, dead: "dead" },
     Kind { name: "Raging Long Legs", parm: "bigfoot", shared: "bigfoot", data: "BigFoot", textures: &[], carcass: None, dead: "dead" },
     Kind { name: "Man-at-Legs", parm: "houdai", shared: "houdai", data: "Houdai", textures: &[], carcass: None, dead: "dead" },
+    Kind { name: "Giant Breadbug", parm: "oopanmodoki", shared: "oopanmodoki", data: "OoPanModoki", textures: &[], carcass: Some("OoPanModoki"), dead: "dead" },
 ];
 
 pub fn kind(kind: u8) -> Option<&'static Kind> {

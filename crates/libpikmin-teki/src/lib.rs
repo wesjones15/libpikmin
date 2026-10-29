@@ -15,6 +15,7 @@ pub mod bulborb;
 pub mod bulborb2;
 pub mod collec;
 pub mod object;
+pub mod panmodoki;
 pub mod shijimi;
 pub mod dororo;
 pub mod gashiba;
@@ -290,6 +291,7 @@ fn p2_strategy(kind: u8) -> Strategy {
         p2::BURROW_NIT => armor::strategy(),
         p2::HERMIT_CRAWMAD => jigumo::strategy(),
         p2::SPECTRALID => shijimi::strategy(),
+        p2::GIANT_BREADBUG => panmodoki::strategy(),
         p2::ORANGE_BULBORB | p2::HAIRY_BULBORB | p2::DWARF_ORANGE_BULBORB | p2::SNOW_BULBORB | p2::FIERY_BULBLAX => bulborb2::strategy(),
         _ => kogane::strategy(kind),
     }
