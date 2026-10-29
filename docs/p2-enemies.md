@@ -678,3 +678,8 @@ Read and judged impractical for Ship Repair as the decomp has them:
 Not read or started: **Hanachirashi** (13 states, flying and Pikmin-weight driven like the Jellyfloats), **Jigumo** (Hermit Crawmad, 13 states plus its nest), **ShijimiChou** (Spectralids, flock), **OoPanModoki** (Giant Breadbug, in the Breadbug's shared files),
 **LeafChappy** (Bulbmin: a Pikmin-like follower, not a hostile), and every tier 4 boss except the two Bulblaxes: **Damagumo**, **BigFoot** (Long Legs), **Houdai**, **DangoMushi**, **SnakeCrow**, **SnakeWhole**, **UmiMushi**, **BigTreasure**, **BlackMan** + **Tyre**.
 Each of those needs the same routine: read the decomp (1,000-5,000 lines), a core module and test, the roster line, a hull for a boss. They are the exact remaining list; none is blocked except by effort and the notes above.
+
+Read after that: **Damagumo (Beady Long Legs)** has only four clips (`dead`, `landing`, `wait`, `flick`): its walk is procedural leg IK (`startIKMotion`, `IKSystemMgr`), and its damage comes from the
+legs' feet (`InteractPress` on contact). The state machine itself is small (Stay, Land, Wait, Flick, Walk, Dead) but the host draws from clips, so it would slide about in its wait pose and have no feet to crush with.
+**BigFoot (Raging Long Legs)** and **Houdai (Man-at-Legs)** use the same IK system. They need a port of the IK legs (a pose solver in the core, feet as hurt/crush boxes, a draw path that poses joints from the solver)
+before the state machines are worth writing; that is the real blocker for the three Long-Legs bosses, not their state counts.
