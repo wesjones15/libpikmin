@@ -663,3 +663,18 @@ Judged impractical for Ship Repair (reason): **Imomushi (Ravenous Whiskerpillar)
 has none. Left for when fruit plants exist.
 
 Remaining: Hanachirashi, BombSarai, the Dweevils, Jigumo, ShijimiChou, MiniHoudai, then the Long Legs (Damagumo, BigFoot) and the rest of tier 4.
+
+### Remaining list and reasons (end of the 2026-10-28 session)
+
+Read and judged impractical for Ship Repair as the decomp has them:
+- **BombSarai (Careening Dirigibug)**: it flies, picks up a Bomb-rock and drops it, but it targets only Pikmin (`getAttackablePikmin`) and steers by a height-control loop; a player is no target. Could be
+  revived as "a flier that drops lit Bomb-rocks on players" once a lit-on-spawn bomb exists (kind 34 would need a start flag set by the host like the Mitite's `count[0]`).
+- **Dweevils (OtakaraBase: Fire, Caustic, Munge, Anode, Volatile)**: they walk to a `mMovePosition` that the treasure-carrying logic sets from outside (`isMovePositionSet`, the Take/Item/Bomb states carry a treasure);
+  their only own attack is an element burst when Pikmin cling (the Flick state). With the treasure objectives being another session's, a Dweevil port should wait for how they place treasures.
+- **MiniHoudai (Gatling Groink)**: a walking turret whose gun is a separate object (`MiniHoudaiShotGun`: lock-on, rotation, shell flight, a rebirth after being knocked down); a 2,700-line port of the gun and
+  its shells, not a state machine alone.
+- **Imomushi**, **Kurage/OniKurage**, **Fuefuki**, **ElecHiba/ElecBug**, **Demon/Sarai**, **Egg**: above.
+
+Not read or started: **Hanachirashi** (13 states, flying and Pikmin-weight driven like the Jellyfloats), **Jigumo** (Hermit Crawmad, 13 states plus its nest), **ShijimiChou** (Spectralids, flock), **OoPanModoki** (Giant Breadbug, in the Breadbug's shared files),
+**LeafChappy** (Bulbmin: a Pikmin-like follower, not a hostile), and every tier 4 boss except the two Bulblaxes: **Damagumo**, **BigFoot** (Long Legs), **Houdai**, **DangoMushi**, **SnakeCrow**, **SnakeWhole**, **UmiMushi**, **BigTreasure**, **BlackMan** + **Tyre**.
+Each of those needs the same routine: read the decomp (1,000-5,000 lines), a core module and test, the roster line, a hull for a boss. They are the exact remaining list; none is blocked except by effort and the notes above.
