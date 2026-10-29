@@ -34,6 +34,7 @@ pub mod shell;
 pub mod sokkuri;
 pub mod tai;
 pub mod tank;
+pub mod wtank;
 pub mod yai;
 
 use std::sync::Arc;
@@ -254,6 +255,7 @@ fn p2_strategy(kind: u8) -> Strategy {
         p2::MITITE => mitite::strategy(),
         p2::GAS_PIPE => gashiba::strategy(),
         p2::BOMB_ROCK => bomb::strategy(),
+        p2::WATERY_BLOWHOG => wtank::strategy(),
         _ => kogane::strategy(kind),
     }
 }

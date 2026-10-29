@@ -36,6 +36,8 @@ pub const MITITE: u8 = 32;
 pub const GAS_PIPE: u8 = 33;
 /// Bomb-rock (`Bomb::Obj`).
 pub const BOMB_ROCK: u8 = 34;
+/// Watery Blowhog (`Wtank::Obj`).
+pub const WATERY_BLOWHOG: u8 = 35;
 
 /// One Pikmin 2 kind: where its files are (`<cache>/enemy/...`) and what it is called.
 pub struct Kind {
@@ -55,7 +57,7 @@ pub struct Kind {
     pub dead: &'static str,
 }
 
-pub const KIND_TABLE: [Kind; 8] = [
+pub const KIND_TABLE: [Kind; 9] = [
     Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", texture: Some("Kogane/kogane_s3tc.bti"), carcass: None, dead: "damage" },
     Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", texture: Some("Wealthy/oogane_s3tc.bti"), carcass: None, dead: "damage" },
     Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", texture: Some("Fart/babakogane_s3tc.bti"), carcass: None, dead: "damage" },
@@ -64,6 +66,7 @@ pub const KIND_TABLE: [Kind; 8] = [
     Kind { name: "Mitite", parm: "tamagomushi", shared: "tamagomushi", data: "TamagoMushi", texture: None, carcass: Some("TamagoMushi"), dead: "dead" },
     Kind { name: "Gas pipe", parm: "gashiba", shared: "gashiba", data: "GasHiba", texture: None, carcass: None, dead: "wait" },
     Kind { name: "Bomb-rock", parm: "bomb", shared: "bomb", data: "Bomb", texture: None, carcass: None, dead: "hit_loop" },
+    Kind { name: "Watery Blowhog", parm: "wtank", shared: "tank", data: "Tank", texture: Some("Wtank/mizu_butadokkuri_main_s3tc.bti"), carcass: Some("Wtank"), dead: "dead" },
 ];
 
 pub fn kind(kind: u8) -> Option<&'static Kind> {
@@ -368,6 +371,8 @@ pub fn sound_id(name: &str) -> Option<u32> {
         "ENEMY_LOOSE_ITEM" => 0x5810,
         "BABY_PRESSED" => 0x580F,
         "HIBA_STOP" => 0x580C,
+        "WATERTANK_BREATH" => 0x5963,
+        "WATERTANK_SHOT" => 0x58AA,
         "BOMB_START" => 0x5808,
         "PK_SE_BOMB" => 0x5800,
         "GAS_HIBA_VOMIT" => 0x58AE,
