@@ -90,7 +90,7 @@ fn stuck(t: &Teki, w: &World) -> i32 {
 }
 
 /// `EnemyFunc::isStartFlick`.
-fn start_flick(t: &Teki, w: &World) -> bool {
+pub(crate) fn start_flick(t: &Teki, w: &World) -> bool {
     let n = stuck(t, w);
     let blow = if n < t.i(2) {
         1

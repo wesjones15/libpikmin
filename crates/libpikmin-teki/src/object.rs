@@ -252,6 +252,8 @@ pub struct Teki {
     pub in_water: bool,
     /// Where the host wants it to go (the Smoky Progg walks to its Onion).
     pub goal: Option<Vec3>,
+    /// The stepping legs of a Long Legs boss (`IKSystemMgr`), with the gait the host draws from.
+    pub legs: Option<Box<crate::legs::Legs>>,
 }
 
 /// A flame stream (`CylinderTypeCallBack`): a cylinder from the mouth, `length` long and `radius` wide.
@@ -373,6 +375,7 @@ impl Teki {
             spawn_vel: Vec3::ZERO,
             in_water: false,
             goal: None,
+            legs: None,
         }
     }
 

@@ -20,6 +20,9 @@ pub mod dororo;
 pub mod gashiba;
 pub mod hiba;
 pub mod effects;
+pub mod bigfoot;
+pub mod damagumo;
+pub mod houdai;
 pub mod ik;
 pub mod info;
 pub mod jigumo;
@@ -28,6 +31,8 @@ pub mod kabuto;
 pub mod king;
 pub mod kinoko;
 pub mod kogane;
+pub mod legs;
+pub mod longlegs;
 pub mod mar;
 pub mod miurin;
 pub mod mitite;
@@ -67,6 +72,8 @@ pub struct Tekis {
     pending: Vec<(TekiId, Event)>,
     /// Players buried now: the host sets them before each update.
     pub buried: Vec<u32>,
+    /// The Long Legs' leg rigs (`legs::LegRig`), by kind: read from the models, since the gait starts from where the model's feet are.
+    rigs: std::collections::HashMap<u8, Arc<legs::LegRig>>,
 }
 
 impl Tekis {
@@ -87,13 +94,20 @@ impl Tekis {
         }
         // Pikmin 2's enemies follow, from the cache `libsms::extract::p2_enemy` fills beside the Pikmin 1 files.
         let p2_root = assets.root.join("p2");
+        let mut rigs = std::collections::HashMap::new();
         for kind in p2::FIRST..p2::FIRST + p2::KIND_TABLE.len() as u8 {
             let info = TekiInfo::load_p2(&p2_root, kind).ok().map(Arc::new);
-            let strategy = info.as_ref().map(|_| Arc::new(p2_strategy(kind)));
+            // The Long Legs start from where their model's feet are: without the model there is no strategy for them.
+            let rig = longlegs::is_long_legs(kind).then(|| p2::kind(kind).and_then(|k| legs::LegRig::load(&p2_root, k))).flatten().map(Arc::new);
+            let usable = !longlegs::is_long_legs(kind) || rig.is_some();
+            if let Some(r) = rig {
+                rigs.insert(kind, r);
+            }
+            let strategy = info.as_ref().filter(|_| usable).map(|_| Arc::new(p2_strategy(kind)));
             infos.push(info);
             strategies.push(strategy);
         }
-        Tekis { infos, strategies, list: Vec::new(), next_id: 0, rng: Rng(0x9E37_79B9_7F4A_7C15), pending: Vec::new(), buried: Vec::new() }
+        Tekis { infos, strategies, list: Vec::new(), next_id: 0, rng: Rng(0x9E37_79B9_7F4A_7C15), pending: Vec::new(), buried: Vec::new(), rigs }
     }
 
     pub fn seed(&mut self, seed: u64) {
@@ -115,6 +129,7 @@ impl Tekis {
         let strategy = self.strategies.get(kind as usize)?.clone()?;
         self.next_id += 1;
         let mut t = Teki::new(self.next_id, info, creature, pos, yaw);
+        t.legs = self.rigs.get(&kind).map(|r| Box::new(legs::Legs::new(r.clone(), pos, yaw)));
         strategy.start(&mut t);
         self.list.push(t);
         Some(self.next_id)
@@ -232,6 +247,7 @@ impl Tekis {
             if t.kind >= p2::FIRST {
                 // `doUpdateCommon`, which every state runs.
                 kogane::update_common(t, &mut w);
+                longlegs::update_common(t, &mut w);
                 bulborb2::burn_common(t, &mut w);
             }
         }
@@ -268,6 +284,9 @@ fn p2_strategy(kind: u8) -> Strategy {
         p2::CANNON_LARVA => kabuto::strategy(),
         p2::EMPRESS_BULBLAX => queen::strategy(),
         p2::EMPEROR_BULBLAX => king::strategy(),
+        p2::BEADY_LONG_LEGS => damagumo::strategy(),
+        p2::RAGING_LONG_LEGS => bigfoot::strategy(),
+        p2::MAN_AT_LEGS => houdai::strategy(),
         p2::BURROW_NIT => armor::strategy(),
         p2::HERMIT_CRAWMAD => jigumo::strategy(),
         p2::SPECTRALID => shijimi::strategy(),

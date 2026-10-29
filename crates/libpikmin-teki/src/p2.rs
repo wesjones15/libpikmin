@@ -60,6 +60,12 @@ pub const BURROW_NIT: u8 = 44;
 pub const HERMIT_CRAWMAD: u8 = 45;
 /// Unmarked Spectralid (`ShijimiChou::Obj`).
 pub const SPECTRALID: u8 = 46;
+/// Beady Long Legs (`Damagumo::Obj`).
+pub const BEADY_LONG_LEGS: u8 = 47;
+/// Raging Long Legs (`BigFoot::Obj`).
+pub const RAGING_LONG_LEGS: u8 = 48;
+/// Man-at-Legs (`Houdai::Obj`).
+pub const MAN_AT_LEGS: u8 = 49;
 
 /// One Pikmin 2 kind: where its files are (`<cache>/enemy/...`) and what it is called.
 pub struct Kind {
@@ -79,7 +85,7 @@ pub struct Kind {
     pub dead: &'static str,
 }
 
-pub const KIND_TABLE: [Kind; 20] = [
+pub const KIND_TABLE: [Kind; 23] = [
     Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", textures: &["Kogane/kogane_s3tc.bti"], carcass: None, dead: "damage" },
     Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", textures: &["Wealthy/oogane_s3tc.bti"], carcass: None, dead: "damage" },
     Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", textures: &["Fart/babakogane_s3tc.bti"], carcass: None, dead: "damage" },
@@ -100,6 +106,9 @@ pub const KIND_TABLE: [Kind; 20] = [
     Kind { name: "Cloaking Burrow-nit", parm: "armor", shared: "armor", data: "Armor", textures: &[], carcass: Some("Armor"), dead: "dead" },
     Kind { name: "Hermit Crawmad", parm: "jigumo", shared: "jigumo", data: "Jigumo", textures: &[], carcass: Some("Jigumo"), dead: "dead" },
     Kind { name: "Unmarked Spectralid", parm: "shijimichou", shared: "shijimichou", data: "ShijimiChou", textures: &[], carcass: Some("ShijimiChou"), dead: "dead" },
+    Kind { name: "Beady Long Legs", parm: "damagumo", shared: "damagumo", data: "Damagumo", textures: &[], carcass: None, dead: "dead" },
+    Kind { name: "Raging Long Legs", parm: "bigfoot", shared: "bigfoot", data: "BigFoot", textures: &[], carcass: None, dead: "dead" },
+    Kind { name: "Man-at-Legs", parm: "houdai", shared: "houdai", data: "Houdai", textures: &[], carcass: None, dead: "dead" },
 ];
 
 pub fn kind(kind: u8) -> Option<&'static Kind> {

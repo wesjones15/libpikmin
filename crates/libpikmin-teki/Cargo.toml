@@ -7,4 +7,5 @@ publish.workspace = true
 [dependencies]
 libpikmin.workspace = true
 libpikmin-assets.workspace = true
+libsms.workspace = true
 glam.workspace = true
