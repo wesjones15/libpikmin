@@ -19,6 +19,7 @@ pub mod dororo;
 pub mod gashiba;
 pub mod hiba;
 pub mod effects;
+pub mod ik;
 pub mod info;
 pub mod kabekui;
 pub mod kabuto;
