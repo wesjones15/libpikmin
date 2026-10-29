@@ -32,6 +32,8 @@ pub const BULBORB_LARVA: u8 = 30;
 pub const SKITTER_LEAF: u8 = 31;
 /// Mitite (`TamagoMushi::Obj`).
 pub const MITITE: u8 = 32;
+/// Gas pipe (`GasHiba::Obj`).
+pub const GAS_PIPE: u8 = 33;
 
 /// One Pikmin 2 kind: where its files are (`<cache>/enemy/...`) and what it is called.
 pub struct Kind {
@@ -51,13 +53,14 @@ pub struct Kind {
     pub dead: &'static str,
 }
 
-pub const KIND_TABLE: [Kind; 6] = [
+pub const KIND_TABLE: [Kind; 7] = [
     Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", texture: Some("Kogane/kogane_s3tc.bti"), carcass: None, dead: "damage" },
     Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", texture: Some("Wealthy/oogane_s3tc.bti"), carcass: None, dead: "damage" },
     Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", texture: Some("Fart/babakogane_s3tc.bti"), carcass: None, dead: "damage" },
     Kind { name: "Bulborb Larva", parm: "baby", shared: "baby", data: "Baby", texture: None, carcass: None, dead: "dead" },
     Kind { name: "Skitter Leaf", parm: "sokkuri", shared: "sokkuri", data: "Sokkuri", texture: None, carcass: Some("Sokkuri"), dead: "dead1" },
     Kind { name: "Mitite", parm: "tamagomushi", shared: "tamagomushi", data: "TamagoMushi", texture: None, carcass: Some("TamagoMushi"), dead: "dead" },
+    Kind { name: "Gas pipe", parm: "gashiba", shared: "gashiba", data: "GasHiba", texture: None, carcass: None, dead: "wait" },
 ];
 
 pub fn kind(kind: u8) -> Option<&'static Kind> {
@@ -361,6 +364,8 @@ pub fn sound_id(name: &str) -> Option<u32> {
     Some(match name {
         "ENEMY_LOOSE_ITEM" => 0x5810,
         "BABY_PRESSED" => 0x580F,
+        "HIBA_STOP" => 0x580C,
+        "GAS_HIBA_VOMIT" => 0x58AE,
         "KOGANE_WALK" => 0x5872,
         "KOGANE_HIT" => 0x5873,
         "OOGANE_HIT" => 0x5880,

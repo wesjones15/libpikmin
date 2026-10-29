@@ -13,6 +13,7 @@ pub mod bulborb;
 pub mod collec;
 pub mod object;
 pub mod dororo;
+pub mod gashiba;
 pub mod hiba;
 pub mod effects;
 pub mod info;
@@ -250,6 +251,7 @@ fn p2_strategy(kind: u8) -> Strategy {
         p2::BULBORB_LARVA => baby::strategy(),
         p2::SKITTER_LEAF => sokkuri::strategy(),
         p2::MITITE => mitite::strategy(),
+        p2::GAS_PIPE => gashiba::strategy(),
         _ => kogane::strategy(kind),
     }
 }
