@@ -1416,6 +1416,41 @@ mod tests {
         assert!(sim.sprouts().next().is_none(), "host grants salvage seeds only after validating its receipt");
     }
 
+    /// In the race a treasure is carried to the carrier's own Dolphin, never the rival's nearer one and never an Onion,
+    /// however many treasures that Dolphin has already received (they are not fitted parts).
+    #[test]
+    fn competitive_treasures_go_only_to_the_carriers_own_ship() {
+        let mut sim = Sim::default();
+        sim.set_ship_part_competitive_delivery(true);
+        let a = sim.add_captain(Vec3::ZERO);
+        let b = sim.add_captain(Vec3::ZERO);
+        let far = sim.add_ship(Vec3::X * 300.0, Vec3::X * 280.0, Vec3::new(300.0, 60.0, 0.0));
+        let near = sim.add_ship(Vec3::X * 20.0, Vec3::X * 15.0, Vec3::new(20.0, 60.0, 0.0));
+        let onion = sim.add_onion(Vec3::Z * 80.0, &[PikiColor::Red]);
+        sim.set_ship_part_owner(far, a); sim.set_ship_part_owner(near, b); sim.set_ship_part_owner(onion, a);
+        let mut desc = PelletDesc::numbered(sim.params(), 1, PikiColor::Red, Vec3::ZERO, 0.0);
+        desc.ship_part = Some(TREASURE_PART_BASE + 9);
+        for _ in 0..2 {
+            let t = sim.spawn_pellet(desc);
+            attach(&mut sim, PikiColor::Red, t);
+            sim.pikis.last_mut().unwrap().captain = Some(a);
+            assert_eq!(sim.decide_goal(t.0 as usize, &mut FlatHost).unwrap().0, far, "my own Dolphin, not the nearer rival or my Onion");
+            let rival = sim.spawn_pellet(desc);
+            attach(&mut sim, PikiColor::Red, rival);
+            sim.pikis.last_mut().unwrap().captain = Some(b);
+            assert_eq!(sim.decide_goal(rival.0 as usize, &mut FlatHost).unwrap().0, near);
+        }
+        let mut receipts = Vec::new();
+        for _ in 0..900 {
+            sim.step(&mut FlatHost);
+            receipts.extend(sim.drain_events().into_iter().filter(|e| matches!(e, Event::ShipPartCollected { .. })));
+        }
+        assert_eq!(receipts.len(), 4, "{receipts:?}");
+        assert!(receipts.iter().all(|e| matches!(e, Event::ShipPartCollected { ship, part, .. }
+            if *part == TREASURE_PART_BASE + 9 && (*ship == far || *ship == near))));
+        assert!(sim.sprouts().next().is_none());
+    }
+
     #[test]
     fn onion_auto_pickup_never_takes_ship_parts_loose_or_carried_even_if_already_fitted() {
         for policy in 0..=3 {
