@@ -1360,3 +1360,29 @@ fn treasure_cache_completeness_crosses_the_abi() {
         assert_eq!(pik_p2_extract_treasures(none.as_ptr(), missing.as_ptr()), 1);
     }
 }
+
+#[test]
+fn treasure_models_join_the_view_table_through_the_abi() {
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
+    let p2 = assets.root.join("p2");
+    if !p2.join("treasure/config/otakara_config.txt").is_file() {
+        eprintln!("SKIP: no Pikmin 2 treasure cache");
+        return;
+    }
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    let cache = CString::new(p2.to_string_lossy().as_bytes()).unwrap();
+    let missing = CString::new(p2.join("nowhere").to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let view = pik_view_new(dir.as_ptr(), 0);
+        assert!(!view.is_null());
+        let before = pik_view_model_count(view);
+        assert_eq!(pik_view_load_treasures(view, missing.as_ptr()), -1);
+        assert_eq!(pik_view_model_count(view), before, "a failed load adds nothing");
+        let first = pik_view_load_treasures(view, cache.as_ptr());
+        assert_eq!(first as u32, before);
+        assert_eq!(pik_view_model_count(view), before + 188);
+        assert_eq!(pik_view_load_treasures(view, cache.as_ptr()), first, "again is a no-op");
+        assert_eq!(pik_view_load_treasures(view, std::ptr::null()), -1);
+        pik_view_free(view);
+    }
+}

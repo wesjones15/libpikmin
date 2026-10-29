@@ -371,6 +371,28 @@ pub unsafe extern "C" fn pik_view_load_pikmin2(view: *mut PikView, dir: *const c
     }
 }
 
+/// Loads Pikmin 2's 188 treasures from the Pikmin 2 cache `dir` ([`crate::pik_p2_extract_treasures`]), appending their models to
+/// the table (in `otakara_config.txt` order): call it before reading the table. Treasure pellets (ship-part ids from 1000, see
+/// `pik_sim_spawn_treasure`) are then drawn with them, sparkle, and make Pikmin 2's sounds on the Pikmin 2 output. Returns the
+/// first model's index, or -1 when the cache is missing (they are then drawn as plain pellets).
+/// # Safety
+/// `view` is a live handle; `dir` a NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_load_treasures(view: *mut PikView, dir: *const c_char) -> i32 {
+    if dir.is_null() { return -1; }
+    // SAFETY: as documented.
+    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+    unsafe {
+        with_view(view, -1, |v| match v.view.load_treasures(std::path::Path::new(&dir)) {
+            Ok(m) => {
+                if v.p2_dir.is_none() { v.p2_dir = Some(std::path::PathBuf::from(&dir)); }
+                m as i32
+            }
+            Err(_) => -1,
+        })
+    }
+}
+
 /// Draws the ship of Onion `onion` as Louie's Hocotate Ship (`on` 1; it loads with Louie, [`pik_view_load_louie`]) or as
 /// the Dolphin again (0). Does nothing for Onions that are not ships or when the Pikmin 2 ship files were missing.
 /// # Safety
@@ -911,6 +933,21 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
                 for &(captain, skin, voice) in &voices {
                     if skin == libpikmin_present::pianta::SKIN_PIANTA && let Some(cue) = voice.cue() {
                         sa.play_at(cue, heard_at(captain));
+                    }
+                }
+            }
+            // Treasures sound on the Pikmin 2 output (started on the first, like the enemies' sounds below).
+            let treasure_cues = v.view.take_treasure_cues();
+            if !treasure_cues.is_empty() {
+                if v.louie_audio.is_none() && !v.louie_audio_tried && v.audio.is_some() {
+                    v.louie_audio_tried = true;
+                    if let Some(dir) = v.louie_dir.clone().or_else(|| v.p2_dir.clone()) {
+                        v.louie_audio = libsms_present::audio::Pikmin2Audio::start(&dir);
+                    }
+                }
+                if let Some(la) = v.louie_audio.as_ref() {
+                    for c in &treasure_cues {
+                        la.play(c.id, Some(c.at * SOUND_SCALE), 0x5452_0000 + c.id as u64);
                     }
                 }
             }
