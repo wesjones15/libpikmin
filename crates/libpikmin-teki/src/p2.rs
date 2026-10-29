@@ -38,6 +38,8 @@ pub const GAS_PIPE: u8 = 33;
 pub const BOMB_ROCK: u8 = 34;
 /// Watery Blowhog (`Wtank::Obj`).
 pub const WATERY_BLOWHOG: u8 = 35;
+/// Armored Cannon Beetle Larva (`Kabuto::Obj`).
+pub const CANNON_LARVA: u8 = 36;
 
 /// One Pikmin 2 kind: where its files are (`<cache>/enemy/...`) and what it is called.
 pub struct Kind {
@@ -57,7 +59,7 @@ pub struct Kind {
     pub dead: &'static str,
 }
 
-pub const KIND_TABLE: [Kind; 9] = [
+pub const KIND_TABLE: [Kind; 10] = [
     Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", texture: Some("Kogane/kogane_s3tc.bti"), carcass: None, dead: "damage" },
     Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", texture: Some("Wealthy/oogane_s3tc.bti"), carcass: None, dead: "damage" },
     Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", texture: Some("Fart/babakogane_s3tc.bti"), carcass: None, dead: "damage" },
@@ -67,6 +69,7 @@ pub const KIND_TABLE: [Kind; 9] = [
     Kind { name: "Gas pipe", parm: "gashiba", shared: "gashiba", data: "GasHiba", texture: None, carcass: None, dead: "wait" },
     Kind { name: "Bomb-rock", parm: "bomb", shared: "bomb", data: "Bomb", texture: None, carcass: None, dead: "hit_loop" },
     Kind { name: "Watery Blowhog", parm: "wtank", shared: "tank", data: "Tank", texture: Some("Wtank/mizu_butadokkuri_main_s3tc.bti"), carcass: Some("Wtank"), dead: "dead" },
+    Kind { name: "Armored Cannon Beetle Larva", parm: "kabuto", shared: "kabuto", data: "Kabuto", texture: None, carcass: Some("Kabuto"), dead: "dead" },
 ];
 
 pub fn kind(kind: u8) -> Option<&'static Kind> {

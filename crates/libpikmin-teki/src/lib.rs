@@ -19,6 +19,7 @@ pub mod hiba;
 pub mod effects;
 pub mod info;
 pub mod kabekui;
+pub mod kabuto;
 pub mod kinoko;
 pub mod kogane;
 pub mod mar;
@@ -256,6 +257,7 @@ fn p2_strategy(kind: u8) -> Strategy {
         p2::GAS_PIPE => gashiba::strategy(),
         p2::BOMB_ROCK => bomb::strategy(),
         p2::WATERY_BLOWHOG => wtank::strategy(),
+        p2::CANNON_LARVA => kabuto::strategy(),
         _ => kogane::strategy(kind),
     }
 }
