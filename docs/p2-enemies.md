@@ -584,3 +584,26 @@ Verification: all `libpikmin-teki` tests, the FFI draw/run test and `build.ps1` 
 Kabuto, then tiers 3 and 4 and every boss. The disc files for all of them (bosses included) are already in the extracted cache
 (`assets/p2/enemy/data/<Name>/`), so each remaining enemy needs only its `Kind` row, strategy module, tests and roster entry. Bosses
 additionally need hull and hurtbox work in `TekiBodies`/`TekiBody` and are not started.
+
+### Update after the third pass (2026-10-28)
+
+Ported through core, tests, draw path and Ship Repair wiring (all staged by `build.ps1`, never played):
+- 32 **Mitite** (`mitite.rs`, 4 tests): hidden until found, the leader calls ten fellows (`Out::Spawn`; the host marks them with
+  `count[0] = 1` so they do not call more), wander in walks and turns, dive away after 8-10 s, a hit kills them with a nectar drop and the disc's corpse.
+- 33 **Gas pipe** (`gashiba.rs`, 2 tests): vents at once (the disc's wait time is zero), the cloud kills non-White Pikmin, not players; a fixture
+  Ship Repair places each stage after the first (`GasPipesPerStage`), unkillable like the Fire Geyser.
+- 34 **Bomb-rock** (`bomb.rs`, 1 test): lies still until hit, burns the 4.5 s fuse, blows up players and Pikmin in 90 units. Damage to other
+  enemies and chain reactions are left out. Unkillable: it goes off instead.
+- 35 **Watery Blowhog** (`wtank.rs`, 3 tests): patrol, chase turn, a growing water stream (the Fiery Blowhog's flame cylinder with a damage of its
+  own; the disc's bubble damage is zero), flick, death with the disc's corpse (7-15 carriers, 8 seeds). On the Fiery Blowhog's model with the water texture.
+
+Judged impractical for now (reason):
+- **ElecHiba, ElecBug (Anode Beetle)**: both work as pairs (an electrode with a child; bugs that find a partner and arc between them).
+  The enemy framework has no way to link two enemies' states; it needs a partner link in `Tekis` first.
+- **Demon / Sarai (Snitchbugs)**: they carry a captain off through the air (`InteractSarai`, mouth slots); a RoR2 player cannot be carried
+  by the sim. P1's Snitchbug (kind 8) already covers the creature.
+- **Egg**: only meaningful with the Empress (it hatches Larvae and Mitites); comes with the Queen if she is ported.
+
+Still to do, in survey order: Kabuto (and Rkabuto/Fkabuto), Fuefuki, then tier 3 (Bulborb family, Fiery Bulblax, Armor, Hanachirashi, Kurage,
+BombSarai, Dweevils, Imomushi, Jigumo, ShijimiChou, MiniHoudai, OoPanModoki, LeafChappy) and every boss. Of the bosses, the survey marks
+Queen/KingChappy (a big Bulborb body), OniKurage (after Kurage) and the Long Legs (Damagumo, BigFoot) as the practical ones for Ship Repair.
