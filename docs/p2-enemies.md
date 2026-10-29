@@ -647,3 +647,19 @@ Judged impractical for Ship Repair (reason), added after reading them:
 Remaining practical list, in order: Emperor Bulblax (`KingChappy`), Armor, Hanachirashi, BombSarai, the Dweevils (one `OtakaraBase` for five), Imomushi, Jigumo,
 ShijimiChou, MiniHoudai, then the Long Legs (Damagumo, BigFoot) and the rest of the survey's tier 4. Each needs its decomp read (1,000-3,000 lines),
 a core module with tests, the roster line and, for bosses, a hull choice.
+
+### Update after the sixth pass (2026-10-28)
+
+- 43 **Emperor Bulblax** (boss, `king.rs`, 4 tests): buried until a player or Pikmin is within the spawn distance, bursts out and throws off what is near, walks after the nearest
+  target (re-picking its goal, going home when it loses it or leaves its territory, then diving), bites with a long tongue (an eating window in front of the mouth hurts a player
+  and kills Pikmin, which it then swallows), stamps and shakes off what clings, roars, dies with the disc's corpse (20-30 carriers, 30 seeds). Cost 1000, Golem body, always drops a part.
+  Not ported: Bomb-rock eating and the stun after it (`Damage`, `Eat`), the tongue's map trace, leg IK and blend animation, the roar's `InteractAstonish`.
+- 44 **Cloaking Burrow-nit** (`armor.rs`, 3 tests): buried until someone is in sight, bursts out, hunts, bites (Pikmin in front of the mouth are caught and eaten), flicks, goes home and dives;
+  disc corpse (8-16 carriers). The story-mode bridge gnawing (`MoveSide`/`MoveCentre`/`MoveTop`/`Attack1`) is left out.
+- `cargo test -p libpikmin-present`: the one failure, `stings::intro_is_audible_stereo_and_reused_without_disc_banks`, is "Access is denied (os error 5)" writing a temp file
+  (the sandbox's %TEMP% rule), not my work; everything else passes.
+
+Judged impractical for Ship Repair (reason): **Imomushi (Ravenous Whiskerpillar)** - its AI goes for fruit plants (`getRandFruitsPlant`, Appear/Climb/Fall states built around them), and Ship Repair
+has none. Left for when fruit plants exist.
+
+Remaining: Hanachirashi, BombSarai, the Dweevils, Jigumo, ShijimiChou, MiniHoudai, then the Long Legs (Damagumo, BigFoot) and the rest of tier 4.
