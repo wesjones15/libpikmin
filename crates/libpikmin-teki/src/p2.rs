@@ -70,6 +70,8 @@ pub const MAN_AT_LEGS: u8 = 49;
 pub const GIANT_BREADBUG: u8 = 50;
 /// Segmented Crawbster (`DangoMushi::Obj`).
 pub const SEGMENTED_CRAWBSTER: u8 = 51;
+/// Burrowing Snagret (`SnakeCrow::Obj`).
+pub const BURROWING_SNAGRET: u8 = 52;
 
 /// One Pikmin 2 kind: where its files are (`<cache>/enemy/...`) and what it is called.
 pub struct Kind {
@@ -89,7 +91,7 @@ pub struct Kind {
     pub dead: &'static str,
 }
 
-pub const KIND_TABLE: [Kind; 25] = [
+pub const KIND_TABLE: [Kind; 26] = [
     Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", textures: &["Kogane/kogane_s3tc.bti"], carcass: None, dead: "damage" },
     Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", textures: &["Wealthy/oogane_s3tc.bti"], carcass: None, dead: "damage" },
     Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", textures: &["Fart/babakogane_s3tc.bti"], carcass: None, dead: "damage" },
@@ -115,6 +117,7 @@ pub const KIND_TABLE: [Kind; 25] = [
     Kind { name: "Man-at-Legs", parm: "houdai", shared: "houdai", data: "Houdai", textures: &[], carcass: None, dead: "dead" },
     Kind { name: "Giant Breadbug", parm: "oopanmodoki", shared: "oopanmodoki", data: "OoPanModoki", textures: &[], carcass: Some("OoPanModoki"), dead: "dead" },
     Kind { name: "Segmented Crawbster", parm: "dangomushi", shared: "dangomushi", data: "DangoMushi", textures: &[], carcass: Some("DangoMushi"), dead: "dead" },
+    Kind { name: "Burrowing Snagret", parm: "snakecrow", shared: "snakecrow", data: "SnakeCrow", textures: &[], carcass: Some("SnakeCrow"), dead: "dead" },
 ];
 
 pub fn kind(kind: u8) -> Option<&'static Kind> {
@@ -453,6 +456,11 @@ pub fn sound_id(name: &str) -> Option<u32> {
         "DANGO_FALL" => 0x597D,
         "DANGO_ROLL_GROUND" => 0x5980,
         "DANGO_ARM_GROUND" => 0x5982,
+        "SNAKE_APPEAR" => 0x582E,
+        "SNAKE_DIG" => 0x582F,
+        "SNAKE_SHOUT" => 0x5830,
+        "SNAKE_EAT" => 0x5831,
+        "SNAKE_DEAD1" => 0x5835,
         _ => return None,
     })
 }
