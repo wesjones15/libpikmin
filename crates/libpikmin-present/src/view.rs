@@ -1152,7 +1152,11 @@ impl View {
     /// Who wears which body ([`crate::pianta::SKIN_OLIMAR`] or [`crate::pianta::SKIN_PIANTA`]); anything
     /// unloaded draws Olimar.
     pub fn set_captain_skin(&mut self, captain: u32, skin: u8) {
-        self.captain_skins.insert(captain, skin);
+        if self.captain_skins.insert(captain, skin) != Some(skin)
+            && let Some(pianta) = self.pianta.as_mut()
+        {
+            pianta.reset_pose(captain);
+        }
     }
 
     /// The captains wearing Louie now.
