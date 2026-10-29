@@ -9,6 +9,7 @@
 pub mod anim;
 pub mod baby;
 pub mod beatle;
+pub mod bomb;
 pub mod bulborb;
 pub mod collec;
 pub mod object;
@@ -252,6 +253,7 @@ fn p2_strategy(kind: u8) -> Strategy {
         p2::SKITTER_LEAF => sokkuri::strategy(),
         p2::MITITE => mitite::strategy(),
         p2::GAS_PIPE => gashiba::strategy(),
+        p2::BOMB_ROCK => bomb::strategy(),
         _ => kogane::strategy(kind),
     }
 }
