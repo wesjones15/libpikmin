@@ -563,3 +563,24 @@ Done through core, tests, draw path and Ship Repair roster wiring (staged by `ro
 - Missing: JPA2 effects (none emitted), the variants' TEV konst-colour tweak, cave treasure drops, wall normal, stone/bitter state,
   Doodlebug panic (Pikmin in the gas die at once), spawn weights/costs untuned (2/1/2, 10/20/15).
 - Not started: every other enemy in the table above, and all bosses.
+
+### Update after the second pass (2026-10-28)
+
+Ported through core, tests, draw path and Ship Repair roster wiring (kinds in `libpikmin-teki::p2`):
+- 30 **Bulborb Larva** (`baby.rs`, 3 tests): hatch, chase the nearest Pikmin/player in sight (800), bite (2 damage, hits Pikmin at its mouth
+  instead of the mouth-slot swallow), dies when hurt or pressed with a 20% nectar drop. Leaves no corpse (`EB_LeaveCarcass` off).
+- 31 **Skitter Leaf** (`sokkuri.rs`, 3 tests): hidden until a player is in sight, ground/water skittering, waits, flick after
+  `ip07`+1 hits, back under its leaf when home and alone, press/death. **Leaves the disc's corpse**: `carcass_config.txt` (radius,
+  carriers, seeds, offset) is copied by the enemy extractor (marker v2) and loaded into `TekiInfo`; the dying clip is the corpse's pose;
+  the host (`TekiBodies.Died`, `TekiCorpses`) makes the pellet and draws the model on it exactly as for Pikmin 1 corpses.
+
+Corpse rule for the rest: `Kind::carcass` names the enemy's entry in `carcass_config.txt` (None where the decomp turns
+`EB_LeaveCarcass` off: Kogane family, Baby, Mitite, GasHiba, Hanachirashi, Kurage), `Kind::dead` the clip it lies in. Enemies that do leave
+one: Sokkuri, ElecBug, Tank/Wtank, Kabuto, Sarai/Demon, Fuefuki, and the bosses.
+
+Verification: all `libpikmin-teki` tests, the FFI draw/run test and `build.ps1` pass; the staged plugin is current. Never played.
+
+**Not done (in survey order):** Wtank (+ P2 Tank, 7 states, leaves a corpse), Mitite, GasHiba, ElecHiba, Bomb-rock, Egg, ElecBug, Demon (+ P2 Sarai),
+Kabuto, then tiers 3 and 4 and every boss. The disc files for all of them (bosses included) are already in the extracted cache
+(`assets/p2/enemy/data/<Name>/`), so each remaining enemy needs only its `Kind` row, strategy module, tests and roster entry. Bosses
+additionally need hull and hurtbox work in `TekiBodies`/`TekiBody` and are not started.
