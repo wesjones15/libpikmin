@@ -213,6 +213,8 @@ pub struct LegsView {
     pub face: f32,
     pub feet: [Vec3; LEGS],
     pub bend: [f32; LEGS],
+    /// Where the Man-at-Legs' gun points (the world direction of its barrel) while it is out of its rest.
+    pub gun: Option<Vec3>,
 }
 
 /// A Y rotation by `yaw` (the way `Teki::forward` faces at `yaw`), applied to a model-space vector.
@@ -340,6 +342,7 @@ impl Legs {
             face: self.face,
             feet: std::array::from_fn(|i| self.legs[i].foot),
             bend: std::array::from_fn(|i| self.legs[i].bend),
+            gun: self.gun.rotating.then(|| self.gun.dir()),
         }
     }
 

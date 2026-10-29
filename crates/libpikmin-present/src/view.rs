@@ -456,6 +456,10 @@ pub struct View {
     /// Pikmin 2's enemy kinds that loaded ([`View::load_p2_tekis`]).
     p2_tekis: Vec<std::sync::Arc<crate::p2enemy::P2Teki>>,
     teki_input: Vec<crate::teki::TekiInstance>,
+    /// The Long Legs' legs as the core has them, by the instance id (`View::set_teki_legs`).
+    teki_legs: HashMap<u32, libpikmin_teki::legs::LegsView>,
+    /// The next body pushed keeps its place in the model's space instead of standing on the ground (a body whose legs set its height).
+    no_lift: bool,
     /// Each enemy's motion and frame at the last update, to find the sound keys it passed.
     teki_played: HashMap<u32, (u32, f32)>,
     /// Sounds from the enemies' animations this update: (creature id, table's first `SE_*`, index), and
@@ -704,6 +708,8 @@ impl View {
             tekis,
             p2_tekis: Vec::new(),
             teki_input: Vec::new(),
+            teki_legs: HashMap::new(),
+            no_lift: false,
             teki_played: HashMap::new(),
             teki_sounds: Vec::new(),
             teki_positions: Vec::new(),
@@ -929,6 +935,13 @@ impl View {
     pub fn set_tekis(&mut self, list: &[crate::teki::TekiInstance]) {
         self.teki_input.clear();
         self.teki_input.extend_from_slice(list);
+    }
+
+    /// The Long Legs' legs (`libpikmin_teki::Teki::legs`, `Legs::view`) for the instances of [`View::set_tekis`], by instance id, replacing
+    /// any given before: the body is drawn at their trace point facing their way with its legs folded onto their feet.
+    pub fn set_teki_legs(&mut self, list: &[(u32, libpikmin_teki::legs::LegsView)]) {
+        self.teki_legs.clear();
+        self.teki_legs.extend(list.iter().copied());
     }
 
     /// Plays `EffectMgr`'s effect `id` (`EFF_*`, [`libpikmin_assets::effect_table`]) once at `pos`: the
@@ -1191,7 +1204,7 @@ impl View {
         rot: Quat, root: Mat4, joints: &[Mat4], alpha: f32, flags: u8) {
         let pose = libsms_assets::Pose::new(&m.bmd, root * Mat4::from_scale(Vec3::splat(scale)), joints);
         let low = m.batches.iter().flat_map(|b| &b.vertices).map(|v| pose.skin(v).0.y).fold(f32::INFINITY, f32::min);
-        let low = if low.is_finite() { low } else { 0.0 };
+        let low = if low.is_finite() && !std::mem::take(&mut self.no_lift) { low } else { 0.0 };
         let first_vertex = self.positions.len() as u32;
         let first_color = self.colors.len() as u32;
         for (bi, b) in m.batches.iter().enumerate() {
@@ -1928,12 +1941,22 @@ impl View {
                 heard.insert(t.id);
                 self.teki_positions.push((cid, t.pos));
                 let bind = p2.body.bind_world();
-                let joints = p2.clip(t.motion)
+                let mut joints = p2.clip(t.motion)
                     .and_then(|c| p2.body.clip_frames(c).and_then(|n| p2.body.pose(c, t.frame.clamp(0.0, (n - 1.0).max(0.0)))))
                     .unwrap_or(bind);
+                // A Long Legs boss stands on its own feet: its legs fold onto them, it is drawn where its legs put it, and its height
+                // is theirs (not the lowest vertex's).
+                let (mut at, mut yaw) = (t.pos, t.yaw);
+                if p2.legs.is_some() {
+                    self.no_lift = true;
+                    if let Some(lv) = self.teki_legs.get(&t.id).filter(|lv| lv.active) {
+                        p2.fold_legs(&mut joints, lv);
+                        (at, yaw) = (lv.trace, lv.face);
+                    }
+                }
                 let flags = if t.flash > 0.0 { flags::FLASH } else { 0 };
                 let k = key(kinds::TEKI, t.id as u64);
-                self.push_body(&p2.body.model, p2.model, p2.tex_base, scale, kinds::TEKI, k, t.pos, Quat::from_rotation_y(t.yaw),
+                self.push_body(&p2.body.model, p2.model, p2.tex_base, scale, kinds::TEKI, k, at, Quat::from_rotation_y(yaw),
                     Mat4::IDENTITY, &joints, t.alpha.clamp(0.0, 1.0), flags);
                 continue;
             }
