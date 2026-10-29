@@ -683,3 +683,30 @@ Read after that: **Damagumo (Beady Long Legs)** has only four clips (`dead`, `la
 legs' feet (`InteractPress` on contact). The state machine itself is small (Stay, Land, Wait, Flick, Walk, Dead) but the host draws from clips, so it would slide about in its wait pose and have no feet to crush with.
 **BigFoot (Raging Long Legs)** and **Houdai (Man-at-Legs)** use the same IK system. They need a port of the IK legs (a pose solver in the core, feet as hurt/crush boxes, a draw path that poses joints from the solver)
 before the state machines are worth writing; that is the real blocker for the three Long-Legs bosses, not their state counts.
+
+### Update after the seventh pass (2026-10-28)
+
+- 45 **Hermit Crawmad** (`jigumo.rs`, 5 tests): lives in a hole (`Appear` waits underground, held on its first clip frame, until someone is in its territory), hovers in the hole's mouth (`Wait`),
+  turns to face what it saw (`Search`), lunges (`Attack`, or the quick `SAttack` at its feet) and bites; what it catches it swallows into its one mouth slot, backs home with it (`Carry`: slowed by
+  Pikmin clinging, pausing now and then) and eats it as it dives (`Eat`); a miss turns about and walks home at the disc's slow return speed (`Miss`, `Return`). Only while it carries or returns is it open
+  to blows (`INVINCIBLE` clears), `Flick` shakes off the Pikmin clinging. Scale is one of five between the disc's 1.0 and 2.0. Disc corpse (5-8 carriers). Not ported: the hole model (`Nest`/`JigumoHouse`), the head-versus-body
+  hurt rule, the zig-zag of the walk home, the wall climbing and the unstick nudge, the bubble and smoke effects. **Host caveat that applies to every `INVINCIBLE` P2 kind**: the RoR2 body keeps taking the
+  players' damage whatever the core's state, because the host feeds health lost to the core as `Event::Pressed`; the core only decides how the enemy reacts (the Kogane family use `Hazard` for real invulnerability).
+- 46 **Unmarked Spectralid** (`shijimi.rs`, 4 tests): hovers at 70 over its place, bobbing on its pitch phase and ambling between points in its territory; takes off when anyone is within 150; blows do nothing; a Pikmin
+  that lands on it brings it down (`Fall`: it sways to the ground) and it dies leaving nectar at the disc's rate and its 1-carrier carcass. The roster entry is `Hazard` (endless RoR2 health) so only the Pikmin kill it.
+  Not ported: the flock and its leader (`mGroupLeader`, followers tracing the leader), settling on a dying Bulblax (`Rest`), flying off when approached (`Leave`: a departing enemy would leave a corpse), the red and purple
+  kinds' sprays.
+- 50 **Giant Breadbug** (`panmodoki.rs`, 4 tests): comes up from its mound (`Appear`), ambles (`Walk`), goes for the nearest pellet it can pull from the Pikmin on it (`Stick`: not a ship part or treasure, within the search range
+  and cone), backs home with it in its jaws (`Back`, `CarryEnd`) and eats it underground, healing, for the hide time (`Hide`). A blow (or a thrown Purple Pikmin) makes it let go and costs 100 (`Damage`). Life 2000, cost 300.
+  Not ported: the route graph (it walks straight), the tug of war beyond letting go when the Pikmin outnumber its strength (`Pulled`), the Onion/ship suction (`Sucked`), holding treasures in its mound, throwing
+  up what it ate when it dies (`throwUpEatItem`), the mound model. Its roster line waits in the working tree until the Long Legs' lines (47-49) are committed, so the kind numbers stay contiguous.
+
+Judged impractical for Ship Repair (reason): **Hanachirashi (Withering Blowhog)** - it targets only Pikmin (`getSearchedPikmin`, `isPikmin`), its Fall/Land/Ground/TakeOff cycle follows how many Pikmin hang
+on it like the Jellyfloats', and its attack is a wind that carries Pikmin off; a player is never a target. Left with Kurage for when Pikmin-weight mechanics for fliers exist.
+
+Remaining after this pass: the Dweevils (see the reading below), then tier 4: DangoMushi, SnakeCrow, SnakeWhole, UmiMushi, BigTreasure, BlackMan + Tyre; the Long Legs are the `p2-longlegs` session's.
+
+**Dweevils, read**: `OtakaraBase` is a thief: it walks to the nearest loose pellet (`getNearestTreasure`, any pickable pellet in its territory), takes it (`Take`) and runs from the nearest Pikmin or player with it
+(`Item*` states); while it carries, blows only wear the treasure down (`damageTreasure`) until it drops it; shaken (`isStartFlick`) it charges and bursts with its element (`attackTarget` -> the subclass's `interactCreature`).
+Ship Repair places treasures as native sim pellets (`pik_sim_spawn_treasure`, `ShipRepairSession.Treasure.cs`) and scores, tracks and rescues them itself, so a Dweevil that picks one up would walk it off the map
+the scoring code expects. A port that never takes treasures is possible (a fleeing creature with an element burst), but it is most of what a Dweevil is, so it waits for the p2-treasures session to say whether a thief may touch them.
