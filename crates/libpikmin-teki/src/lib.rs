@@ -28,6 +28,7 @@ pub mod palm;
 pub mod otimoti;
 pub mod p2;
 pub mod shell;
+pub mod sokkuri;
 pub mod tai;
 pub mod tank;
 pub mod yai;
@@ -246,6 +247,7 @@ impl Tekis {
 fn p2_strategy(kind: u8) -> Strategy {
     match kind {
         p2::BULBORB_LARVA => baby::strategy(),
+        p2::SKITTER_LEAF => sokkuri::strategy(),
         _ => kogane::strategy(kind),
     }
 }
