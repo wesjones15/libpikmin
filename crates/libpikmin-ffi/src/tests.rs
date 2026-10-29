@@ -1386,3 +1386,60 @@ fn treasure_models_join_the_view_table_through_the_abi() {
         pik_view_free(view);
     }
 }
+
+#[test]
+fn a_long_legs_boss_stands_on_its_feet_and_is_drawn_with_folded_legs_through_the_abi() {
+    use crate::teki_ai::*;
+    let assets = libpikmin_assets::Assets::discover(None);
+    let Some(assets) = assets.filter(|a| libpikmin_teki::p2::is_available(&a.root.join("p2"), libpikmin_teki::p2::BEADY_LONG_LEGS)) else {
+        eprintln!("SKIP: the Pikmin 2 enemy cache is not extracted");
+        return;
+    };
+    assert_eq!(pik_legs_size(), 100, "ror2-olimar's Native.Legs mirrors this");
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    let kind = libpikmin_teki::p2::BEADY_LONG_LEGS as u32;
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        crate::view::pik_view_set_teki_models(1);
+        let view = pik_view_new(dir.as_ptr(), 0);
+        crate::view::pik_view_set_teki_models(0);
+        let sim = pik_sim_new(dir.as_ptr(), 1);
+        let t = pik_tekis_new(dir.as_ptr(), 3);
+        assert_eq!(pik_tekis_has_strategy(t, kind), 1);
+        let at = PikVec3::default();
+        let id = pik_tekis_spawn(t, kind, 4242, &at, 0.0) as u32;
+        let navi = PikNavi { id: 1, pos: PikVec3 { x: 0.0, y: 0.0, z: 300.0 }, size: 10.0, alive: 1, buried: 0, _pad: [0; 2] };
+        let mut legs = PikLegs::default();
+        // Standing and walking after a few seconds.
+        for _ in 0..600 {
+            crate::teki_ai::pik_tekis_set_ground(t, id, 0.0, 0);
+            pik_tekis_update(t, sim, &navi, 1, 1);
+        }
+        assert_eq!(pik_tekis_legs(t, id, &mut legs), 1);
+        assert_eq!(legs.flags & 1, 1, "its legs stand on their own feet");
+        assert!(legs.feet.iter().all(|f| f.y >= -0.01 && f.y < 150.0));
+        // Drawn: once from its clip alone, once with the legs folded onto the feet: the vertices differ.
+        let frame = PikViewFrame { dt: 1.0 / 30.0, forward: PikVec3 { x: 0.0, y: 0.0, z: 1.0 }, up: PikVec3 { x: 0.0, y: 1.0, z: 0.0 }, listener: -1, ..Default::default() };
+        let mut st = PikTekiState::default();
+        assert_eq!(pik_tekis_state(t, id, &mut st), 1);
+        let inst = crate::view::PikTekiInstance { id: 9, kind, pos: st.pos, yaw: st.yaw, motion: st.motion, frame: st.frame, scale: 1.0, alpha: 1.0, ..Default::default() };
+        let mut verts = Vec::new();
+        for folded in [false, true] {
+            crate::view::pik_view_set_tekis(view, &inst, 1);
+            let mut l = legs;
+            l.id = 9;
+            crate::view::pik_view_set_teki_legs(view, if folded { &l } else { std::ptr::null() }, folded as u32);
+            pik_view_update(view, sim, &frame);
+            let n = pik_view_draws(view, std::ptr::null_mut(), 0);
+            let mut draws = vec![PikDraw::default(); n as usize];
+            pik_view_draws(view, draws.as_mut_ptr(), n);
+            let d = draws.iter().find(|d| d.kind == 12).expect("the boss is drawn");
+            verts.push((d.first_vertex, d.pos.x, d.pos.y, d.pos.z));
+        }
+        // Folded, it is drawn at the legs' trace point rather than where the instance said.
+        assert!((verts[1].1 - legs.trace.x).abs() < 1e-3 && (verts[1].3 - legs.trace.z).abs() < 1e-3, "{verts:?}");
+        pik_tekis_free(t);
+        pik_sim_free(sim);
+        pik_view_free(view);
+    }
+}

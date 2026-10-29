@@ -382,3 +382,47 @@ pub unsafe extern "C" fn pik_tekis_state(t: *const PikTekis, id: u32, out: *mut 
     };
     1
 }
+
+/// A Long Legs boss's legs as the view draws them (`libpikmin_teki::legs::LegsView`): the body is drawn at `trace`
+/// facing `face` with its legs folded onto `feet` (world places). `flags`: bit 0 the legs stand on their own feet (before
+/// that the body plays its clip alone), 1 the clip is blended with the legs (the flick), 2 `gun` is where the gun points.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PikLegs {
+    /// The enemy's id for [`pik_tekis_legs`]; the host sets it to the draw instance's id for `pik_view_set_teki_legs`.
+    pub id: u32,
+    pub flags: u32,
+    pub trace: PikVec3,
+    pub face: f32,
+    pub feet: [PikVec3; 4],
+    pub bend: [f32; 4],
+    pub gun: PikVec3,
+}
+
+/// The size of [`PikLegs`], for hosts to check their mirror.
+#[unsafe(no_mangle)]
+pub extern "C" fn pik_legs_size() -> u32 {
+    std::mem::size_of::<PikLegs>() as u32
+}
+
+/// An enemy's legs (a Long Legs boss: Beady Long Legs, Raging Long Legs, Man-at-Legs); 0 if it has none.
+///
+/// # Safety
+/// `t` from [`pik_tekis_new`]; `out` writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_tekis_legs(t: *const PikTekis, id: u32, out: *mut PikLegs) -> u8 {
+    // SAFETY: as documented.
+    let (Some(t), false) = (unsafe { t.as_ref() }, out.is_null()) else { return 0 };
+    let Some(l) = t.tekis.get(id).and_then(|e| e.legs.as_ref()) else { return 0 };
+    let v = l.view();
+    let mut r = PikLegs { id, trace: v.trace.into(), face: v.face, ..Default::default() };
+    r.flags = v.active as u32 | (v.blend as u32) << 1 | (v.gun.is_some() as u32) << 2;
+    for i in 0..4 {
+        r.feet[i] = v.feet[i].into();
+        r.bend[i] = v.bend[i];
+    }
+    r.gun = v.gun.unwrap_or(Vec3::ZERO).into();
+    // SAFETY: as documented.
+    unsafe { out.write(r) };
+    1
+}

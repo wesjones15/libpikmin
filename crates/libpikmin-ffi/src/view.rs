@@ -1494,3 +1494,35 @@ pub unsafe extern "C" fn pik_view_spawn_effect(view: *mut PikView, id: u32, pos:
     // SAFETY: as documented.
     unsafe { with_view(view, 0, |v| v.view.spawn_effect(id as usize, at) as u8) }
 }
+
+/// The Long Legs' legs ([`crate::teki_ai::pik_tekis_legs`], with `id` set to the draw instance's) for the instances of
+/// [`pik_view_set_tekis`], replacing any given before: each is drawn at its trace point with its legs folded onto its feet.
+///
+/// # Safety
+/// `view` from [`pik_view_new`]; `list` readable for `count`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_teki_legs(view: *mut PikView, list: *const crate::teki_ai::PikLegs, count: u32) {
+    // SAFETY: as documented.
+    unsafe {
+        with_view(view, (), |v| {
+            let src = if list.is_null() || count == 0 { &[][..] } else { std::slice::from_raw_parts(list, count as usize) };
+            let legs: Vec<_> = src
+                .iter()
+                .map(|l| {
+                    let feet = std::array::from_fn(|i| glam::Vec3::from(l.feet[i]));
+                    let view = libpikmin_teki::legs::LegsView {
+                        active: l.flags & 1 != 0,
+                        blend: l.flags & 2 != 0,
+                        trace: l.trace.into(),
+                        face: l.face,
+                        feet,
+                        bend: l.bend,
+                        gun: (l.flags & 4 != 0).then(|| l.gun.into()),
+                    };
+                    (l.id, view)
+                })
+                .collect();
+            v.view.set_teki_legs(&legs);
+        })
+    }
+}
