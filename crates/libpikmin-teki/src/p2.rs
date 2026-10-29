@@ -72,6 +72,8 @@ pub const GIANT_BREADBUG: u8 = 50;
 pub const SEGMENTED_CRAWBSTER: u8 = 51;
 /// Burrowing Snagret (`SnakeCrow::Obj`).
 pub const BURROWING_SNAGRET: u8 = 52;
+/// Pileated Snagret (`SnakeWhole::Obj`).
+pub const PILEATED_SNAGRET: u8 = 53;
 
 /// One Pikmin 2 kind: where its files are (`<cache>/enemy/...`) and what it is called.
 pub struct Kind {
@@ -91,7 +93,7 @@ pub struct Kind {
     pub dead: &'static str,
 }
 
-pub const KIND_TABLE: [Kind; 26] = [
+pub const KIND_TABLE: [Kind; 27] = [
     Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", textures: &["Kogane/kogane_s3tc.bti"], carcass: None, dead: "damage" },
     Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", textures: &["Wealthy/oogane_s3tc.bti"], carcass: None, dead: "damage" },
     Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", textures: &["Fart/babakogane_s3tc.bti"], carcass: None, dead: "damage" },
@@ -118,6 +120,7 @@ pub const KIND_TABLE: [Kind; 26] = [
     Kind { name: "Giant Breadbug", parm: "oopanmodoki", shared: "oopanmodoki", data: "OoPanModoki", textures: &[], carcass: Some("OoPanModoki"), dead: "dead" },
     Kind { name: "Segmented Crawbster", parm: "dangomushi", shared: "dangomushi", data: "DangoMushi", textures: &[], carcass: Some("DangoMushi"), dead: "dead" },
     Kind { name: "Burrowing Snagret", parm: "snakecrow", shared: "snakecrow", data: "SnakeCrow", textures: &[], carcass: Some("SnakeCrow"), dead: "dead" },
+    Kind { name: "Pileated Snagret", parm: "snakewhole", shared: "snakewhole", data: "SnakeWhole", textures: &[], carcass: Some("SnakeWhole"), dead: "dead" },
 ];
 
 pub fn kind(kind: u8) -> Option<&'static Kind> {
@@ -461,6 +464,7 @@ pub fn sound_id(name: &str) -> Option<u32> {
         "SNAKE_SHOUT" => 0x5830,
         "SNAKE_EAT" => 0x5831,
         "SNAKE_DEAD1" => 0x5835,
+        "SNAKEWHOLE_JUMP" => 0x5900,
         _ => return None,
     })
 }

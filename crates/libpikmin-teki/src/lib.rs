@@ -300,6 +300,7 @@ fn p2_strategy(kind: u8) -> Strategy {
         p2::GIANT_BREADBUG => panmodoki::strategy(),
         p2::SEGMENTED_CRAWBSTER => dango::strategy(),
         p2::BURROWING_SNAGRET => snagret::strategy(),
+        p2::PILEATED_SNAGRET => snagret::whole(),
         p2::ORANGE_BULBORB | p2::HAIRY_BULBORB | p2::DWARF_ORANGE_BULBORB | p2::SNOW_BULBORB | p2::FIERY_BULBLAX => bulborb2::strategy(),
         _ => kogane::strategy(kind),
     }
