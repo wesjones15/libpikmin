@@ -7,6 +7,7 @@
 //! damage in with [`Tekis::damage`] and the real position back with [`Tekis::set_position`].
 
 pub mod anim;
+pub mod armor;
 pub mod baby;
 pub mod beatle;
 pub mod bomb;
@@ -264,6 +265,7 @@ fn p2_strategy(kind: u8) -> Strategy {
         p2::CANNON_LARVA => kabuto::strategy(),
         p2::EMPRESS_BULBLAX => queen::strategy(),
         p2::EMPEROR_BULBLAX => king::strategy(),
+        p2::BURROW_NIT => armor::strategy(),
         p2::ORANGE_BULBORB | p2::HAIRY_BULBORB | p2::DWARF_ORANGE_BULBORB | p2::SNOW_BULBORB | p2::FIERY_BULBLAX => bulborb2::strategy(),
         _ => kogane::strategy(kind),
     }

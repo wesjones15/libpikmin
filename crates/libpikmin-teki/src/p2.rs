@@ -54,6 +54,8 @@ pub const FIERY_BULBLAX: u8 = 41;
 pub const EMPRESS_BULBLAX: u8 = 42;
 /// Emperor Bulblax (`KingChappy::Obj`).
 pub const EMPEROR_BULBLAX: u8 = 43;
+/// Cloaking Burrow-nit (`Armor::Obj`).
+pub const BURROW_NIT: u8 = 44;
 
 /// One Pikmin 2 kind: where its files are (`<cache>/enemy/...`) and what it is called.
 pub struct Kind {
@@ -73,7 +75,7 @@ pub struct Kind {
     pub dead: &'static str,
 }
 
-pub const KIND_TABLE: [Kind; 17] = [
+pub const KIND_TABLE: [Kind; 18] = [
     Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", textures: &["Kogane/kogane_s3tc.bti"], carcass: None, dead: "damage" },
     Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", textures: &["Wealthy/oogane_s3tc.bti"], carcass: None, dead: "damage" },
     Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", textures: &["Fart/babakogane_s3tc.bti"], carcass: None, dead: "damage" },
@@ -91,6 +93,7 @@ pub const KIND_TABLE: [Kind; 17] = [
     Kind { name: "Fiery Bulblax", parm: "firechappy", shared: "firechappy", data: "FireChappy", textures: &[], carcass: Some("FireChappy"), dead: "dead" },
     Kind { name: "Empress Bulblax", parm: "queen", shared: "queen", data: "Queen", textures: &[], carcass: Some("Queen"), dead: "dead" },
     Kind { name: "Emperor Bulblax", parm: "kingchappy", shared: "kingchappy", data: "KingChappy", textures: &[], carcass: Some("KingChappy"), dead: "dead" },
+    Kind { name: "Cloaking Burrow-nit", parm: "armor", shared: "armor", data: "Armor", textures: &[], carcass: Some("Armor"), dead: "dead" },
 ];
 
 pub fn kind(kind: u8) -> Option<&'static Kind> {
