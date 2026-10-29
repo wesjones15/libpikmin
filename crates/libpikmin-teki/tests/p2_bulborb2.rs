@@ -118,3 +118,28 @@ fn a_dwarf_stands_until_it_sees_someone_and_every_kind_dies_with_the_notice() {
     }
     let _ = (DEAD, ATTACK);
 }
+
+#[test]
+fn the_fiery_bulblax_burns_what_touches_it_until_it_is_put_out() {
+    use libpikmin::PikiColor;
+    use libpikmin_teki::p2::FIERY_BULBLAX;
+    let Some(a) = assets() else { eprintln!("SKIP: Pikmin 2 enemy files are not extracted"); return };
+    if !p2::is_available(&a.root.join("p2"), FIERY_BULBLAX) {
+        eprintln!("SKIP: no Fiery Bulblax files");
+        return;
+    }
+    let mut rig = Rig::new(&a, FIERY_BULBLAX, Vec3::new(0.0, 0.0, 30.0));
+    assert_eq!(rig.tekis.info(FIERY_BULBLAX).unwrap().life, 1400.0);
+    let piki = rig.sim.spawn_piki(PikiColor::Red, Vec3::new(20.0, 0.0, 0.0)).unwrap();
+    rig.run_until(3.0, |_| false);
+    assert!(rig.outs.iter().any(|o| matches!(o, Out::HitNavi { knock, .. } if *knock < 0.0)), "the player at its side is burned");
+    assert!(rig.sim.piki(piki).health < Params::default().piki.piki_max_health, "and so is a Pikmin");
+    // In water it is put out for good.
+    rig.outs.clear();
+    rig.tekis.set_ground(rig.id, 0.0, true);
+    let navi = rig.player;
+    rig.tekis.update(&mut rig.sim, &FlatHost, &[navi], 1.0 / 30.0);
+    rig.outs.clear();
+    rig.run_until(2.0, |_| false);
+    assert!(!rig.outs.iter().any(|o| matches!(o, Out::HitNavi { knock, .. } if *knock < 0.0)));
+}

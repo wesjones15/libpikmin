@@ -68,6 +68,7 @@ fn it_loads_the_discs_numbers_and_has_no_corpse() {
     let tekis = Tekis::load(&a);
     let info = tekis.info(BULBORB_LARVA).expect("loaded");
     assert_eq!(info.life, 5.0);
+    assert_eq!(info.scale, 1.0, "no mScale of its own: drawn at the model size");
     assert_eq!((info.run_speed, info.visible_range), (40.0, 800.0));
     assert_eq!(info.clips, vec!["dead", "deadpress", "move", "attack", "attackfail", "born"]);
     assert_eq!(info.floats[p2::fp::own::BASE + 11], 0.2, "nectar chance");

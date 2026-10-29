@@ -538,3 +538,26 @@ pub fn strategy() -> Strategy {
     );
     s
 }
+
+/// `FireChappy::Obj::doUpdateCommon`/`collisionCallback`: the Fiery Bulblax's body burns whatever touches it while it is alight, which
+/// water puts out for good (`updateFireState`). Pikmin around its body take the fire, players are burned (`HitNavi` with a negative
+/// knock: the host's damage over time).
+pub fn burn_common(t: &mut Teki, w: &mut World) {
+    if t.kind != crate::p2::FIERY_BULBLAX {
+        return;
+    }
+    if t.in_water {
+        t.flags[3] = true;
+    }
+    if t.flags[3] || t.state == DEAD {
+        return;
+    }
+    let reach = t.coll_radius + 10.0;
+    let damage = t.f(fp::ATTACK_DAMAGE);
+    w.sim.attack_pikis_in_sphere(t.pos, reach, damage * w.dt);
+    for n in w.navis.iter().filter(|n| n.alive) {
+        if dist_xz(t.pos, n.pos) - n.size <= reach && (n.pos.y - t.pos.y).abs() < reach {
+            w.out.push(Out::HitNavi { teki: t.id, navi: n.id, damage, from: t.pos, knock: -1.0 });
+        }
+    }
+}

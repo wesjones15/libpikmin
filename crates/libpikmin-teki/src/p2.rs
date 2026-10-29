@@ -48,6 +48,8 @@ pub const HAIRY_BULBORB: u8 = 38;
 pub const DWARF_ORANGE_BULBORB: u8 = 39;
 /// Snow Bulborb (`YellowKochappy::Obj`).
 pub const SNOW_BULBORB: u8 = 40;
+/// Fiery Bulblax (`FireChappy::Obj`).
+pub const FIERY_BULBLAX: u8 = 41;
 
 /// One Pikmin 2 kind: where its files are (`<cache>/enemy/...`) and what it is called.
 pub struct Kind {
@@ -67,7 +69,7 @@ pub struct Kind {
     pub dead: &'static str,
 }
 
-pub const KIND_TABLE: [Kind; 14] = [
+pub const KIND_TABLE: [Kind; 15] = [
     Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", textures: &["Kogane/kogane_s3tc.bti"], carcass: None, dead: "damage" },
     Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", textures: &["Wealthy/oogane_s3tc.bti"], carcass: None, dead: "damage" },
     Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", textures: &["Fart/babakogane_s3tc.bti"], carcass: None, dead: "damage" },
@@ -82,6 +84,7 @@ pub const KIND_TABLE: [Kind; 14] = [
     Kind { name: "Hairy Bulborb", parm: "yellowchappy", shared: "chappy", data: "Chappy", textures: &["YellowChappy/swallow_565.2.bti", "YellowChappy/moyou_565.2.bti"], carcass: Some("YellowChappy"), dead: "dead" },
     Kind { name: "Dwarf Orange Bulborb", parm: "bluekochappy", shared: "kochappy", data: "Kochappy", textures: &["BlueKochappy/kochappy_body_s3tc.3.bti"], carcass: Some("BlueKochappy"), dead: "dead" },
     Kind { name: "Snow Bulborb", parm: "yellowkochappy", shared: "kochappy", data: "Kochappy", textures: &["YellowKochappy/kochappy_body_s3tc.2.bti"], carcass: Some("YellowKochappy"), dead: "dead" },
+    Kind { name: "Fiery Bulblax", parm: "firechappy", shared: "firechappy", data: "FireChappy", textures: &[], carcass: Some("FireChappy"), dead: "dead" },
 ];
 
 pub fn kind(kind: u8) -> Option<&'static Kind> {
@@ -298,7 +301,8 @@ impl TekiInfo {
                 }
             }
         }
-        let scale = floats[fp::own::SCALE].max(0.01);
+        // Only some enemies have a `mScale` of their own (the Kogane family); the rest are drawn at the model's size.
+        let scale = if floats[fp::own::SCALE] > 0.0 { floats[fp::own::SCALE] } else { 1.0 };
         // The first collision sphere is the whole body (`enemyColl.txt`: child count, then the radius).
         let shared = root.join("enemy/parm").join(k.shared);
         let radius = read_text(&shared.join("enemycoll.txt"))
