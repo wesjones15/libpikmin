@@ -30,6 +30,8 @@ pub const DOODLEBUG: u8 = 29;
 pub const BULBORB_LARVA: u8 = 30;
 /// Skitter Leaf (`Sokkuri::Obj`).
 pub const SKITTER_LEAF: u8 = 31;
+/// Mitite (`TamagoMushi::Obj`).
+pub const MITITE: u8 = 32;
 
 /// One Pikmin 2 kind: where its files are (`<cache>/enemy/...`) and what it is called.
 pub struct Kind {
@@ -49,12 +51,13 @@ pub struct Kind {
     pub dead: &'static str,
 }
 
-pub const KIND_TABLE: [Kind; 5] = [
+pub const KIND_TABLE: [Kind; 6] = [
     Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", texture: Some("Kogane/kogane_s3tc.bti"), carcass: None, dead: "damage" },
     Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", texture: Some("Wealthy/oogane_s3tc.bti"), carcass: None, dead: "damage" },
     Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", texture: Some("Fart/babakogane_s3tc.bti"), carcass: None, dead: "damage" },
     Kind { name: "Bulborb Larva", parm: "baby", shared: "baby", data: "Baby", texture: None, carcass: None, dead: "dead" },
     Kind { name: "Skitter Leaf", parm: "sokkuri", shared: "sokkuri", data: "Sokkuri", texture: None, carcass: Some("Sokkuri"), dead: "dead1" },
+    Kind { name: "Mitite", parm: "tamagomushi", shared: "tamagomushi", data: "TamagoMushi", texture: None, carcass: Some("TamagoMushi"), dead: "dead" },
 ];
 
 pub fn kind(kind: u8) -> Option<&'static Kind> {

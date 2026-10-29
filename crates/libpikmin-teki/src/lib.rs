@@ -21,6 +21,7 @@ pub mod kinoko;
 pub mod kogane;
 pub mod mar;
 pub mod miurin;
+pub mod mitite;
 pub mod mizinko;
 pub mod napkid;
 pub mod otama;
@@ -248,6 +249,7 @@ fn p2_strategy(kind: u8) -> Strategy {
     match kind {
         p2::BULBORB_LARVA => baby::strategy(),
         p2::SKITTER_LEAF => sokkuri::strategy(),
+        p2::MITITE => mitite::strategy(),
         _ => kogane::strategy(kind),
     }
 }
