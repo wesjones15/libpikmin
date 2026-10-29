@@ -668,6 +668,11 @@ impl Sim {
         p.target_vel = p.vel;
         self.physics(pi, host, dt);
 
+        // A Candypop Bud swallows a thrown Pikmin that comes down on its mouth (`Pom::Obj::pressCallBack`).
+        if self.bulb_swallow(pi) {
+            return;
+        }
+
         if let Some((target, part, surface)) = self.touching_part(pi, None) {
             if self.pikis[pi].color == PikiColor::Purple {
                 self.pound(pi, host, Some((target, part)));

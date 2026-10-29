@@ -358,6 +358,24 @@ pub struct PikOnion {
     pub _pad: [u8; 2],
 }
 
+/// A Candypop Bud ([`pik_sim_bulbs`]), 36 bytes.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PikBulb {
+    pub pos: PikVec3,
+    pub id: u32,
+    /// The colour it spits now ([`PikiColor::index`]).
+    pub colour: u32,
+    /// 1 for the rainbow Candypop Pop.
+    pub queen: u32,
+    /// 0 opening, 1 open (a Pikmin went in), 2 closing, 3 spitting, 4 withering.
+    pub state: u32,
+    /// Seconds in that state.
+    pub t: f32,
+    /// Slots left.
+    pub free: u32,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PikSprout {
@@ -448,6 +466,12 @@ pub mod event_kind {
     pub const GROUNDED: u32 = 48;
     /// `a` the White Pikmin that was eaten; the creature fields name the creature that ate it.
     pub const POISONED_EATER: u32 = 49;
+    /// `a` the Pikmin that went into a Candypop Bud, `b` the bud, `c` its colour, `pos` the bud.
+    pub const BULB_SWALLOWED: u32 = 50;
+    /// `a` the bud, `c` the colour it spat, `b` how many sprouts, `pos` where they leave.
+    pub const BULB_SHOT: u32 = 51;
+    /// `a` the heaviest Pikmin latched on, `b` the weight (a Purple counts five); the creature fields name the flier.
+    pub const WEIGHED_DOWN: u32 = 52;
 }
 
 /// One [`Event`]. `a` is the Pikmin, pellet, sprout or captain it's about (the first id in the
@@ -2318,6 +2342,91 @@ pub unsafe extern "C" fn pik_sim_onion_goal(sim: *mut PikSim, id: u32, out: *mut
     }) }
 }
 
+/// Plants a Candypop Bud ([`libpikmin::bulb`]) of colour `colour` at `pos`; `queen` makes it the rainbow Pop. Returns its
+/// id, or -1.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`]; `pos` readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_add_bulb(sim: *mut PikSim, colour: u32, queen: u32, pos: *const PikVec3) -> i32 {
+    // SAFETY: as documented.
+    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return -1 };
+    let Some(colour) = color_arg(colour) else { return -1 };
+    // SAFETY: as documented.
+    unsafe { with(sim, -1, |s| s.sim.add_bulb(colour, queen != 0, pos.into()).0 as i32) }
+}
+
+/// Takes the Candypop Bud `id` away.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_remove_bulb(sim: *mut PikSim, id: u32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| s.sim.remove_bulb(libpikmin::BulbId(id))) }
+}
+
+/// Copies up to `max` Candypop Buds into `out`. Returns how many there are in all.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`]; `out` writable for `max` (or null if 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_bulbs(sim: *mut PikSim, out: *mut PikBulb, max: u32) -> u32 {
+    use libpikmin::BulbState;
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, 0, |s| {
+            let bulbs = s.sim.bulbs();
+            for (i, b) in bulbs.iter().take(max as usize).enumerate() {
+                let (state, t) = match b.state {
+                    BulbState::Open { t } => (if b.used > 0 || t >= libpikmin::bulb::OPEN_TIME { 1 } else { 0 }, t),
+                    BulbState::Swing { t } => (1, t),
+                    BulbState::Close { t } => (2, t),
+                    BulbState::Shot { t, .. } => (3, t),
+                    BulbState::Dead { t } => (4, t),
+                };
+                let v = PikBulb {
+                    pos: b.pos.into(),
+                    id: b.id.0,
+                    colour: b.colour.index() as u32,
+                    queen: b.queen as u32,
+                    state,
+                    t,
+                    free: b.slots().saturating_sub(b.used),
+                };
+                // SAFETY: `i < max`, which the caller promised is writable.
+                out.add(i).write(v);
+            }
+            bulbs.len() as u32
+        })
+    }
+}
+
+/// How much weight of Pikmin brings the flying creature `creature` down ([`libpikmin::weigh`]: 5 small, 15 large,
+/// 25 boss, 1 for a projectile; a Purple counts five); 0 takes the rule away. The sim then raises `WEIGHED_DOWN`.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_ground_need(sim: *mut PikSim, creature: u64, need: u32) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| s.sim.set_ground_need(creature, need)) }
+}
+
+/// The weight of Pikmin that brings a flying creature of a class down ([`libpikmin::weigh`]): 0 a small flier (5), 1 a large
+/// one (15), 2 a boss (25), 3 a projectile that can be shot (1). A Purple counts five. 0 for any other class.
+#[unsafe(no_mangle)]
+pub extern "C" fn pik_weigh_need(kind: u32) -> u32 {
+    use libpikmin::weigh;
+    match kind {
+        0 => weigh::SMALL,
+        1 => weigh::LARGE,
+        2 => weigh::BOSS,
+        3 => weigh::PROJECTILE,
+        _ => 0,
+    }
+}
+
 /// Copies up to `max` sprouts in the ground or in the air into `out`. Returns how many there
 /// are in all.
 ///
@@ -2553,6 +2662,16 @@ fn event(e: Event) -> PikEvent {
         }
         Event::PoisonedEater { piki, creature: c } => {
             (v.kind, v.a) = (POISONED_EATER, piki.0);
+            creature(&mut v, c);
+        }
+        Event::BulbSwallowed { piki, bulb, colour, pos } => {
+            (v.kind, v.a, v.b, v.c, v.pos) = (BULB_SWALLOWED, piki.0, bulb.0 as i32, colour.index() as i32, pos.into())
+        }
+        Event::BulbShot { bulb, colour, count, pos } => {
+            (v.kind, v.a, v.b, v.c, v.pos) = (BULB_SHOT, bulb.0, count as i32, colour.index() as i32, pos.into())
+        }
+        Event::WeighedDown { creature: c, piki, weight } => {
+            (v.kind, v.a, v.b) = (WEIGHED_DOWN, piki.0, weight as i32);
             creature(&mut v, c);
         }
     }

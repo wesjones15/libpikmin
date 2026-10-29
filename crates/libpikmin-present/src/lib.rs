@@ -9,6 +9,7 @@
 pub mod animator;
 pub mod audio;
 pub mod effects;
+pub mod bulb;
 pub mod hocotate;
 pub mod louie;
 pub mod navilight;

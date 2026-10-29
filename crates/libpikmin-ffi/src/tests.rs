@@ -187,6 +187,30 @@ fn struct_sizes_are_what_hosts_mirror() {
 }
 
 #[test]
+fn candypop_buds_and_the_weight_needs_cross_the_abi() {
+    assert_eq!([0u32, 1, 2, 3, 4].map(|k| pik_weigh_need(k)), [5, 15, 25, 1, 0]);
+    assert_eq!(std::mem::size_of::<PikBulb>(), 36);
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        let sim = pik_sim_new(std::ptr::null(), 3);
+        let at = PikVec3 { x: 10.0, y: 0.0, z: 20.0 };
+        let purple = pik_sim_add_bulb(sim, PikiColor::Purple.index() as u32, 0, &at);
+        let pop = pik_sim_add_bulb(sim, PikiColor::Blue.index() as u32, 1, &at);
+        assert!(purple >= 0 && pop > purple);
+        assert_eq!(pik_sim_add_bulb(sim, 9, 0, &at), -1, "no such colour");
+        let mut out = [PikBulb::default(); 4];
+        assert_eq!(pik_sim_bulbs(sim, out.as_mut_ptr(), 4), 2);
+        assert_eq!((out[0].colour, out[0].queen, out[0].free, out[0].state), (3, 0, 5, 0));
+        assert_eq!((out[1].colour, out[1].queen, out[1].free), (0, 1, 1));
+        assert_eq!(out[0].pos.x, 10.0);
+        pik_sim_remove_bulb(sim, purple as u32);
+        assert_eq!(pik_sim_bulbs(sim, out.as_mut_ptr(), 4), 1);
+        pik_sim_set_ground_need(sim, 5, 15);
+        pik_sim_free(sim);
+    }
+}
+
+#[test]
 fn events_past_one_read_wait_for_the_next() {
     // SAFETY: every pointer below is live for its call.
     unsafe {

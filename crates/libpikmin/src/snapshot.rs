@@ -15,6 +15,7 @@ use std::collections::VecDeque;
 
 use glam::{Vec2, Vec3};
 
+use crate::bulb::{Bulb, BulbId, BulbState};
 use crate::captain::{Captain, CaptainInput, CaptainPose, LockView, Pressed, Punch, ThrowState, WhistleState};
 use crate::carry::{Carry, CarryPhase, Pellet, PelletDesc, PelletId, PelletState};
 use crate::damage::DeathCause;
@@ -30,7 +31,7 @@ use crate::strike::Strike;
 use crate::{CaptainId, PikiId};
 
 /// Bumped when the encoding changes.
-pub const SNAPSHOT_VERSION: u8 = 8;
+pub const SNAPSHOT_VERSION: u8 = 9;
 
 // Far more than any real sim has; a corrupt length can't make decoding allocate wildly.
 const MAX_ENTITIES: usize = 4096;
@@ -51,6 +52,9 @@ pub struct Snapshot {
     pub nectar_drops: Vec<NectarDrop>,
     pub puddles: Vec<Puddle>,
     pub next_nectar: u32,
+    /// Candypop Buds ([`crate::bulb`]).
+    pub bulbs: Vec<Bulb>,
+    pub next_bulb: u32,
     /// Where the host's creatures were (id, position, yaw), so a replica can place the sounds of
     /// what they do. Not their parts: nothing on a replica latches onto them.
     pub creatures: Vec<(u64, Vec3, f32)>,
@@ -72,6 +76,8 @@ impl Snapshot {
             nectar_drops: sim.nectar_drops.clone(),
             puddles: sim.puddles.clone(),
             next_nectar: sim.next_nectar,
+            bulbs: sim.bulbs.clone(),
+            next_bulb: sim.next_bulb,
             creatures: sim.creatures.creatures.iter().map(|c| (c.id, c.pos, c.yaw)).collect(),
             events: events.to_vec(),
         }
@@ -151,6 +157,11 @@ impl Snapshot {
         for p in &self.puddles {
             w_puddle(&mut w, p);
         }
+        w.u32(self.next_bulb);
+        w.len(self.bulbs.len());
+        for b in &self.bulbs {
+            w_bulb(&mut w, b);
+        }
         w.len(self.creatures.len());
         for (id, pos, yaw) in &self.creatures {
             w.u64(*id);
@@ -201,6 +212,9 @@ impl Snapshot {
         let nectar_drops = (0..n).map(|_| r_drop(&mut r)).collect::<Option<Vec<_>>>()?;
         let n = r.len()?;
         let puddles = (0..n).map(|_| r_puddle(&mut r)).collect::<Option<Vec<_>>>()?;
+        let next_bulb = r.u32()?;
+        let n = r.len()?;
+        let bulbs = (0..n).map(|_| r_bulb(&mut r)).collect::<Option<Vec<_>>>()?;
         let n = r.len()?;
         let creatures = (0..n).map(|_| Some((r.u64()?, r.vec3()?, r.f32()?))).collect::<Option<Vec<_>>>()?;
         let n = r.len()?;
@@ -216,6 +230,8 @@ impl Snapshot {
             nectar_drops,
             puddles,
             next_nectar,
+            bulbs,
+            next_bulb,
             creatures,
             events,
         })
@@ -237,6 +253,8 @@ impl Sim {
         self.nectar_drops.clone_from(&s.nectar_drops);
         self.puddles.clone_from(&s.puddles);
         self.next_nectar = s.next_nectar;
+        self.bulbs.clone_from(&s.bulbs);
+        self.next_bulb = s.next_bulb;
         self.creatures.clear();
         for &(id, pos, yaw) in &s.creatures {
             self.creatures.push(id, pos, yaw, true, false, &[]);
@@ -1498,6 +1516,45 @@ fn r_puddle(r: &mut Reader) -> Option<Puddle> {
     Some(Puddle { id, pos, state })
 }
 
+fn w_bulb(w: &mut Writer, b: &Bulb) {
+    w.u32(b.id.0);
+    w.vec3(b.pos);
+    w_color(w, b.colour);
+    w.bool(b.queen);
+    w.u32(b.used);
+    w.u32(b.swallowed);
+    w.u32(b.same);
+    w.f32(b.change);
+    let (tag, t, fired) = match b.state {
+        BulbState::Open { t } => (0, t, false),
+        BulbState::Swing { t } => (1, t, false),
+        BulbState::Close { t } => (2, t, false),
+        BulbState::Shot { t, fired } => (3, t, fired),
+        BulbState::Dead { t } => (4, t, false),
+    };
+    w.u8(tag);
+    w.f32(t);
+    w.bool(fired);
+}
+
+fn r_bulb(r: &mut Reader) -> Option<Bulb> {
+    let id = BulbId(r.u32()?);
+    let pos = r.vec3()?;
+    let colour = r_color(r)?;
+    let queen = r.bool()?;
+    let (used, swallowed, same, change) = (r.u32()?, r.u32()?, r.u32()?, r.f32()?);
+    let (tag, t, fired) = (r.u8()?, r.f32()?, r.bool()?);
+    let state = match tag {
+        0 => BulbState::Open { t },
+        1 => BulbState::Swing { t },
+        2 => BulbState::Close { t },
+        3 => BulbState::Shot { t, fired },
+        4 => BulbState::Dead { t },
+        _ => return None,
+    };
+    Some(Bulb { id, pos, colour, queen, used, swallowed, same, change, state })
+}
+
 // ---- events ----------------------------------------------------------------------------------
 
 fn w_cause(w: &mut Writer, c: DeathCause) {
@@ -1772,6 +1829,26 @@ fn w_event(w: &mut Writer, e: &Event) {
             w.u32(piki.0);
             w.u64(creature);
         }
+        BulbSwallowed { piki, bulb, colour, pos } => {
+            w.u8(50);
+            w.u32(piki.0);
+            w.u32(bulb.0);
+            w_color(w, colour);
+            w.vec3(pos);
+        }
+        BulbShot { bulb, colour, count, pos } => {
+            w.u8(51);
+            w.u32(bulb.0);
+            w_color(w, colour);
+            w.u32(count);
+            w.vec3(pos);
+        }
+        WeighedDown { creature, piki, weight } => {
+            w.u8(52);
+            w.u64(creature);
+            w.u32(piki.0);
+            w.u32(weight);
+        }
     }
 }
 
@@ -1833,6 +1910,9 @@ fn r_event(r: &mut Reader) -> Option<Event> {
         47 => Pounded { piki: piki(r)?, pos: r.vec3()? },
         48 => Grounded { creature: r.u64()?, piki: piki(r)? },
         49 => PoisonedEater { piki: piki(r)?, creature: r.u64()? },
+        50 => BulbSwallowed { piki: piki(r)?, bulb: BulbId(r.u32()?), colour: r_color(r)?, pos: r.vec3()? },
+        51 => BulbShot { bulb: BulbId(r.u32()?), colour: r_color(r)?, count: r.u32()?, pos: r.vec3()? },
+        52 => WeighedDown { creature: r.u64()?, piki: piki(r)?, weight: r.u32()? },
         _ => return None,
     })
 }

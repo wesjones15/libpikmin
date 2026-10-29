@@ -220,6 +220,13 @@ pub enum Event {
     Grounded { creature: CreatureId, piki: PikiId },
     /// A White Pikmin was eaten: `creature` swallowed poison (`EnemyBase::eatWhitePikminCallBack`).
     PoisonedEater { piki: PikiId, creature: CreatureId },
+    /// A thrown Pikmin came down in a Candypop Bud ([`crate::bulb`]) and was swallowed; `colour` is what it was.
+    BulbSwallowed { piki: PikiId, bulb: crate::bulb::BulbId, colour: PikiColor, pos: Vec3 },
+    /// A Candypop Bud spat `count` sprouts of `colour` from `pos`.
+    BulbShot { bulb: crate::bulb::BulbId, colour: PikiColor, count: u32, pos: Vec3 },
+    /// The Pikmin latched to a flying `creature` weigh `weight` (in ordinary Pikmin, a Purple five), as much as it was
+    /// told it needs to be brought down ([`crate::weigh`]). `piki` is the heaviest of them. Sent every half second.
+    WeighedDown { creature: CreatureId, piki: PikiId, weight: u32 },
 }
 
 impl Event {
@@ -236,7 +243,8 @@ impl Event {
             | PikiDied { piki, .. } | Swallowed { piki, .. } | SpitOut { piki }
             | Plucked { piki, .. } | PluckerOut { piki, .. } | PikiGrew { piki, .. }
             | PikiStomped { piki, .. } | PikiLaunched { piki, .. } | Pounded { piki, .. }
-            | Grounded { piki, .. } | PoisonedEater { piki, .. } => [Some(piki), None],
+            | Grounded { piki, .. } | PoisonedEater { piki, .. } | BulbSwallowed { piki, .. }
+            | WeighedDown { piki, .. } => [Some(piki), None],
             _ => [None, None],
         };
         ids.into_iter().flatten()

@@ -393,6 +393,27 @@ pub unsafe extern "C" fn pik_view_load_treasures(view: *mut PikView, dir: *const
     }
 }
 
+/// Loads Pikmin 2's Candypop Bud ([`libpikmin::bulb`]) from the Pikmin 2 cache `dir` (the folder holding `enemy/`,
+/// [`pik_p2_enemies_extract`]) in Blue, Red, Yellow, Purple and White, appending five models to the table in that order.
+/// Returns the first model's index, or -1 when the files are missing (buds are then not drawn).
+/// # Safety
+/// `view` is a live handle; `dir` a NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_load_bulbs(view: *mut PikView, dir: *const c_char) -> i32 {
+    if dir.is_null() { return -1; }
+    // SAFETY: as documented.
+    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+    unsafe {
+        with_view(view, -1, |v| match v.view.load_bulbs(std::path::Path::new(&dir)) {
+            Ok(m) => m as i32,
+            Err(e) => {
+                eprintln!("Candypop Buds: {e}");
+                -1
+            }
+        })
+    }
+}
+
 /// Draws the ship of Onion `onion` as Louie's Hocotate Ship (`on` 1; it loads with Louie, [`pik_view_load_louie`]) or as
 /// the Dolphin again (0). Does nothing for Onions that are not ships or when the Pikmin 2 ship files were missing.
 /// # Safety

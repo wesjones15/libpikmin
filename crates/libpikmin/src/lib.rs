@@ -7,6 +7,7 @@
 pub mod anim;
 pub mod captain;
 pub mod camera;
+pub mod bulb;
 pub mod carry;
 pub mod clock;
 pub mod damage;
@@ -26,9 +27,11 @@ pub mod piki;
 pub mod plucker;
 pub mod snapshot;
 pub mod strike;
+pub mod weigh;
 mod sim;
 
 pub use captain::{Captain, CaptainInput, CaptainPose, LockView};
+pub use bulb::{Bulb, BulbId, BulbState};
 pub use carry::{Pellet, PelletDesc, PelletId, PelletState, TREASURE_PART_BASE};
 pub use clock::{FixedClock, TICK_DT, TICK_HZ};
 pub use damage::DeathCause;

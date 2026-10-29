@@ -561,6 +561,8 @@ pub struct View {
     treasure_cues: Vec<crate::treasure::Cue>,
     treasure_bursts: Vec<(Vec3, f32, crate::treasure::Burst, f32)>,
     treasure_spots: Vec<(Vec3, f32, u32)>,
+    /// Candypop Buds ([`View::load_bulbs`]).
+    bulbs: Option<std::sync::Arc<crate::bulb::BulbSet>>,
     /// Purple and White Pikmin (Pikmin 2, [`View::load_pikmin2`]).
     pub(crate) pikmin2: Option<std::sync::Arc<crate::pikmin2::Pikmin2Skin>>,
     /// Pikachu and his Ice Climbers ([`View::load_pikachu`]).
@@ -778,6 +780,7 @@ impl View {
             treasure_cues: Vec::new(),
             treasure_bursts: Vec::new(),
             treasure_spots: Vec::new(),
+            bulbs: None,
             pikmin2: None,
             pikachu: None,
             captain_skins: HashMap::new(),
@@ -1056,6 +1059,29 @@ impl View {
             Err(e) => eprintln!("Treasure sparkles: {e}"),
         }
         self.treasures = Some(std::sync::Arc::new(set));
+        Ok(first)
+    }
+
+    /// Loads Pikmin 2's Candypop Bud from the cache `dir` (the folder holding `enemy/`, `libsms::extract::p2_enemy`) in each
+    /// of the five colours, appending five models to the table (Blue, Red, Yellow, Purple, White); returns the first one's
+    /// index. Call before the host reads the table. The sim's buds ([`libpikmin::Sim::add_bulb`]) are then drawn.
+    pub fn load_bulbs(&mut self, dir: &std::path::Path) -> Result<u32, String> {
+        if let Some(b) = &self.bulbs { return Ok(b.bodies.first().map_or(0, |b| b.model)); }
+        let first = self.models.len() as u32;
+        let tex_base = self.textures.list.len() as i32;
+        let set = crate::bulb::BulbSet::load(dir, first, tex_base)?;
+        for (i, b) in set.bodies.iter().enumerate() {
+            let m = &b.body.model;
+            self.textures.list.extend(set.textures(i));
+            self.models.push(ViewModel::external(
+                set.batches(i), m.lo, m.hi,
+                m.batch_texture.iter().map(|&t| if t >= 0 { t + b.tex_base } else { -1 }).collect(),
+                m.batch_blend.clone(),
+                m.batch_env.clone(),
+                m.batch_lit.iter().map(|l| l & 3).collect(),
+            ));
+        }
+        self.bulbs = Some(std::sync::Arc::new(set));
         Ok(first)
     }
 
@@ -1859,6 +1885,18 @@ impl View {
         // Pellets and corpses: the numbered pellets, sized to the thing being carried
         // (corpses too: a host's enemies have no Pikmin model). The model goes by carriers,
         // which for a numbered pellet is its number.
+        if let Some(set) = self.bulbs.clone() {
+            for bulb in sim.bulbs() {
+                let Some(body) = set.body(bulb.colour) else { continue };
+                let joints = set.joints(bulb);
+                let k = key(kinds::PELLET, 0x4255_0000 + bulb.id.0 as u64);
+                let (pos, rot) = self.place_rot(k, bulb.pos, Quat::IDENTITY, tick, alpha);
+                // The Pop is a little taller than the plain buds; no-lift keeps the foot where the sim has it.
+                let scale = if bulb.queen { 1.25 } else { 1.0 };
+                self.push_body(&body.body.model, body.model, body.tex_base, scale, kinds::PELLET, k, pos, rot,
+                    Mat4::IDENTITY, &joints, 1.0, 0);
+            }
+        }
         for pel in sim.pellets() {
             let treasure = pel.desc.ship_part.filter(|&p| p >= libpikmin::TREASURE_PART_BASE && self.treasures.is_some());
             if let Some(part) = treasure {

@@ -26,7 +26,8 @@ impl Host for Arena {
 
 fn dump(sim: &Sim) -> String {
     format!(
-        "{:#?}\n{:#?}\n{:#?}\n{:#?}\n{:#?}\n{:#?}\n{:#?}",
+        "{:#?}\n{:#?}\n{:#?}\n{:#?}\n{:#?}\n{:#?}\n{:#?}\n{:#?}",
+        sim.bulbs(),
         sim.captains(),
         sim.pikis(),
         sim.pellets(),
@@ -54,6 +55,8 @@ fn busy() -> (Sim, Vec<Event>) {
     sim.spawn_pellet(PelletDesc::numbered(&params, 5, PikiColor::Red, Vec3::new(60.0, 0.0, -40.0), 0.7));
     sim.spawn_pellet(PelletDesc::numbered(&params, 1, PikiColor::Blue, Vec3::new(80.0, 0.0, 50.0), 0.1));
     sim.plant_sprout(PikiColor::Yellow, Vec3::new(20.0, 0.0, -60.0));
+    sim.add_bulb(PikiColor::Purple, false, Vec3::new(-90.0, 0.0, 120.0));
+    sim.add_bulb(PikiColor::Blue, true, Vec3::new(-120.0, 0.0, 130.0));
     let mut events = Vec::new();
     let mut host = Arena;
     for tick in 0..400 {

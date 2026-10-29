@@ -32,6 +32,12 @@ pub struct Sim {
     pub(crate) nectar_drops: Vec<crate::nectar::NectarDrop>,
     pub(crate) puddles: Vec<crate::nectar::Puddle>,
     pub(crate) next_nectar: u32,
+    /// Candypop Buds ([`crate::bulb`]) and the last id given.
+    pub(crate) bulbs: Vec<crate::bulb::Bulb>,
+    pub(crate) next_bulb: u32,
+    /// See [`Sim::set_ground_need`].
+    pub(crate) ground_need: std::collections::HashMap<CreatureId, u32>,
+    pub(crate) weigh_timer: f32,
     pub(crate) events: Vec<Event>,
     pending_shakes: Vec<CreatureId>,
     /// See [`Sim::set_auto_rejoin`].
@@ -94,6 +100,10 @@ impl Sim {
             nectar_drops: Vec::new(),
             puddles: Vec::new(),
             next_nectar: 0,
+            bulbs: Vec::new(),
+            next_bulb: 0,
+            ground_need: Default::default(),
+            weigh_timer: 0.0,
             events: Vec::new(),
             pending_shakes: Vec::new(),
             auto_rejoin: false,
@@ -289,6 +299,8 @@ impl Sim {
         self.update_onions(dt);
         self.update_onion_exits(dt);
         self.update_sprouts(host, dt);
+        self.update_bulbs(dt);
+        self.update_weights(dt);
         self.update_auto_pluck(dt);
         self.update_recovery(dt);
         self.rescue_fallen(host);
