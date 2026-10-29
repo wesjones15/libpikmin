@@ -621,3 +621,19 @@ Queen/KingChappy (a big Bulborb body), OniKurage (after Kurage) and the Long Leg
 
 Counts: Kogane family (3), Larva, Skitter Leaf, Mitite, Gas pipe, Bomb-rock, Watery Blowhog, Cannon Larva = 10 Pikmin 2 kinds (27-36)
 ported and wired of the survey's ~40 new enemies; ElecHiba, ElecBug and Demon judged impractical (above); the rest and all bosses remain.
+
+### Update after the fifth pass (2026-10-28)
+
+Ported through core, tests, draw path and Ship Repair roster (never played):
+- 37-40 **Orange, Hairy, Dwarf Orange and Snow Bulborbs** (`bulborb2.rs`, 4 tests with the Fiery one): the `ChappyBase` machine (sleep at home, wake, turn, walk, bite, flick,
+  turn home, go home, die with the disc's corpse), on the Red Bulborbs' model with their own textures (`EnemyBody::load_swapped`: textures 0 and 1) and numbers. The Orange
+  one wakes when anyone is within its wake radius, the others when hit. The dwarfs run the same machine (the decomp's `KochappyBase` has a `Wait` for the sleep, a `Press`
+  squash, a short absent-minded pause: approximated; a pressed dwarf plays its press clip).
+- 41 **Fiery Bulblax**: that machine plus the burning body (`FireChappy::collisionCallback`: the body burns Pikmin and players that touch it until water puts it out).
+- 42 **Empress Bulblax** (boss, `queen.rs`, 4 tests): sleeps and lays larvae (kind 30, a fifth of the disc's 25-50 limit), wakes when hurt, shakes off a mob, rolls across her
+  territory crushing and crashing at its ends, dies with the disc's corpse (20-30 carriers, 30 seeds). Roster: always drops a ship part, cost 900, on the Golem body.
+- Bug fixed on the way: only the Kogane family's parm file has an `mScale`; every other Pikmin 2 kind had loaded at scale 0.01 (drawn at 1% size, with tiny bounds).
+  Kinds 30-36 are drawn at the model's size now.
+
+Still to do: the Emperor Bulblax (`KingChappy`, 13 states, 2498 lines: the next practical boss), Kurage then OniKurage, Fuefuki (needs a design choice, above), Armor, Hanachirashi, BombSarai, the
+Dweevils, Imomushi, Jigumo, ShijimiChou, MiniHoudai, the Long Legs, and the bosses the survey marks hard. Nothing in this file has been played.
