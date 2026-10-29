@@ -637,3 +637,13 @@ Ported through core, tests, draw path and Ship Repair roster (never played):
 
 Still to do: the Emperor Bulblax (`KingChappy`, 13 states, 2498 lines: the next practical boss), Kurage then OniKurage, Fuefuki (needs a design choice, above), Armor, Hanachirashi, BombSarai, the
 Dweevils, Imomushi, Jigumo, ShijimiChou, MiniHoudai, the Long Legs, and the bosses the survey marks hard. Nothing in this file has been played.
+
+Judged impractical for Ship Repair (reason), added after reading them:
+- **Kurage, OniKurage (Jellyfloats)**: their whole attack is sucking Pikmin up (`suckPikmin`) and being weighed down by them (the Fall/Land/Ground/TakeOff
+  cycle follows how many Pikmin hang on); they do nothing to a RoR2 player, and OniKurage is the same creature grown. A port would be a floating bug that
+  only matters when the player has a swarm; left until Pikmin-weight mechanics for fliers exist.
+- **Fuefuki**: needs a design choice, see above.
+
+Remaining practical list, in order: Emperor Bulblax (`KingChappy`), Armor, Hanachirashi, BombSarai, the Dweevils (one `OtakaraBase` for five), Imomushi, Jigumo,
+ShijimiChou, MiniHoudai, then the Long Legs (Damagumo, BigFoot) and the rest of the survey's tier 4. Each needs its decomp read (1,000-3,000 lines),
+a core module with tests, the roster line and, for bosses, a hull choice.
