@@ -40,6 +40,14 @@ pub const BOMB_ROCK: u8 = 34;
 pub const WATERY_BLOWHOG: u8 = 35;
 /// Armored Cannon Beetle Larva (`Kabuto::Obj`).
 pub const CANNON_LARVA: u8 = 36;
+/// Orange Bulborb (`BlueChappy::Obj`).
+pub const ORANGE_BULBORB: u8 = 37;
+/// Hairy Bulborb (`YellowChappy::Obj`).
+pub const HAIRY_BULBORB: u8 = 38;
+/// Dwarf Orange Bulborb (`BlueKochappy::Obj`).
+pub const DWARF_ORANGE_BULBORB: u8 = 39;
+/// Snow Bulborb (`YellowKochappy::Obj`).
+pub const SNOW_BULBORB: u8 = 40;
 
 /// One Pikmin 2 kind: where its files are (`<cache>/enemy/...`) and what it is called.
 pub struct Kind {
@@ -51,25 +59,29 @@ pub struct Kind {
     pub shared: &'static str,
     /// `enemy/data/<data>/model/enemy.bmd` and `anim/*.bca`: the Kogane family shares one model.
     pub data: &'static str,
-    /// The texture file the kind swaps in (`Mgr::getChangeTexture`), under `enemy/data/`, if it reuses another's model.
-    pub texture: Option<&'static str>,
+    /// The texture files the kind swaps in (`Mgr::getChangeTexture`: texture 0, then 1), under `enemy/data/`, if it reuses another's model.
+    pub textures: &'static [&'static str],
     /// Its name in `carcass_config.txt` when it leaves a corpse (`EnemyBase::EB_LeaveCarcass`), else none.
     pub carcass: Option<&'static str>,
     /// The clip its corpse lies in (the dying motion).
     pub dead: &'static str,
 }
 
-pub const KIND_TABLE: [Kind; 10] = [
-    Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", texture: Some("Kogane/kogane_s3tc.bti"), carcass: None, dead: "damage" },
-    Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", texture: Some("Wealthy/oogane_s3tc.bti"), carcass: None, dead: "damage" },
-    Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", texture: Some("Fart/babakogane_s3tc.bti"), carcass: None, dead: "damage" },
-    Kind { name: "Bulborb Larva", parm: "baby", shared: "baby", data: "Baby", texture: None, carcass: None, dead: "dead" },
-    Kind { name: "Skitter Leaf", parm: "sokkuri", shared: "sokkuri", data: "Sokkuri", texture: None, carcass: Some("Sokkuri"), dead: "dead1" },
-    Kind { name: "Mitite", parm: "tamagomushi", shared: "tamagomushi", data: "TamagoMushi", texture: None, carcass: Some("TamagoMushi"), dead: "dead" },
-    Kind { name: "Gas pipe", parm: "gashiba", shared: "gashiba", data: "GasHiba", texture: None, carcass: None, dead: "wait" },
-    Kind { name: "Bomb-rock", parm: "bomb", shared: "bomb", data: "Bomb", texture: None, carcass: None, dead: "hit_loop" },
-    Kind { name: "Watery Blowhog", parm: "wtank", shared: "tank", data: "Tank", texture: Some("Wtank/mizu_butadokkuri_main_s3tc.bti"), carcass: Some("Wtank"), dead: "dead" },
-    Kind { name: "Armored Cannon Beetle Larva", parm: "kabuto", shared: "kabuto", data: "Kabuto", texture: None, carcass: Some("Kabuto"), dead: "dead" },
+pub const KIND_TABLE: [Kind; 14] = [
+    Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", textures: &["Kogane/kogane_s3tc.bti"], carcass: None, dead: "damage" },
+    Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", textures: &["Wealthy/oogane_s3tc.bti"], carcass: None, dead: "damage" },
+    Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", textures: &["Fart/babakogane_s3tc.bti"], carcass: None, dead: "damage" },
+    Kind { name: "Bulborb Larva", parm: "baby", shared: "baby", data: "Baby", textures: &[], carcass: None, dead: "dead" },
+    Kind { name: "Skitter Leaf", parm: "sokkuri", shared: "sokkuri", data: "Sokkuri", textures: &[], carcass: Some("Sokkuri"), dead: "dead1" },
+    Kind { name: "Mitite", parm: "tamagomushi", shared: "tamagomushi", data: "TamagoMushi", textures: &[], carcass: Some("TamagoMushi"), dead: "dead" },
+    Kind { name: "Gas pipe", parm: "gashiba", shared: "gashiba", data: "GasHiba", textures: &[], carcass: None, dead: "wait" },
+    Kind { name: "Bomb-rock", parm: "bomb", shared: "bomb", data: "Bomb", textures: &[], carcass: None, dead: "hit_loop" },
+    Kind { name: "Watery Blowhog", parm: "wtank", shared: "tank", data: "Tank", textures: &["Wtank/mizu_butadokkuri_main_s3tc.bti"], carcass: Some("Wtank"), dead: "dead" },
+    Kind { name: "Armored Cannon Beetle Larva", parm: "kabuto", shared: "kabuto", data: "Kabuto", textures: &[], carcass: Some("Kabuto"), dead: "dead" },
+    Kind { name: "Orange Bulborb", parm: "bluechappy", shared: "chappy", data: "Chappy", textures: &["BlueChappy/swallow_565.3.bti", "BlueChappy/moyou_565.3.bti"], carcass: Some("BlueChappy"), dead: "dead" },
+    Kind { name: "Hairy Bulborb", parm: "yellowchappy", shared: "chappy", data: "Chappy", textures: &["YellowChappy/swallow_565.2.bti", "YellowChappy/moyou_565.2.bti"], carcass: Some("YellowChappy"), dead: "dead" },
+    Kind { name: "Dwarf Orange Bulborb", parm: "bluekochappy", shared: "kochappy", data: "Kochappy", textures: &["BlueKochappy/kochappy_body_s3tc.3.bti"], carcass: Some("BlueKochappy"), dead: "dead" },
+    Kind { name: "Snow Bulborb", parm: "yellowkochappy", shared: "kochappy", data: "Kochappy", textures: &["YellowKochappy/kochappy_body_s3tc.2.bti"], carcass: Some("YellowKochappy"), dead: "dead" },
 ];
 
 pub fn kind(kind: u8) -> Option<&'static Kind> {

@@ -11,6 +11,7 @@ pub mod baby;
 pub mod beatle;
 pub mod bomb;
 pub mod bulborb;
+pub mod bulborb2;
 pub mod collec;
 pub mod object;
 pub mod dororo;
@@ -258,6 +259,7 @@ fn p2_strategy(kind: u8) -> Strategy {
         p2::BOMB_ROCK => bomb::strategy(),
         p2::WATERY_BLOWHOG => wtank::strategy(),
         p2::CANNON_LARVA => kabuto::strategy(),
+        p2::ORANGE_BULBORB | p2::HAIRY_BULBORB | p2::DWARF_ORANGE_BULBORB | p2::SNOW_BULBORB => bulborb2::strategy(),
         _ => kogane::strategy(kind),
     }
 }
