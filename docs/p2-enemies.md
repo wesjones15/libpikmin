@@ -607,3 +607,17 @@ Judged impractical for now (reason):
 Still to do, in survey order: Kabuto (and Rkabuto/Fkabuto), Fuefuki, then tier 3 (Bulborb family, Fiery Bulblax, Armor, Hanachirashi, Kurage,
 BombSarai, Dweevils, Imomushi, Jigumo, ShijimiChou, MiniHoudai, OoPanModoki, LeafChappy) and every boss. Of the bosses, the survey marks
 Queen/KingChappy (a big Bulborb body), OniKurage (after Kurage) and the Long Legs (Damagumo, BigFoot) as the practical ones for Ship Repair.
+
+### Update after the fourth pass (2026-10-28)
+
+- 36 **Armored Cannon Beetle Larva** (`kabuto.rs`, 3 tests; ported through core, tests, draw path, roster): wander (`Wait`/`Turn`/`Move`), turn on whatever it
+  sees, spit Pikmin 1's rolling boulder (kind 20) along a narrow lane ahead, flick, death with the disc's corpse (7-15 carriers, radius 34).
+  The fixed turret variants (`Fix*`, the Decorated and fixed Cannon Beetles) are placed fixtures and not ported.
+  `isAttackableTarget`'s lane (15 wide, 15 to sight radius long) is from the decomp; the stone's speed is a guess (250), unverified.
+- **Fuefuki (Antenna Beetle)** read but not ported: its `Whisle` state summons other enemies from the stage's table, which Ship Repair
+  does not have; it would be a call for a random ported kind (`Out::Spawn`), which is a design choice for the user.
+- **Bulborb family** (`ChappyBase`, 8 states plus ~1200 lines of Chappy/Sleep/Walk/Attack code, six variants) is the next big win and the
+  next thing to do; **bosses** are untouched.
+
+Counts: Kogane family (3), Larva, Skitter Leaf, Mitite, Gas pipe, Bomb-rock, Watery Blowhog, Cannon Larva = 10 Pikmin 2 kinds (27-36)
+ported and wired of the survey's ~40 new enemies; ElecHiba, ElecBug and Demon judged impractical (above); the rest and all bosses remain.
