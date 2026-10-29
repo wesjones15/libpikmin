@@ -138,6 +138,9 @@ pub struct Captain {
     /// enemy. Throws go to it the way they go to a creature, and the Pikmin start carrying it where they land.
     /// A creature lock takes precedence while both are set.
     pub lock_pellet: Option<crate::carry::PelletId>,
+    /// Host extension: locked onto a Candypop Bud ([`crate::bulb`]): throws go to its mouth and the Pikmin go in.
+    /// An enemy or pellet lock takes precedence while both are set.
+    pub lock_bulb: Option<crate::bulb::BulbId>,
     /// Multiplies his run speed: the host's own speed stat over its base (items, buffs).
     /// 1 in Pikmin.
     pub speed_scale: f32,
@@ -235,6 +238,7 @@ impl Captain {
             throw_color: None,
             lock_target: None,
             lock_pellet: None,
+            lock_bulb: None,
             speed_scale: 1.0,
             reach_scale: 1.0,
             attack_rate: 1.0,
@@ -356,10 +360,16 @@ impl Sim {
         if let Some(c) = self.captains.get_mut(captain.0 as usize) { c.lock_pellet = pellet; }
     }
 
-    /// Whether he is locked onto an enemy or onto something to carry.
+    /// Locks onto a Candypop Bud (see [`Captain::lock_bulb`]); `None` lets go. It lapses by itself once the bud is
+    /// withered, gone or full.
+    pub fn set_lock_bulb(&mut self, captain: CaptainId, bulb: Option<crate::bulb::BulbId>) {
+        if let Some(c) = self.captains.get_mut(captain.0 as usize) { c.lock_bulb = bulb; }
+    }
+
+    /// Whether he is locked onto an enemy, onto something to carry or onto a bud.
     fn locked_on(&self, ci: usize) -> bool {
         let c = &self.captains[ci];
-        c.lock_target.is_some() || c.lock_view.is_some() && c.lock_pellet.is_some()
+        c.lock_target.is_some() || c.lock_view.is_some() && (c.lock_pellet.is_some() || c.lock_bulb.is_some())
     }
     pub(crate) fn update_captain(&mut self, ci: usize, host: &mut dyn Host, dt: f32) {
         let input = self.captains[ci].input;
@@ -596,6 +606,18 @@ impl Sim {
             // The middle of the thing, with the cursor stood up in front of it like an enemy's.
             let middle = pel.pos + Vec3::Y * pel.desc.height * 0.5;
             let body = crate::CreaturePart { centre: middle, radius: pel.desc.radius.max(pel.desc.height * 0.5), stickable: true };
+            c.cursor_world = middle;
+            c.cursor = Vec3::new(middle.x - c.pos.x, 0., middle.z - c.pos.z);
+            let eye = c.pos + Vec3::Y * LOCK_EYE_HEIGHT;
+            c.lock_view = Some(LockView { pos: lock_marker(&[body], eye), eye });
+        } else if c.lock_target.is_none()
+            && c.lock_pellet.is_none()
+            && let Some(id) = c.lock_bulb
+            && let Some(bulb) = self.bulbs.iter().find(|b| b.id == id).filter(|b| b.can_swallow())
+        {
+            // The bud's mouth, with the cursor stood up in front of it like an enemy's.
+            let middle = bulb.pos + Vec3::Y * crate::bulb::HEIGHT * 0.6;
+            let body = crate::CreaturePart { centre: middle, radius: crate::bulb::RADIUS, stickable: true };
             c.cursor_world = middle;
             c.cursor = Vec3::new(middle.x - c.pos.x, 0., middle.z - c.pos.z);
             let eye = c.pos + Vec3::Y * LOCK_EYE_HEIGHT;
@@ -1103,7 +1125,7 @@ impl Sim {
         // A lock-on is followed; without one, a host that asks for it has the throw home on
         // the cursor point (which also makes up for the captain's own speed).
         // A thing to carry is a point: where it lies when thrown, or where it is carried to in the flight.
-        let on_pellet = c.lock_pellet.is_some() && c.lock_view.is_some();
+        let on_pellet = (c.lock_pellet.is_some() || c.lock_bulb.is_some()) && c.lock_view.is_some();
         let (creature, point) = (c.lock_target, (self.cursor_homing || on_pellet).then_some(c.cursor_world));
         p.guided_throw = (creature.is_some() || point.is_some()).then(|| crate::piki::GuidedThrow {
             creature,

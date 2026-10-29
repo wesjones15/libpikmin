@@ -35,6 +35,8 @@ pub struct Sim {
     /// Candypop Buds ([`crate::bulb`]) and the last id given.
     pub(crate) bulbs: Vec<crate::bulb::Bulb>,
     pub(crate) next_bulb: u32,
+    /// See [`Sim::set_bulb_slots`]: plain bud, rainbow Pop.
+    pub(crate) bulb_slots: (u32, u32),
     /// See [`Sim::set_ground_need`].
     pub(crate) ground_need: std::collections::HashMap<CreatureId, u32>,
     pub(crate) weigh_timer: f32,
@@ -102,6 +104,7 @@ impl Sim {
             next_nectar: 0,
             bulbs: Vec::new(),
             next_bulb: 0,
+            bulb_slots: (crate::bulb::SLOTS, crate::bulb::QUEEN_SLOTS),
             ground_need: Default::default(),
             weigh_timer: 0.0,
             events: Vec::new(),

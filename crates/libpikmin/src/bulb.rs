@@ -25,6 +25,11 @@ pub const SLOTS: u32 = 5;
 /// `mQueenMaxSlots` (ip11) and `mQueenShotMultiplier` (ip13).
 pub const QUEEN_SLOTS: u32 = 1;
 pub const QUEEN_MULTIPLIER: u32 = 5;
+/// The most slots a host may give a bud.
+pub const MAX_SLOTS: u32 = 200;
+/// A lock-on "thing" id at or above this is a bud ([`BulbId`] plus this), below it a pellet: one id space for hosts that
+/// pass what a captain is locked onto as a single number ([`crate::Sim::set_lock_bulb`]).
+pub const LOCK_BASE: u32 = 0x4000_0000;
 /// `mRemainOpenTime` (fp01): seconds it stays open after a Pikmin went in.
 pub const REMAIN_OPEN: f32 = 30.0;
 /// `mColorChangeTime` (fp02).
@@ -70,6 +75,8 @@ pub struct Bulb {
     pub colour: PikiColor,
     /// The rainbow Candypop Pop (`EnemyID_RandPom`): Blue, Red and Yellow in turn, one slot, five seeds.
     pub queen: bool,
+    /// How many Pikmin it can take before it withers (`mTotalSlotCount`; see [`Sim::set_bulb_slots`]).
+    pub slots: u32,
     /// Slots taken (`mUsedSlotCount`) and Pikmin in it now to be spat (`mStuckPikminCount`).
     pub used: u32,
     pub swallowed: u32,
@@ -82,7 +89,7 @@ pub struct Bulb {
 
 impl Bulb {
     pub fn slots(&self) -> u32 {
-        if self.queen { QUEEN_SLOTS } else { SLOTS }
+        self.slots
     }
 
     /// `mCanSwallowPiki`: open and unfolded, with a slot free.
@@ -113,6 +120,7 @@ impl Sim {
             pos,
             colour,
             queen,
+            slots: if queen { self.bulb_slots.1 } else { self.bulb_slots.0 },
             used: 0,
             swallowed: 0,
             same: 0,
@@ -120,6 +128,16 @@ impl Sim {
             state: BulbState::Open { t: 0.0 },
         });
         id
+    }
+
+    /// How many Pikmin a plain bud and the rainbow Pop take before they wither (Pikmin 2: [`SLOTS`] 5 and [`QUEEN_SLOTS`] 1),
+    /// for the buds there are and the ones added later. A host with bigger squads than Pikmin 2's gives them more room;
+    /// each Pikmin a bud swallows still comes back as one sprout (five from the Pop). Clamped to 1..=[`MAX_SLOTS`].
+    pub fn set_bulb_slots(&mut self, normal: u32, queen: u32) {
+        self.bulb_slots = (normal.clamp(1, MAX_SLOTS), queen.clamp(1, MAX_SLOTS));
+        for b in &mut self.bulbs {
+            b.slots = if b.queen { self.bulb_slots.1 } else { self.bulb_slots.0 };
+        }
     }
 
     pub fn bulbs(&self) -> &[Bulb] {

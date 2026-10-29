@@ -75,13 +75,18 @@ impl Glow {
     }
 
     pub(crate) fn push(&mut self, flat: &mut Flat, centre: Vec3, half: f32, strength: f32, right: Vec3, up: Vec3) {
+        self.push_tinted(flat, centre, half, strength, [1.0; 3], right, up);
+    }
+
+    /// As [`Glow::push`], with its colours multiplied by `tint` (a Candypop Bud's effects take the bud's colour).
+    pub(crate) fn push_tinted(&mut self, flat: &mut Flat, centre: Vec3, half: f32, strength: f32, tint: [f32; 3], right: Vec3, up: Vec3) {
         let [rgb_a, inv_a] = self.textures(flat);
         let (r, u) = (right * half, up * half);
         let corners = [centre - r + u, centre + r + u, centre + r - u, centre - r - u];
         for (texture, c) in [(inv_a, self.env), (rgb_a, self.prm)] {
             flat.quads.push(FlatQuad {
                 corners,
-                color: [c[0] * strength, c[1] * strength, c[2] * strength, 1.0],
+                color: [c[0] * strength * tint[0], c[1] * strength * tint[1], c[2] * strength * tint[2], 1.0],
                 texture,
                 additive: true,
             });

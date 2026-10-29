@@ -405,7 +405,11 @@ pub unsafe extern "C" fn pik_view_load_bulbs(view: *mut PikView, dir: *const c_c
     let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
     unsafe {
         with_view(view, -1, |v| match v.view.load_bulbs(std::path::Path::new(&dir)) {
-            Ok(m) => m as i32,
+            Ok(m) => {
+                // The buds' sounds play on the Pikmin 2 output, which starts from this cache.
+                if v.p2_dir.is_none() { v.p2_dir = Some(std::path::PathBuf::from(&dir)); }
+                m as i32
+            }
             Err(e) => {
                 eprintln!("Candypop Buds: {e}");
                 -1

@@ -1467,3 +1467,26 @@ fn a_long_legs_boss_stands_on_its_feet_and_is_drawn_with_folded_legs_through_the
         pik_view_free(view);
     }
 }
+
+#[test]
+fn a_lock_id_above_the_base_locks_a_bud_and_below_it_a_pellet() {
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        let sim = pik_sim_new(std::ptr::null(), 3);
+        let c = pik_sim_add_captain(sim, &PikVec3::default()) as u32;
+        let at = PikVec3 { x: 0.0, y: 0.0, z: 100.0 };
+        let bud = pik_sim_add_bulb(sim, PikiColor::Red.index() as u32, 0, &at) as u32;
+        pik_sim_set_bulb_slots(sim, 30, 6);
+        let mut out = [PikBulb::default(); 1];
+        pik_sim_bulbs(sim, out.as_mut_ptr(), 1);
+        assert_eq!(out[0].free, 30);
+        pik_sim_set_lock_pellet(sim, c, libpikmin::bulb::LOCK_BASE + bud, 1);
+        let lock = |sim: *mut PikSim| with(sim, (None, None), |s| (s.sim.captain(CaptainId(c)).lock_bulb, s.sim.captain(CaptainId(c)).lock_pellet));
+        assert_eq!(lock(sim), (Some(libpikmin::BulbId(bud)), None));
+        pik_sim_set_lock_pellet(sim, c, 3, 1);
+        assert_eq!(lock(sim), (None, Some(libpikmin::carry::PelletId(3))));
+        pik_sim_set_lock_pellet(sim, c, 0, 0);
+        assert_eq!(lock(sim), (None, None));
+        pik_sim_free(sim);
+    }
+}

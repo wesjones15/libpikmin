@@ -31,7 +31,7 @@ use crate::strike::Strike;
 use crate::{CaptainId, PikiId};
 
 /// Bumped when the encoding changes.
-pub const SNAPSHOT_VERSION: u8 = 9;
+pub const SNAPSHOT_VERSION: u8 = 10;
 
 // Far more than any real sim has; a corrupt length can't make decoding allocate wildly.
 const MAX_ENTITIES: usize = 4096;
@@ -1030,6 +1030,7 @@ fn w_captain(w: &mut Writer, c: &Captain) {
     w.opt(c.throw_color.as_ref(), |w, k| w_color(w, *k));
     w.opt(c.lock_target.as_ref(), |w, t| w.u64(*t));
     w.opt(c.lock_pellet.as_ref(), |w, t| w.u32(t.0));
+    w.opt(c.lock_bulb.as_ref(), |w, t| w.u32(t.0));
     w.f32(c.speed_scale);
     w.f32(c.reach_scale);
     w.f32(c.attack_rate);
@@ -1104,6 +1105,7 @@ fn r_captain(r: &mut Reader) -> Option<Captain> {
     let throw_color = r.opt(r_color)?;
     let lock_target = r.opt(|r| r.u64())?;
     let lock_pellet = r.opt(|r| r.u32().map(crate::carry::PelletId))?;
+    let lock_bulb = r.opt(|r| r.u32().map(BulbId))?;
     let speed_scale = r.f32()?;
     let reach_scale = r.f32()?;
     let attack_rate = r.f32()?;
@@ -1154,6 +1156,7 @@ fn r_captain(r: &mut Reader) -> Option<Captain> {
         throw_color,
         lock_target,
         lock_pellet,
+        lock_bulb,
         speed_scale,
         reach_scale,
         attack_rate,
@@ -1521,6 +1524,7 @@ fn w_bulb(w: &mut Writer, b: &Bulb) {
     w.vec3(b.pos);
     w_color(w, b.colour);
     w.bool(b.queen);
+    w.u32(b.slots);
     w.u32(b.used);
     w.u32(b.swallowed);
     w.u32(b.same);
@@ -1542,6 +1546,7 @@ fn r_bulb(r: &mut Reader) -> Option<Bulb> {
     let pos = r.vec3()?;
     let colour = r_color(r)?;
     let queen = r.bool()?;
+    let slots = r.u32()?;
     let (used, swallowed, same, change) = (r.u32()?, r.u32()?, r.u32()?, r.f32()?);
     let (tag, t, fired) = (r.u8()?, r.f32()?, r.bool()?);
     let state = match tag {
@@ -1552,7 +1557,7 @@ fn r_bulb(r: &mut Reader) -> Option<Bulb> {
         4 => BulbState::Dead { t },
         _ => return None,
     };
-    Some(Bulb { id, pos, colour, queen, used, swallowed, same, change, state })
+    Some(Bulb { id, pos, colour, queen, slots, used, swallowed, same, change, state })
 }
 
 // ---- events ----------------------------------------------------------------------------------

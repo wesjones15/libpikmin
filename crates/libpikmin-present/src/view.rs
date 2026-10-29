@@ -563,6 +563,11 @@ pub struct View {
     treasure_spots: Vec<(Vec3, f32, u32)>,
     /// Candypop Buds ([`View::load_bulbs`]).
     bulbs: Option<std::sync::Arc<crate::bulb::BulbSet>>,
+    /// The buds' stand-in effects, what the view remembers of each bud, the bursts running and the open buds that twinkle.
+    bulb_fx: Option<crate::bulb::BulbFx>,
+    bulb_tracks: crate::bulb::Tracks,
+    bulb_bursts: Vec<(Vec3, libpikmin::PikiColor, crate::bulb::Burst, f32)>,
+    bulb_spots: Vec<(Vec3, libpikmin::PikiColor, u32)>,
     /// Purple and White Pikmin (Pikmin 2, [`View::load_pikmin2`]).
     pub(crate) pikmin2: Option<std::sync::Arc<crate::pikmin2::Pikmin2Skin>>,
     /// Pikachu and his Ice Climbers ([`View::load_pikachu`]).
@@ -781,6 +786,10 @@ impl View {
             treasure_bursts: Vec::new(),
             treasure_spots: Vec::new(),
             bulbs: None,
+            bulb_fx: None,
+            bulb_tracks: HashMap::new(),
+            bulb_bursts: Vec::new(),
+            bulb_spots: Vec::new(),
             pikmin2: None,
             pikachu: None,
             captain_skins: HashMap::new(),
@@ -1021,6 +1030,16 @@ impl View {
             }
             self.navi_light = Some(light);
         }
+        // Candypop Buds: a twinkle at the mouth of each open one, and the bursts of the moment.
+        if let Some(mut fx) = self.bulb_fx.take() {
+            for &(feet, colour, key) in &self.bulb_spots {
+                fx.twinkle(&mut self.particles, feet, colour, key, self.time, right, up);
+            }
+            for &(feet, colour, kind, born) in &self.bulb_bursts {
+                fx.burst(&mut self.particles, kind, feet, colour, self.time - born, right, up);
+            }
+            self.bulb_fx = Some(fx);
+        }
         // Treasures: a twinkle around each one on the map, and the burst of one appearing or being taken in.
         if let Some(mut fx) = self.treasure_fx.take() {
             for &(feet, radius, key) in &self.treasure_spots {
@@ -1080,6 +1099,10 @@ impl View {
                 m.batch_env.clone(),
                 m.batch_lit.iter().map(|l| l & 3).collect(),
             ));
+        }
+        match crate::bulb::BulbFx::load(dir) {
+            Ok(fx) => self.bulb_fx = Some(fx),
+            Err(e) => eprintln!("Candypop Bud effects: {e}"),
         }
         self.bulbs = Some(std::sync::Arc::new(set));
         Ok(first)
@@ -1451,6 +1474,8 @@ impl View {
         self.light_spots.clear();
         self.treasure_spots.clear();
         self.treasure_bursts.retain(|b| self.time - b.3 < crate::treasure::BURST_SECONDS);
+        self.bulb_spots.clear();
+        self.bulb_bursts.retain(|b| self.time - b.3 < crate::bulb::BURST_SECONDS);
         self.positions.clear();
         self.normals.clear();
         self.colors.clear();
@@ -1888,6 +1913,16 @@ impl View {
         if let Some(set) = self.bulbs.clone() {
             for bulb in sim.bulbs() {
                 let Some(body) = set.body(bulb.colour) else { continue };
+                // Its moments are followed wherever it is (so a bud met again is not "new"), but only buds within
+                // `DRAW_DISTANCE` of a captain are posed, skinned, heard or lit: the rest are out of sight anyway.
+                let (cues, burst, track) = crate::bulb::moments(self.bulb_tracks.get(&bulb.id.0).copied(), bulb);
+                self.bulb_tracks.insert(bulb.id.0, track);
+                if !sim.captains().is_empty() && !sim.captains().iter().any(|c| {
+                    let d = c.pos - bulb.pos;
+                    d.x * d.x + d.z * d.z < crate::bulb::DRAW_DISTANCE * crate::bulb::DRAW_DISTANCE
+                }) {
+                    continue;
+                }
                 let joints = set.joints(bulb);
                 let k = key(kinds::PELLET, 0x4255_0000 + bulb.id.0 as u64);
                 let (pos, rot) = self.place_rot(k, bulb.pos, Quat::IDENTITY, tick, alpha);
@@ -1895,6 +1930,14 @@ impl View {
                 let scale = if bulb.queen { 1.25 } else { 1.0 };
                 self.push_body(&body.body.model, body.model, body.tex_base, scale, kinds::PELLET, k, pos, rot,
                     Mat4::IDENTITY, &joints, 1.0, 0);
+                // Its sounds (on the host's Pikmin 2 output, with the treasures') and the effects of the moment.
+                let now = self.time;
+                self.treasure_cues.extend(cues.into_iter().map(|id| crate::treasure::Cue { id, at: bulb.pos }));
+                if let Some(kind) = burst { self.bulb_bursts.push((bulb.pos, bulb.colour, kind, now)); }
+                if bulb.can_swallow() { self.bulb_spots.push((bulb.pos, bulb.colour, bulb.id.0)); }
+            }
+            if self.bulb_tracks.len() > sim.bulbs().len() {
+                self.bulb_tracks.retain(|id, _| sim.bulbs().iter().any(|b| b.id.0 == *id));
             }
         }
         for pel in sim.pellets() {

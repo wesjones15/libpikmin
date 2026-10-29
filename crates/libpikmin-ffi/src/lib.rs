@@ -65,13 +65,34 @@ pub unsafe extern "C" fn pik_sim_set_lock_target(sim: *mut PikSim, captain: u32,
 }
 
 /// Locks the captain onto a pellet, corpse or ship part (its `PikPellet::id`); `enabled` 0 lets go. Call it
-/// every tick, as `pik_sim_set_lock_target`: the lock lapses once the thing is delivered.
+/// every tick, as `pik_sim_set_lock_target`: the lock lapses once the thing is delivered. An id from
+/// `libpikmin::bulb::LOCK_BASE` (0x40000000) up is a Candypop Bud (its `PikBulb::id` plus that), so a host passes one
+/// "thing" number for both; the other lock is let go.
 ///
 /// # Safety
 /// `sim` from `pik_sim_new`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_lock_pellet(sim: *mut PikSim, captain: u32, pellet: u32, enabled: u8) {
-    unsafe { with(sim, (), |s| s.sim.set_lock_pellet(CaptainId(captain), (enabled != 0).then_some(libpikmin::carry::PelletId(pellet)))) }
+    use libpikmin::bulb::LOCK_BASE;
+    unsafe {
+        with(sim, (), |s| {
+            let on = enabled != 0;
+            let bulb = (on && pellet >= LOCK_BASE).then(|| libpikmin::BulbId(pellet - LOCK_BASE));
+            let pellet = (on && pellet < LOCK_BASE).then_some(libpikmin::carry::PelletId(pellet));
+            s.sim.set_lock_pellet(CaptainId(captain), pellet);
+            s.sim.set_lock_bulb(CaptainId(captain), bulb);
+        })
+    }
+}
+
+/// How many Pikmin a plain Candypop Bud and the rainbow Pop take before they wither (Pikmin 2: 5 and 1; at most 200),
+/// for the buds there are and later ones.
+///
+/// # Safety
+/// `sim` from `pik_sim_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_bulb_slots(sim: *mut PikSim, normal: u32, queen: u32) {
+    unsafe { with(sim, (), |s| s.sim.set_bulb_slots(normal, queen)) }
 }
 
 #[unsafe(no_mangle)]
