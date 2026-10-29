@@ -7,6 +7,7 @@
 //! damage in with [`Tekis::damage`] and the real position back with [`Tekis::set_position`].
 
 pub mod anim;
+pub mod baby;
 pub mod beatle;
 pub mod bulborb;
 pub mod collec;
@@ -75,7 +76,7 @@ impl Tekis {
         let p2_root = assets.root.join("p2");
         for kind in p2::FIRST..p2::FIRST + p2::KIND_TABLE.len() as u8 {
             let info = TekiInfo::load_p2(&p2_root, kind).ok().map(Arc::new);
-            let strategy = info.as_ref().map(|_| Arc::new(kogane::strategy(kind)));
+            let strategy = info.as_ref().map(|_| Arc::new(p2_strategy(kind)));
             infos.push(info);
             strategies.push(strategy);
         }
@@ -238,6 +239,14 @@ impl Tekis {
         self.pending = events;
         self.list.retain(|t| !finished.contains(&t.id));
         out
+    }
+}
+
+/// The strategy of Pikmin 2 kind `kind`.
+fn p2_strategy(kind: u8) -> Strategy {
+    match kind {
+        p2::BULBORB_LARVA => baby::strategy(),
+        _ => kogane::strategy(kind),
     }
 }
 

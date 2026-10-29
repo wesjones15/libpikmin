@@ -46,7 +46,7 @@ impl P2Teki {
 pub fn load_body(dir: &Path, kind: u8) -> Result<EnemyBody, String> {
     let k = p2::kind(kind).ok_or("not a Pikmin 2 kind")?;
     let base = format!("enemy/data/{}", k.data);
-    EnemyBody::load(dir, &format!("{base}/model/enemy.bmd"), &format!("{base}/anim"), Some(&format!("enemy/data/{}", k.texture)))
+    EnemyBody::load(dir, &format!("{base}/model/enemy.bmd"), &format!("{base}/anim"), k.texture.map(|t| format!("enemy/data/{t}")).as_deref())
 }
 
 /// What the disc says about `kind` with the body's real bounds (the parm files give only a collision sphere), at the

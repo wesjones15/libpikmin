@@ -26,6 +26,8 @@ pub const FLINT_BEETLE: u8 = 27;
 pub const GLINT_BEETLE: u8 = 28;
 /// Doodlebug (`Fart::Obj`).
 pub const DOODLEBUG: u8 = 29;
+/// Bulborb Larva (`Baby::Obj`).
+pub const BULBORB_LARVA: u8 = 30;
 
 /// One Pikmin 2 kind: where its files are (`<cache>/enemy/...`) and what it is called.
 pub struct Kind {
@@ -37,14 +39,19 @@ pub struct Kind {
     pub shared: &'static str,
     /// `enemy/data/<data>/model/enemy.bmd` and `anim/*.bca`: the Kogane family shares one model.
     pub data: &'static str,
-    /// The texture file the kind swaps in (`Mgr::getChangeTexture`), under `enemy/data/`.
-    pub texture: &'static str,
+    /// The texture file the kind swaps in (`Mgr::getChangeTexture`), under `enemy/data/`, if it reuses another's model.
+    pub texture: Option<&'static str>,
+    /// Its name in `carcass_config.txt` when it leaves a corpse (`EnemyBase::EB_LeaveCarcass`), else none.
+    pub carcass: Option<&'static str>,
+    /// The clip its corpse lies in (the dying motion).
+    pub dead: &'static str,
 }
 
-pub const KIND_TABLE: [Kind; 3] = [
-    Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", texture: "Kogane/kogane_s3tc.bti" },
-    Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", texture: "Wealthy/oogane_s3tc.bti" },
-    Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", texture: "Fart/babakogane_s3tc.bti" },
+pub const KIND_TABLE: [Kind; 4] = [
+    Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", texture: Some("Kogane/kogane_s3tc.bti"), carcass: None, dead: "damage" },
+    Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", texture: Some("Wealthy/oogane_s3tc.bti"), carcass: None, dead: "damage" },
+    Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", texture: Some("Fart/babakogane_s3tc.bti"), carcass: None, dead: "damage" },
+    Kind { name: "Bulborb Larva", parm: "baby", shared: "baby", data: "Baby", texture: None, carcass: None, dead: "dead" },
 ];
 
 pub fn kind(kind: u8) -> Option<&'static Kind> {
@@ -67,6 +74,10 @@ pub mod fp {
     pub const VIEW_ANGLE: usize = 13;
     /// `mMaxAttackRange`.
     pub const MAX_ATTACK_RANGE: usize = 20;
+    /// `mMaxAttackAngle`, degrees.
+    pub const MAX_ATTACK_ANGLE: usize = 21;
+    /// `mAttackHitAngle`, degrees.
+    pub const ATTACK_HIT_ANGLE: usize = 23;
     /// `mAttackRadius`.
     pub const ATTACK_RADIUS: usize = 22;
     /// `mAttackDamage`.
@@ -93,6 +104,8 @@ pub mod fp {
 }
 
 const SLOTS: usize = 160;
+/// The corpse config's place under `<cache>/enemy/` (`libsms::extract::p2_enemy::CARCASS`).
+pub const CARCASS_FILE: &str = "carcass_config.txt";
 
 /// The text parameter files: blocks of `{id} type value` ended by `{_eof}`. The first block is
 /// `Creature::Property`, the second `EnemyParmsBase`'s general parms, the third the enemy's own
@@ -135,6 +148,8 @@ pub fn parse_anim_mgr(text: &str) -> Vec<ClipInfo> {
         }
         match (line, &mut cur) {
             ("{", None) => cur = Some((Vec::new(), Vec::new())),
+            // Some blocks put the source path on the `{` line.
+            (l, None) if l.starts_with('{') => cur = Some((vec![l[1..].trim().to_owned()], Vec::new())),
             ("}", Some(_)) => {
                 let (names, keys) = cur.take().unwrap();
                 if let Some(file) = names.get(1) {
@@ -155,6 +170,51 @@ pub fn parse_anim_mgr(text: &str) -> Vec<ClipInfo> {
         }
     }
     clips
+}
+
+/// One corpse of `carcass_config.txt` (`PelletConfig::TParms`, pelletConfig.cpp): a block per enemy of `key value` lines
+/// ended by `end`.
+#[derive(Debug, Clone, Default)]
+pub struct Carcass {
+    pub name: String,
+    pub radius: f32,
+    pub height: f32,
+    pub min_carriers: u32,
+    pub max_carriers: u32,
+    /// `pikicountmin` / `pikicountmax`: the Pikmin it turns into when taken to an Onion.
+    pub piki_min: i32,
+    pub piki_max: i32,
+    pub offset: Vec3,
+}
+
+pub fn parse_carcass(text: &str) -> Vec<Carcass> {
+    let mut out = Vec::new();
+    let mut cur: Option<Carcass> = None;
+    for line in text.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        let mut w = line.split_whitespace();
+        let (Some(key), rest) = (w.next(), w.collect::<Vec<_>>()) else { continue };
+        let num = |i: usize| rest.get(i).and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+        match key {
+            "{" => cur = Some(Carcass::default()),
+            "}" => out.extend(cur.take()),
+            _ => {
+                let Some(c) = cur.as_mut() else { continue };
+                match key {
+                    "name" => c.name = rest.first().copied().unwrap_or("").to_owned(),
+                    "radius" => c.radius = num(0),
+                    "height" => c.height = num(0),
+                    "min" => c.min_carriers = num(0) as u32,
+                    "max" => c.max_carriers = num(0) as u32,
+                    "pikicountmin" => c.piki_min = num(0) as i32,
+                    "pikicountmax" => c.piki_max = num(0) as i32,
+                    "offset" => c.offset = Vec3::new(num(0), num(1), num(2)),
+                    _ => {}
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The length in frames of a J3D `.bca`/`.bck` (its `ANF1`/`ANK1` chunk: loop mode, angle scale, then the duration).
@@ -241,6 +301,11 @@ impl TekiInfo {
             let m = motion_data.get(index);
             TekiMotion { index: index as u32, start: 0.0, end: m.map_or(1.0, |m| m.frames), loop_start: 0.0, loop_end: m.map_or(1.0, |m| m.frames), action0: 0.0, action1: 0.0 }
         };
+        let carcass = k.carcass.and_then(|name| {
+            let text = read_text(&root.join("enemy").join(crate::p2::CARCASS_FILE)).ok()?;
+            parse_carcass(&text).into_iter().find(|c| c.name.eq_ignore_ascii_case(name))
+        });
+        let dead = clips.iter().position(|c| c.file.trim_end_matches(".bca").trim_end_matches(".bck") == k.dead).unwrap_or(0);
         let model = Model::default();
         let skeleton = Skeleton::new(&model);
         Ok(TekiInfo {
@@ -258,18 +323,20 @@ impl TekiInfo {
             attack_range: floats[fp::ATTACK_RADIUS],
             attack_power: floats[fp::ATTACK_DAMAGE],
             collision_radius: r,
-            corpse_size: 0.0,
-            corpse_height: 0.0,
-            corpse_min_carriers: 1,
-            corpse_max_carriers: 1,
-            corpse_seeds_matching: 0,
-            corpse_seeds_other: 0,
+            corpse_size: carcass.as_ref().map_or(0.0, |c| c.radius),
+            corpse_height: carcass.as_ref().map_or(0.0, |c| c.height),
+            corpse_min_carriers: carcass.as_ref().map_or(1, |c| c.min_carriers.max(1)),
+            corpse_max_carriers: carcass.as_ref().map_or(1, |c| c.max_carriers.max(c.min_carriers).max(1)),
+            corpse_seeds_matching: carcass.as_ref().map_or(0, |c| c.piki_max),
+            corpse_seeds_other: carcass.as_ref().map_or(0, |c| c.piki_max),
             swallow_count: 1,
             carcass_size: 3,
-            corpse_offset: Vec3::ZERO,
+            corpse_offset: carcass.as_ref().map_or(Vec3::ZERO, |c| c.offset * scale),
             lo: Vec3::new(-r, 0.0, -r),
             hi: Vec3::new(r, r * 2.0, r),
-            motions: std::array::from_fn(|i| whole(i.min(motion_data.len().saturating_sub(1)))),
+            motions: std::array::from_fn(|i| {
+                if i == crate::info::slot::DEAD { whole(dead) } else { whole(i.min(motion_data.len().saturating_sub(1))) }
+            }),
             motion_data,
             shape: Arc::new(model),
             skeleton: Arc::new(skeleton),
@@ -287,6 +354,7 @@ impl TekiInfo {
 pub fn sound_id(name: &str) -> Option<u32> {
     Some(match name {
         "ENEMY_LOOSE_ITEM" => 0x5810,
+        "BABY_PRESSED" => 0x580F,
         "KOGANE_WALK" => 0x5872,
         "KOGANE_HIT" => 0x5873,
         "OOGANE_HIT" => 0x5880,
@@ -298,4 +366,23 @@ pub fn sound_id(name: &str) -> Option<u32> {
         "OTAKARA_ATK_GAS" => 0x5964,
         _ => return None,
     })
+}
+
+// ---- helpers the Pikmin 2 enemies share (`EnemyFunc`, `EnemyBase`)
+
+/// `EnemyBase::turnToTarget(pos, factor, maxTurnAngle)`: each tick turn by `factor` of the angle left, at most `max_deg`.
+/// Returns the signed angle that was left before the turn.
+pub fn turn_to_target(t: &mut crate::object::Teki, target: Vec3, factor: f32, max_deg: f32) -> f32 {
+    let want = t.calc_target_direction(target);
+    let face = t.direction();
+    let diff = crate::object::nearer_direction(face, want) - face;
+    let max = max_deg.to_radians();
+    t.yaw = face + (diff * factor).clamp(-max, max);
+    diff
+}
+
+/// `EnemyBase::setTargetSpeed`: head along the facing at `speed`, keeping the vertical speed.
+pub fn set_target_speed(t: &mut crate::object::Teki, speed: f32) {
+    let d = crate::object::dir_vec(t.yaw);
+    t.target_vel = Vec3::new(speed * d.x, t.target_vel.y, speed * d.z);
 }
