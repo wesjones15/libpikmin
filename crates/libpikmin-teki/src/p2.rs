@@ -226,7 +226,7 @@ pub fn parse_anim_mgr(text: &str) -> Vec<ClipInfo> {
             // Some blocks put the source path on the `{` line.
             (l, None) if l.starts_with('{') => cur = Some((vec![l[1..].trim().to_owned()], Vec::new())),
             // The Segmented Crawbster's `attack_2` block has lost its `{`: its source path starts it.
-            (l, None) if l.contains('\') => cur = Some((vec![l.to_owned()], Vec::new())),
+            (l, None) if l.contains('\\') => cur = Some((vec![l.to_owned()], Vec::new())),
             ("}", Some(_)) => {
                 let (names, keys) = cur.take().unwrap();
                 if let Some(file) = names.get(1) {
