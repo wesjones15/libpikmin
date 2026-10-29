@@ -2080,9 +2080,10 @@ impl View {
                 let body = &sk.climbers[sk.costume(p.color, p.id.0)];
                 let world = body.pose(&pose.joints);
                 self.push_hsd(body, kinds::PIKI, k, pos, rot, Mat4::from_scale(look.scale), &world, look.fade, f & !flags::FROZEN, true);
-            } else {
-                self.push(k, kinds::PIKI, model, pos, rot, pose, &inputs, look.fade, f);
+                // Climbers have no Pikmin leaf, bud or flower attachment.
+                continue;
             }
+            self.push(k, kinds::PIKI, model, pos, rot, pose, &inputs, look.fade, f);
             if let Some(j) = head
                 && !matches!(p.state, PikiState::Pressed { .. })
             {

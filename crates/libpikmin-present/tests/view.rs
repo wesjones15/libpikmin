@@ -15,6 +15,48 @@ fn assets() -> Option<Assets> {
 }
 
 #[test]
+fn ice_climbers_hide_growth_attachments_without_affecting_normal_pikmin() {
+    use libpikmin::{CaptainInput, Happa};
+    use libpikmin_present::pikachu::SKIN_PIKACHU;
+    let Some(assets) = assets() else { return };
+    let melee = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../libssbm/assets");
+    if !libssbm_assets::disc::ice_climbers_present(&melee) {
+        eprintln!("SKIP: no Melee cache with the Ice Climbers");
+        return;
+    }
+    let mut view = View::load(&assets).unwrap();
+    let pikachu = view.load_pikachu(&melee).unwrap();
+    let mut sim = Sim::default();
+    let captains = [sim.add_captain(Vec3::ZERO), sim.add_captain(Vec3::X * 200.0)];
+    for captain in captains {
+        for (i, stage) in [Happa::Leaf, Happa::Bud, Happa::Flower].into_iter().enumerate() {
+            let id = sim.spawn_piki_in_squad(PikiColor::from_index(i), Vec3::new(i as f32 * 20.0, 0.0, captain.0 as f32 * 100.0), captain).unwrap();
+            sim.piki_mut(id).happa = stage;
+        }
+        sim.set_input(captain, CaptainInput { stick: libpikmin::Vec2::Y, ..Default::default() });
+    }
+    view.set_captain_skin(captains[0].0, SKIN_PIKACHU);
+    for _ in 0..3 {
+        sim.step(&mut FlatHost);
+        view.update(&sim, 1.0, TICK_DT);
+        let pikis: Vec<_> = view.draws.iter().filter(|d| d.kind == kinds::PIKI).collect();
+        assert_eq!(pikis.len(), 6);
+        assert_eq!(pikis.iter().filter(|d| d.model > pikachu).count(), 3);
+        let growth: Vec<_> = view.draws.iter().filter(|d| d.kind == kinds::HAPPA).collect();
+        assert_eq!(growth.len(), 3, "only the ordinary captain's Pikmin have attachments");
+        for model in models::HAPPA {
+            assert!(growth.iter().any(|d| d.model == model));
+        }
+    }
+    // Skin changes restore all growth stages, then hide the climbers' again.
+    for (skin, attachments) in [(0, 6), (SKIN_PIKACHU, 3)] {
+        view.set_captain_skin(captains[0].0, skin);
+        view.update(&sim, 1.0, TICK_DT);
+        assert_eq!(view.draws.iter().filter(|d| d.kind == kinds::HAPPA).count(), attachments);
+    }
+}
+
+#[test]
 fn distant_pose_budget_keeps_draws_and_clocks_but_skips_vertex_work() {
     use libpikmin_present::view::flags::RETAIN_POSE;
     let Some(assets) = assets() else { return };

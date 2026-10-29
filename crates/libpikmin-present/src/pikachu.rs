@@ -306,7 +306,15 @@ impl PikachuSkin {
         let captain = HsdBody::load(dir, "PlPkNr.dat", Archive { file: "PlPk.dat", root: "ftDataPikachu" }, 12, src_bind)?;
         let mut climbers = Vec::with_capacity(CLIMBER_COSTUMES.len());
         for (costume, data, root, kind) in CLIMBER_COSTUMES {
-            climbers.push(HsdBody::load(dir, costume, Archive { file: data, root }, kind, src_bind)?);
+            let mut body = HsdBody::load(dir, costume, Archive { file: data, root }, kind, src_bind)?;
+            // PlPp.dat / PlNn.dat model-part group 1 is the hammer (DObjs 37-42,
+            // including its low-detail alternative). Group 0 is the body.
+            // ftPp_Init_OnDeath / ftNn_Init_OnDeath select these separately through
+            // ftParts_80074A4C; choice -1 hides the whole group. Squad skin adaptation.
+            let bytes = std::fs::read(dir.join(data)).map_err(|e| format!("{data}: {e}"))?;
+            let d = Dat::parse(&bytes).map_err(|e| e.to_string())?;
+            body.model.set_part_choices(&d, root, 0, &[(1, None)]).map_err(|e| format!("{costume}: {e}"))?;
+            climbers.push(body);
         }
         let anims = Animations::load_for(dir, &libssbm_assets::fighter::PIKACHU).ok();
         let mut skin = PikachuSkin { captain, anims, climbers, olimar_height, captain_ratio: 1.0, climber_ratio: 0.42 };
@@ -392,6 +400,14 @@ mod tests {
             let mut tex = Vec::new();
             body.register(0, &mut tex);
             assert!(!body.shown.is_empty());
+            if i > 0 {
+                let (costume, data, root, _) = CLIMBER_COSTUMES[i - 1];
+                let original = hsd::Model::load_costume(&dir, costume, Archive { file: data, root }, 0, None).unwrap();
+                assert!(original.normal_visible[37..40].iter().all(|&v| v), "{costume}: source hammer exists");
+                assert_eq!(&body.model.normal_visible[..37], &original.normal_visible[..37], "{costume}: body parts unchanged");
+                assert!(body.model.normal_visible[37..43].iter().all(|&v| !v), "{costume}: both hammer details hidden");
+                assert!(body.shown.iter().all(|&(b, _)| body.model.batches[b].owner != 15), "{costume}: no hammer vertices registered");
+            }
             let (mut p, mut n) = (Vec::new(), Vec::new());
             let low = body.skin_into(&body.pose(&bind.joints), Mat4::IDENTITY, &mut p, &mut n);
             assert!(low.is_finite());
