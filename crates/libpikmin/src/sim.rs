@@ -473,6 +473,10 @@ fn push_out(pos: &mut Vec3, from: Vec3, min: f32) {
 /// doubles until each step travels less than the body's `radius`, so nothing tunnels through
 /// a wall, and after each step the host pushes the body's sphere out of walls
 /// ([`Host::walls`]). Whatever velocity pointed into the wall is dropped.
+/// Host adaptation: the steepest downhill (rise over run, tan 50°) a grounded body follows
+/// instead of leaving the ground. RoR2's terrain is mostly slope; Pikmin 1's maps barely are.
+const GLUE_SLOPE: f32 = 1.2;
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn integrate(
     host: &dyn Host,
@@ -497,6 +501,7 @@ pub(crate) fn integrate(
     if *on_ground { vel.y = 0.0; } else { vel.y -= gravity * dt; }
 
     let radius = radius.max(1.0);
+    let start = *pos;
     let start_y = pos.y;
     let mut steps = 1u32;
     let mut travel = vel.length() * dt;
@@ -524,15 +529,25 @@ pub(crate) fn integrate(
     // tick: walking uphill the feet end up under the slope, and falling fast they can pass a
     // floor within one tick. Anything taller than the step is a wall for `Host::walls`, whose
     // sphere sits `radius` up.
-    let probe = Vec3::new(pos.x, pos.y.max(start_y) + radius, pos.z);
+    // A fast step up a slope can rise more than the step height in one tick; the probe then
+    // started under the slope and missed it. It reaches up as far as GLUE_SLOPE allows over this
+    // tick's travel (walls, faces too steep for that, are still `Host::walls`' business). Only
+    // on the ground: in the air it would lift a jump up through a thin platform overhead.
+    let travel = (pos.x - start.x).hypot(pos.z - start.z);
+    let reach = if *on_ground { radius.max(travel * GLUE_SLOPE) } else { radius };
+    let probe = Vec3::new(pos.x, pos.y.max(start_y) + reach, pos.z);
     match host.ground_height(probe) {
         Some(g) if pos.y <= g => {
             pos.y = g;
             vel.y = vel.y.max(0.0);
             *on_ground = true;
         }
-        // Stay glued when walking down gentle slopes.
-        Some(g) if *on_ground && vel.y <= 0.0 && pos.y - g < 4.0 => {
+        // Stay glued when walking down slopes. The allowance grows with this tick's horizontal
+        // travel, up to a slope of about 50 degrees (GLUE_SLOPE): a fixed 4 units let a sprinting
+        // body leave a 22-degree downhill every tick, and each lift-off came back as a landing
+        // that restarted the run animation. A real ledge drops further than this and is a fall.
+        Some(g) if *on_ground && vel.y <= 0.0
+            && pos.y - g < 4.0 + travel * GLUE_SLOPE => {
             pos.y = g;
             vel.y = 0.0;
         }
@@ -564,5 +579,56 @@ mod ground_motion_tests {
         assert!(grounded);
         assert!(pos.x > 50.0, "floor contact must not arrest horizontal walking");
         assert_eq!(pos.y, 0.0);
+    }
+
+    /// A ramp falling toward +X at `tan` (rise over run).
+    struct Ramp(f32);
+    impl Host for Ramp {
+        fn ground_height(&self, pos: Vec3) -> Option<f32> {
+            let h = -pos.x * self.0;
+            (pos.y >= h).then_some(h)
+        }
+    }
+
+    #[test]
+    fn running_up_and_down_a_slope_stays_grounded_every_tick() {
+        // 30 and 45 degrees, at a walk (4 units a tick) and a sprint with speed items (10);
+        // +X runs downhill, -X uphill.
+        for tan in [0.577f32, 1.0] {
+            for speed in [120.0f32, 300.0, -120.0, -300.0] {
+                let host = Ramp(tan);
+                let mut pos = Vec3::ZERO;
+                let mut vel = Vec3::X * speed;
+                let mut grounded = true;
+                for tick in 0..90 {
+                    integrate(&host, &mut pos, &mut vel, Vec3::X * speed,
+                        &mut grounded, 10.0, 0.2, 300.0, 1.0 / 30.0);
+                    assert!(grounded, "left the ground on tick {tick} at slope {tan}, speed {speed}: \
+                        each lift-off is a landing and restarts the run animation");
+                }
+                assert!(pos.x.abs() > speed.abs() * 2.5, "slope {tan}, speed {speed}: only got to {}", pos.x);
+            }
+        }
+    }
+
+    #[test]
+    fn running_off_a_real_ledge_still_falls() {
+        // A 1 m drop (25 units) at a run is a fall, not a slope to glue to.
+        struct Ledge;
+        impl Host for Ledge {
+            fn ground_height(&self, pos: Vec3) -> Option<f32> {
+                let h = if pos.x < 20.0 { 0.0 } else { -25.0 };
+                (pos.y >= h).then_some(h)
+            }
+        }
+        let mut pos = Vec3::ZERO;
+        let mut vel = Vec3::X * 120.0;
+        let mut grounded = true;
+        let mut fell = false;
+        for _ in 0..30 {
+            integrate(&Ledge, &mut pos, &mut vel, Vec3::X * 120.0, &mut grounded, 10.0, 0.2, 300.0, 1.0 / 30.0);
+            fell |= !grounded;
+        }
+        assert!(fell, "a body that runs off a 1 m ledge should leave the ground");
     }
 }
