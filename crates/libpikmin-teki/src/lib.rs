@@ -17,6 +17,7 @@ pub mod collec;
 pub mod object;
 pub mod panmodoki;
 pub mod shijimi;
+pub mod dango;
 pub mod dororo;
 pub mod gashiba;
 pub mod hiba;
@@ -296,6 +297,7 @@ fn p2_strategy(kind: u8) -> Strategy {
         p2::HERMIT_CRAWMAD => jigumo::strategy(),
         p2::SPECTRALID => shijimi::strategy(),
         p2::GIANT_BREADBUG => panmodoki::strategy(),
+        p2::SEGMENTED_CRAWBSTER => dango::strategy(),
         p2::ORANGE_BULBORB | p2::HAIRY_BULBORB | p2::DWARF_ORANGE_BULBORB | p2::SNOW_BULBORB | p2::FIERY_BULBLAX => bulborb2::strategy(),
         _ => kogane::strategy(kind),
     }
