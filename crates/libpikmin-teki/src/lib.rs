@@ -207,6 +207,10 @@ impl Tekis {
 
     pub fn set_position(&mut self, id: TekiId, pos: Vec3) {
         if let Some(t) = self.get_mut(id) {
+            // A Long Legs boss stands where its feet put it (`Obj::updateIKSystem` sets its place every tick).
+            if t.legs.as_ref().is_some_and(|l| l.active) {
+                return;
+            }
             t.pos = pos;
         }
     }
