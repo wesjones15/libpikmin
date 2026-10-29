@@ -58,6 +58,8 @@ pub const EMPEROR_BULBLAX: u8 = 43;
 pub const BURROW_NIT: u8 = 44;
 /// Hermit Crawmad (`Jigumo::Obj`).
 pub const HERMIT_CRAWMAD: u8 = 45;
+/// Unmarked Spectralid (`ShijimiChou::Obj`).
+pub const SPECTRALID: u8 = 46;
 
 /// One Pikmin 2 kind: where its files are (`<cache>/enemy/...`) and what it is called.
 pub struct Kind {
@@ -77,7 +79,7 @@ pub struct Kind {
     pub dead: &'static str,
 }
 
-pub const KIND_TABLE: [Kind; 19] = [
+pub const KIND_TABLE: [Kind; 20] = [
     Kind { name: "Iridescent Flint Beetle", parm: "kogane", shared: "kogane", data: "Kogane", textures: &["Kogane/kogane_s3tc.bti"], carcass: None, dead: "damage" },
     Kind { name: "Iridescent Glint Beetle", parm: "wealthy", shared: "kogane", data: "Kogane", textures: &["Wealthy/oogane_s3tc.bti"], carcass: None, dead: "damage" },
     Kind { name: "Doodlebug", parm: "fart", shared: "kogane", data: "Kogane", textures: &["Fart/babakogane_s3tc.bti"], carcass: None, dead: "damage" },
@@ -97,6 +99,7 @@ pub const KIND_TABLE: [Kind; 19] = [
     Kind { name: "Emperor Bulblax", parm: "kingchappy", shared: "kingchappy", data: "KingChappy", textures: &[], carcass: Some("KingChappy"), dead: "dead" },
     Kind { name: "Cloaking Burrow-nit", parm: "armor", shared: "armor", data: "Armor", textures: &[], carcass: Some("Armor"), dead: "dead" },
     Kind { name: "Hermit Crawmad", parm: "jigumo", shared: "jigumo", data: "Jigumo", textures: &[], carcass: Some("Jigumo"), dead: "dead" },
+    Kind { name: "Unmarked Spectralid", parm: "shijimichou", shared: "shijimichou", data: "ShijimiChou", textures: &[], carcass: Some("ShijimiChou"), dead: "dead" },
 ];
 
 pub fn kind(kind: u8) -> Option<&'static Kind> {
@@ -424,6 +427,7 @@ pub fn sound_id(name: &str) -> Option<u32> {
         "JIGUMO_APPEAR_V" => 0x58D3,
         "JIGUMO_ATTACK_V" => 0x58EC,
         "JIGUMO_EAT" => 0x58F4,
+        "BUTTERFLY_HIT" => 0x5917,
         _ => return None,
     })
 }
