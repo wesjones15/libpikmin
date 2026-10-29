@@ -74,13 +74,19 @@ fn a_host_can_give_buds_room_for_a_big_squad() {
     assert_eq!(slots, [(before, 40), (pop, 8)], "existing buds too, and the Pop its own");
     sim.set_bulb_slots(0, 9999);
     assert_eq!((sim.bulbs()[0].slots, sim.bulbs()[1].slots), (1, bulb::MAX_SLOTS), "clamped");
-    // Forty fit.
+    // Forty fit, five at a time: it spits each five before it takes more.
     sim.set_bulb_slots(40, 8);
     for _ in 0..40 { sim.step(&mut FlatHost); }
-    for _ in 0..40 {
-        let p = sim.spawn_piki(PikiColor::Red, Vec3::new(0.0, 20.0, 0.0)).unwrap();
-        sim.piki_mut(p).state = libpikmin::PikiState::Flying { ground_frames: 0 };
+    let mut fed = 0;
+    for _ in 0..(60 * 30) {
+        if fed < 40 && sim.bulbs()[0].can_swallow() {
+            let p = sim.spawn_piki(PikiColor::Red, Vec3::new(0.0, 20.0, 0.0)).unwrap();
+            sim.piki_mut(p).state = libpikmin::PikiState::Flying { ground_frames: 0 };
+            fed += 1;
+        }
         sim.step(&mut FlatHost);
+        if sim.bulbs()[0].used == 40 { break; }
     }
     assert_eq!(sim.bulbs()[0].used, 40);
+    assert!(fed == 40, "all forty went in");
 }

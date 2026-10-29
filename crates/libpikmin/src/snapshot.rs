@@ -31,7 +31,7 @@ use crate::strike::Strike;
 use crate::{CaptainId, PikiId};
 
 /// Bumped when the encoding changes.
-pub const SNAPSHOT_VERSION: u8 = 10;
+pub const SNAPSHOT_VERSION: u8 = 11;
 
 // Far more than any real sim has; a corrupt length can't make decoding allocate wildly.
 const MAX_ENTITIES: usize = 4096;
@@ -1539,6 +1539,7 @@ fn w_bulb(w: &mut Writer, b: &Bulb) {
     w.u8(tag);
     w.f32(t);
     w.bool(fired);
+    w.opt(b.owner.as_ref(), |w, c| w.u32(c.0));
 }
 
 fn r_bulb(r: &mut Reader) -> Option<Bulb> {
@@ -1557,7 +1558,8 @@ fn r_bulb(r: &mut Reader) -> Option<Bulb> {
         4 => BulbState::Dead { t },
         _ => return None,
     };
-    Some(Bulb { id, pos, colour, queen, slots, used, swallowed, same, change, state })
+    let owner = r.opt(|r| r.u32().map(CaptainId))?;
+    Some(Bulb { id, pos, colour, queen, slots, used, swallowed, same, change, state, owner })
 }
 
 // ---- events ----------------------------------------------------------------------------------

@@ -315,7 +315,7 @@ mod tests {
     fn bud(state: BulbState, used: u32, swallowed: u32) -> Bulb {
         Bulb {
             id: libpikmin::BulbId(1), pos: Vec3::ZERO, colour: PikiColor::Purple, queen: false, slots: 5, used, swallowed, same: 0,
-            change: 0.0, state,
+            change: 0.0, state, owner: None,
         }
     }
 

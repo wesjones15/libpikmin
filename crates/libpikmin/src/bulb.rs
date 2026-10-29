@@ -12,10 +12,15 @@
 //! Host adaptations: Pikmin 2's bud swallows a Pikmin that presses its `slot` part; here a thrown Pikmin that comes down
 //! within [`RADIUS`] of the bud's foot and under [`HEIGHT`] is swallowed. The phases last as long as the disc's clips
 //! ([`OPEN_TIME`], [`CLOSE_TIME`], [`SHOT_TIME`], [`WITHER_TIME`]); the seeds fly [`SHOT_AT`] seconds into the shot.
-//! Hosts decide where buds stand ([`Sim::add_bulb`]).
+//! Hosts decide where buds stand ([`Sim::add_bulb`]) and may give them many more slots than Pikmin 2's
+//! ([`Sim::set_bulb_slots`]), so a bud spits each batch of [`SLOTS`] (the Pop: [`QUEEN_SLOTS`]) as soon as it has
+//! swallowed it, and keeps doing so until its slots are gone. What it spits are live Pikmin, thrown up as the seeds
+//! are, that land beside it in the squad of the captain who threw the last one in; the decomp's seeds take root
+//! instead. Only when the field already holds the most Pikmin it can does a bud plant seeds.
 
 use glam::Vec3;
 
+use crate::CaptainId;
 use crate::event::Event;
 use crate::piki::{Happa, PikiColor, PikiState};
 use crate::sim::Sim;
@@ -85,6 +90,8 @@ pub struct Bulb {
     /// The Pop's colour change timer.
     pub change: f32,
     pub state: BulbState,
+    /// The captain whose Pikmin went in last: the Pikmin it spits are his.
+    pub owner: Option<CaptainId>,
 }
 
 impl Bulb {
@@ -92,9 +99,15 @@ impl Bulb {
         self.slots
     }
 
-    /// `mCanSwallowPiki`: open and unfolded, with a slot free.
+    /// How many swallowed Pikmin make it close and spit: Pikmin 2's own slot count ([`SLOTS`], the Pop's [`QUEEN_SLOTS`]).
+    pub fn batch(&self) -> u32 {
+        if self.queen { QUEEN_SLOTS } else { SLOTS }
+    }
+
+    /// `mCanSwallowPiki`: open and unfolded, with a slot free and its batch not yet full.
     pub fn can_swallow(&self) -> bool {
         self.used < self.slots()
+            && self.swallowed < self.batch()
             && match self.state {
                 BulbState::Open { t } => t >= OPEN_TIME,
                 BulbState::Swing { .. } => true,
@@ -126,13 +139,15 @@ impl Sim {
             same: 0,
             change: 0.0,
             state: BulbState::Open { t: 0.0 },
+            owner: None,
         });
         id
     }
 
     /// How many Pikmin a plain bud and the rainbow Pop take before they wither (Pikmin 2: [`SLOTS`] 5 and [`QUEEN_SLOTS`] 1),
     /// for the buds there are and the ones added later. A host with bigger squads than Pikmin 2's gives them more room;
-    /// each Pikmin a bud swallows still comes back as one sprout (five from the Pop). Clamped to 1..=[`MAX_SLOTS`].
+    /// a bud still spits after each [`Bulb::batch`], one Pikmin for each that went in (five from the Pop).
+    /// Clamped to 1..=[`MAX_SLOTS`].
     pub fn set_bulb_slots(&mut self, normal: u32, queen: u32) {
         self.bulb_slots = (normal.clamp(1, MAX_SLOTS), queen.clamp(1, MAX_SLOTS));
         for b in &mut self.bulbs {
@@ -151,7 +166,7 @@ impl Sim {
 
     /// A thrown Pikmin that has just come down: the bud it went into, if it did. `Obj::pressCallBack`.
     pub(crate) fn bulb_swallow(&mut self, pi: usize) -> bool {
-        let (pos, color, id) = (self.pikis[pi].pos, self.pikis[pi].color, self.pikis[pi].id);
+        let (pos, color, id, captain) = (self.pikis[pi].pos, self.pikis[pi].color, self.pikis[pi].id, self.pikis[pi].captain);
         let Some(bi) = self.bulbs.iter().position(|b| {
             b.can_swallow()
                 && (b.pos - pos).truncate_y_len() <= RADIUS + self.pikis[pi].size
@@ -168,6 +183,9 @@ impl Sim {
         if color == b.colour {
             b.same += 1;
         }
+        if captain.is_some() {
+            b.owner = captain;
+        }
         b.state = BulbState::Swing { t: 0.0 };
         let (bulb, at) = (b.id, b.pos);
         self.events.push(Event::BulbSwallowed { piki: id, bulb, colour: color, pos: at });
@@ -175,7 +193,7 @@ impl Sim {
     }
 
     pub(crate) fn update_bulbs(&mut self, dt: f32) {
-        let mut spat: Vec<(Vec3, PikiColor, u32, BulbId)> = Vec::new();
+        let mut spat: Vec<(Vec3, PikiColor, u32, BulbId, Option<CaptainId>)> = Vec::new();
         for b in &mut self.bulbs {
             // The Pop turns while it waits (`changePomColor` in Wait, Open and Swing).
             if b.queen && matches!(b.state, BulbState::Open { .. } | BulbState::Swing { .. }) {
@@ -192,7 +210,7 @@ impl Sim {
             b.state = match b.state {
                 BulbState::Open { t } => BulbState::Open { t: t + dt },
                 BulbState::Swing { t } => {
-                    if t + dt > REMAIN_OPEN || b.used >= b.slots() {
+                    if t + dt > REMAIN_OPEN || b.used >= b.slots() || b.swallowed >= b.batch() {
                         BulbState::Close { t: 0.0 }
                     } else {
                         BulbState::Swing { t: t + dt }
@@ -211,7 +229,7 @@ impl Sim {
                     if !fired && t >= SHOT_AT {
                         fired = true;
                         let count = b.swallowed * if b.queen { QUEEN_MULTIPLIER } else { 1 };
-                        spat.push((b.pos + Vec3::Y * SHOT_HEIGHT, b.colour, count, b.id));
+                        spat.push((b.pos + Vec3::Y * SHOT_HEIGHT, b.colour, count, b.id, b.owner));
                         // Its own colour gives the slot back; the Pop never does.
                         if !b.queen {
                             b.used = b.used.saturating_sub(b.same);
@@ -228,11 +246,23 @@ impl Sim {
                 BulbState::Dead { t } => BulbState::Dead { t: t + dt },
             };
         }
-        for (at, colour, count, bulb) in spat {
+        for (at, colour, count, bulb, owner) in spat {
+            // A captain who has left takes no Pikmin; they land as nobody's.
+            let owner = owner.filter(|c| (c.0 as usize) < self.captains.len());
             for _ in 0..count {
                 let angle = self.rng.f32() * std::f32::consts::TAU;
                 let vel = Vec3::new(SHOT_SIDE * angle.cos(), SHOT_UP, SHOT_SIDE * angle.sin());
-                self.launch_sprout(colour, Happa::Leaf, at, vel);
+                // Thrown up as `Obj::shotPikmin` throws its seeds, and tumbling down as a thrown Pikmin does.
+                let Some(id) = self.spawn_piki(colour, at) else {
+                    self.launch_sprout(colour, Happa::Leaf, at, vel);
+                    continue;
+                };
+                let p = &mut self.pikis[id.0 as usize];
+                p.captain = owner;
+                p.vel = vel;
+                p.target_vel = vel;
+                p.on_ground = false;
+                p.state = PikiState::Flying { ground_frames: 0 };
             }
             self.events.push(Event::BulbShot { bulb, colour, count, pos: at });
         }
@@ -279,8 +309,12 @@ mod tests {
         assert!(!sim.bulb_swallow(far.0 as usize), "it must come down on the bud");
     }
 
+    fn alive(sim: &Sim, color: PikiColor) -> usize {
+        sim.pikis.iter().filter(|p| p.is_alive() && p.color == color).count()
+    }
+
     #[test]
-    fn it_spits_one_seed_of_its_colour_for_each_pikmin_after_thirty_seconds() {
+    fn it_spits_one_pikmin_of_its_colour_for_each_after_thirty_seconds() {
         let mut sim = Sim::default();
         sim.add_bulb(PikiColor::Purple, false, Vec3::ZERO);
         for _ in 0..30 {
@@ -296,7 +330,9 @@ mod tests {
         }
         let shot: Vec<_> = sim.drain_events().filter_map(|e| if let Event::BulbShot { colour, count, .. } = e { Some((colour, count)) } else { None }).collect();
         assert_eq!(shot, [(PikiColor::Purple, 2)]);
-        assert_eq!(sim.sprouts().filter(|s| s.color == PikiColor::Purple).count(), 2);
+        assert_eq!(alive(&sim, PikiColor::Purple), 2, "live Pikmin");
+        assert_eq!(sim.sprouts().count(), 0, "nothing planted");
+        assert!(sim.pikis.iter().filter(|p| p.is_alive()).all(|p| matches!(p.state, PikiState::Flying { .. })), "thrown up");
         assert!(matches!(sim.bulbs()[0].state, BulbState::Open { .. }), "two of its five slots are used, so it opens again");
         assert_eq!(sim.bulbs()[0].used, 2);
     }
@@ -329,7 +365,42 @@ mod tests {
             sim.update_bulbs(1.0 / 30.0);
         }
         assert!(sim.bulbs().is_empty());
-        assert_eq!(sim.sprouts().filter(|s| s.color == PikiColor::Red).count(), 2 + SLOTS as usize, "a seed for each Pikmin that went in");
+        assert_eq!(alive(&sim, PikiColor::Red), 2 + SLOTS as usize, "a Pikmin for each that went in");
+    }
+
+    #[test]
+    fn a_big_bud_spits_every_five_until_its_slots_run_out() {
+        let mut sim = Sim::default();
+        sim.set_bulb_slots(25, 5);
+        let olimar = sim.add_captain(Vec3::new(300.0, 0.0, 0.0));
+        sim.add_bulb(PikiColor::White, false, Vec3::ZERO);
+        let step = |sim: &mut Sim, secs: f32| {
+            for _ in 0..(secs * 30.0) as usize {
+                sim.update_bulbs(1.0 / 30.0);
+            }
+        };
+        step(&mut sim, 1.0);
+        for round in 1..=5 {
+            for i in 0..SLOTS {
+                let p = sim.spawn_piki_in_squad(PikiColor::Red, Vec3::new(300.0, 0.0, 0.0), olimar).unwrap();
+                let pi = p.0 as usize;
+                sim.pikis[pi].pos = Vec3::new(0.0, 20.0, 0.0);
+                sim.pikis[pi].state = PikiState::Flying { ground_frames: 0 };
+                assert!(sim.bulb_swallow(pi), "round {round}, Pikmin {i}");
+            }
+            assert!(!sim.bulbs()[0].can_swallow(), "five in: it shuts at once");
+            // Close and shot (about 2.3 s), well short of the 30 s it waits after fewer than five.
+            step(&mut sim, 2.5);
+            assert_eq!(alive(&sim, PikiColor::White), (round * SLOTS) as usize, "round {round}");
+            if round < 5 {
+                step(&mut sim, 1.0);
+                assert!(sim.bulbs()[0].can_swallow(), "round {round}: open again");
+            }
+        }
+        assert!(sim.pikis.iter().filter(|p| p.is_alive()).all(|p| p.captain == Some(olimar)), "the thrower's");
+        assert_eq!(sim.sprouts().count(), 0);
+        step(&mut sim, 2.0);
+        assert!(sim.bulbs().is_empty(), "25 used: withered");
     }
 
     #[test]
@@ -349,7 +420,7 @@ mod tests {
         for _ in 0..(5 * 30) {
             sim.update_bulbs(1.0 / 30.0);
         }
-        let n = sim.sprouts().filter(|s| s.color != PikiColor::Purple).count();
+        let n = sim.pikis.iter().filter(|p| p.is_alive() && p.color != PikiColor::Purple).count();
         assert_eq!(n, 5);
         let _ = want;
         assert!(sim.bulbs().iter().all(|b| !b.alive()) || sim.bulbs().is_empty(), "its one slot is gone, so it withers");
