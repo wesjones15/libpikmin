@@ -21,6 +21,7 @@ pub mod hiba;
 pub mod effects;
 pub mod ik;
 pub mod info;
+pub mod jigumo;
 pub mod kabekui;
 pub mod kabuto;
 pub mod king;
@@ -267,6 +268,7 @@ fn p2_strategy(kind: u8) -> Strategy {
         p2::EMPRESS_BULBLAX => queen::strategy(),
         p2::EMPEROR_BULBLAX => king::strategy(),
         p2::BURROW_NIT => armor::strategy(),
+        p2::HERMIT_CRAWMAD => jigumo::strategy(),
         p2::ORANGE_BULBORB | p2::HAIRY_BULBORB | p2::DWARF_ORANGE_BULBORB | p2::SNOW_BULBORB | p2::FIERY_BULBLAX => bulborb2::strategy(),
         _ => kogane::strategy(kind),
     }
