@@ -652,9 +652,11 @@ fn delayed_snapshots_do_not_rewind_the_replica_animation_clock() {
         (*server).sim.set_tick(30);
         let n = pik_sim_snapshot(server, bytes.as_mut_ptr(), bytes.len() as u32);
         assert_eq!(pik_replica_apply(replica, bytes.as_ptr(), n), 1);
+        let start = (*replica).sim.tick();
         pik_replica_update(replica, 0.25);
         let before = (*replica).sim.tick();
-        assert!(before > 33);
+        // The clock goes on while it waits for the next.
+        assert!(before >= start + 6, "{start} -> {before}");
         (*server).sim.set_tick(33);
         let n = pik_sim_snapshot(server, bytes.as_mut_ptr(), bytes.len() as u32);
         assert_eq!(pik_replica_apply(replica, bytes.as_ptr(), n), 1);
@@ -682,7 +684,58 @@ fn burst_snapshots_do_not_play_old_spatial_cues_on_a_recycled_pikmin() {
         source.set_tick(2);
         let bytes = Snapshot::of(&source, &[]).encode_replica();
         assert_eq!(pik_replica_apply(replica, bytes.as_ptr(), bytes.len() as u32), 1);
+        // Both shown before a render.
+        pik_replica_update(replica, 1.0);
         assert_eq!((*replica).view_log, vec![ghost]);
+        pik_sim_free(replica);
+    }
+}
+
+#[test]
+fn bunched_snapshots_still_move_the_replica_smoothly() {
+    // The network delivers snapshots in clumps: two or three at once, then nothing. The replica's
+    // playback clock should still move the squad at an even pace, never back and never in a jump.
+    unsafe {
+        let server = pik_sim_new(std::ptr::null(), 4);
+        let c = pik_sim_add_captain(server, &PikVec3::default());
+        for i in 0..12 {
+            pik_sim_spawn_piki(server, (i % 3) as u32, &PikVec3 { x: 20.0 + i as f32 * 3.0, y: 0.0, z: 0.0 }, c);
+        }
+        let mut world = World::default();
+        let h = host(&mut world);
+        let replica = pik_replica_new(std::ptr::null());
+        let mut bytes = vec![0u8; 64 * 1024];
+        let mut held: Vec<Vec<u8>> = Vec::new();
+        let mut xs = Vec::new();
+        // 60 Hz frames, the server at 30 Hz with a snapshot every 3 ticks; he walks to -x, away from the test wall.
+        for frame in 0..600 {
+            if frame % 2 == 0 {
+                pik_sim_set_input(server, 0, &PikInput { stick_x: -1.0, ..Default::default() });
+                pik_sim_advance(server, &h, 1.0 / 30.0);
+                if (frame / 2) % 3 == 2 {
+                    let n = pik_sim_snapshot(server, bytes.as_mut_ptr(), bytes.len() as u32) as usize;
+                    held.push(bytes[..n].to_vec());
+                }
+            }
+            // Delivered in bursts every 9 to 15 frames.
+            if frame % [9, 15, 11, 13][(frame / 40) % 4] == 0 {
+                for b in held.drain(..) {
+                    pik_replica_apply(replica, b.as_ptr(), b.len() as u32);
+                }
+            }
+            pik_replica_update(replica, 1.0 / 60.0);
+            let mut cap = PikCaptain::default();
+            pik_sim_captain(replica, 0, &mut cap);
+            // After a few seconds for the margin to settle.
+            if frame >= 180 { xs.push(-cap.pos.x); }
+        }
+        let steps: Vec<f32> = xs.windows(2).map(|w| w[1] - w[0]).collect();
+        let mean = steps.iter().sum::<f32>() / steps.len() as f32;
+        assert!(mean > 0.5, "the captain moves on the replica ({mean} per frame)");
+        let (lo, hi) = steps.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &s| (lo.min(s), hi.max(s)));
+        assert!(lo > 0.0, "never stands still or goes back (slowest frame {lo}, mean {mean})");
+        assert!(hi < mean * 2.0, "no jumps (fastest frame {hi}, mean {mean})");
+        pik_sim_free(server);
         pik_sim_free(replica);
     }
 }

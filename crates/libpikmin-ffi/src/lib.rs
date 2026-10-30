@@ -957,13 +957,112 @@ pub struct PikSim {
     poisoned: bool,
 }
 
-/// A replica's snapshots: the newest and the one before, blended between as time passes.
+/// A replica's snapshots, played back on a steady clock a little behind the server.
+///
+/// Snapshots arrive unevenly (the network bunches them, and a big squad's are split into fragments),
+/// so blending toward each one as it lands stops and starts: the swarm moves in steps. Instead they
+/// wait in `queue`, and `play` (in server ticks) runs at the server's rate, `delay` ticks behind the
+/// newest the server is estimated to have sent, so there is nearly always a snapshot on either side
+/// of it to blend between. The delay is the usual gap between snapshots plus room for the jitter
+/// seen so far; `play` speeds up or slows down a little to keep to it, and jumps when far off.
 struct Replica {
-    prev: Option<Snapshot>,
-    cur: Option<Snapshot>,
-    /// Seconds since `cur` arrived, and the usual gap between arrivals.
-    since: f32,
-    interval: f32,
+    /// Snapshots `play` hasn't reached yet, oldest first.
+    queue: std::collections::VecDeque<Snapshot>,
+    /// The pair `play` is between, the later one applied to the sim.
+    from: Option<Snapshot>,
+    to: Option<Snapshot>,
+    /// Playback position and this machine's clock, both in server ticks.
+    play: f64,
+    clock: f64,
+    /// The server's tick minus `clock`, from the least-delayed arrivals; how far arrivals stray
+    /// from it; and the usual ticks between snapshots.
+    offset: f64,
+    jitter: f64,
+    gap: f64,
+    started: bool,
+}
+
+impl Replica {
+    fn new() -> Self {
+        Self {
+            queue: std::collections::VecDeque::new(),
+            from: None,
+            to: None,
+            play: 0.0,
+            clock: 0.0,
+            offset: 0.0,
+            jitter: 2.0,
+            gap: 3.0,
+            started: false,
+        }
+    }
+
+    /// The newest snapshot held.
+    fn newest_tick(&self) -> Option<u64> {
+        self.queue.back().or(self.to.as_ref()).map(|s| s.tick)
+    }
+
+    /// Ticks behind the server's newest that playback aims for.
+    fn delay(&self) -> f64 {
+        (self.gap + 2.0 * self.jitter + 1.0).clamp(2.0, 24.0)
+    }
+
+    /// A snapshot arrived: update the clock estimates and queue it.
+    fn push(&mut self, snap: Snapshot) {
+        let sample = snap.tick as f64 - self.clock;
+        if !self.started {
+            self.started = true;
+            self.offset = sample;
+            self.play = snap.tick as f64 - self.delay();
+        } else {
+            if let Some(last) = self.newest_tick() {
+                self.gap += ((snap.tick.saturating_sub(last) as f64).clamp(1.0, 30.0) - self.gap) * 0.1;
+            }
+            // An early arrival is the truer offset (less delay); a late one only drifts it down slowly.
+            let d = sample - self.offset;
+            self.offset += if d > 0.0 { d * 0.5 } else { d * 0.02 };
+            // Quick to widen the margin, slow to narrow it again.
+            let spread = d.abs().min(30.0);
+            self.jitter += (spread - self.jitter) * if spread > self.jitter { 0.3 } else { 0.03 };
+        }
+        self.queue.push_back(snap);
+        while self.queue.len() > 64 {
+            self.queue.pop_front();
+        }
+    }
+
+    /// `dt` seconds on: moves `play` toward where it should be.
+    fn step_clock(&mut self, dt: f32) {
+        let ticks = dt.clamp(0.0, 0.25) as f64 * libpikmin::TICK_HZ as f64;
+        self.clock += ticks;
+        // Past the newest with nothing queued: the margin was too small; widen it, which slows
+        // playback until it has a snapshot ahead again.
+        if self.queue.is_empty() && self.to.as_ref().is_some_and(|t| self.play >= t.tick as f64) {
+            self.jitter = (self.jitter + ticks * 0.5).min(11.0);
+        }
+        let target = self.clock + self.offset - self.delay();
+        let err = target - self.play;
+        if err.abs() > 30.0 {
+            // Far behind (a stall, a burst after one): catch up at once. Never back: the view's
+            // clock only goes forward.
+            self.play = self.play.max(target);
+        } else {
+            self.play += ticks * (1.0 + err * 0.05).clamp(0.85, 1.15);
+        }
+    }
+
+    /// The next queued snapshot is due: `play` has reached the one shown, or nothing is shown yet.
+    fn due(&self) -> bool {
+        !self.queue.is_empty() && self.to.as_ref().is_none_or(|t| t.tick as f64 <= self.play)
+    }
+
+    /// How far `play` is from `from` to `to`.
+    fn fraction(&self) -> f32 {
+        match (&self.from, &self.to) {
+            (Some(a), Some(b)) if b.tick > a.tick => ((self.play - a.tick as f64) / (b.tick - a.tick) as f64).clamp(0.0, 1.0) as f32,
+            _ => 1.0,
+        }
+    }
 }
 
 struct FfiHost<'a> {
@@ -1811,14 +1910,15 @@ pub unsafe extern "C" fn pik_replica_new(assets_dir: *const c_char) -> *mut PikS
     let sim = unsafe { pik_sim_new(assets_dir, 0) };
     // SAFETY: just made, or null.
     if let Some(s) = unsafe { sim.as_mut() } {
-        s.replica = Some(Replica { prev: None, cur: None, since: 0.0, interval: 0.1 });
+        s.replica = Some(Replica::new());
     }
     sim
 }
 
 /// A snapshot from the server's [`pik_sim_snapshot`] arrived. Returns whether it was accepted
-/// (this is a replica, and the bytes are a snapshot of this build). The events in it play at the
-/// next [`pik_view_update`].
+/// (this is a replica, and the bytes are a snapshot of this build). It is queued and shown when
+/// the replica's playback clock reaches it ([`pik_replica_update`]); the first is shown at once.
+/// Its events play when it is shown.
 ///
 /// # Safety
 /// `sim` from [`pik_replica_new`]; `bytes` readable for `len`.
@@ -1834,44 +1934,56 @@ pub unsafe extern "C" fn pik_replica_apply(sim: *mut PikSim, bytes: *const u8, l
         with(sim, 0, |s| {
             let Some(r) = s.replica.as_mut() else { return 0 };
             let Some(snap) = Snapshot::decode(data) else { return 0 };
-            // A newer one only: a late packet from before the one on hand is dropped.
-            if r.cur.as_ref().is_some_and(|c| snap.tick < c.tick) {
+            // A newer one only: a late packet from before the newest on hand is dropped.
+            if r.newest_tick().is_some_and(|t| snap.tick <= t) {
                 return 0;
             }
-            // Several packets may arrive before a render. Don't resolve an older occupant's
-            // deferred spatial cue through a recycled slot. Ghosts carry their own position.
-            if let Some(previous) = &r.cur {
-                s.view_log.retain(|event| matches!(event, Event::PikiGone { .. }) || event.piki_ids().all(|id| {
-                    previous.pikis.get(id.0 as usize).zip(snap.pikis.get(id.0 as usize))
-                        .is_some_and(|(a, b)| a.generation == b.generation)
-                }));
+            r.push(snap);
+            if s.replica.as_ref().is_some_and(|r| r.to.is_none()) {
+                replica_show_due(s);
             }
-            if s.view_log.len() + snap.events.len() <= EVENT_BACKLOG {
-                s.view_log.extend_from_slice(&snap.events);
-            }
-            if r.cur.is_some() {
-                r.interval += (r.since.clamp(0.02, 0.5) - r.interval) * 0.2;
-            }
-            r.since = 0.0;
-            r.prev = r.cur.take();
-            let clock = s.sim.tick();
-            let from = r.prev.as_ref().unwrap_or(&snap);
-            s.sim.apply_snapshot_blend(from, &snap, 0.0);
-            s.sim.set_tick(clock.max(snap.tick));
-            // Where the creatures were, for the sounds of what they do.
-            s.frame.clear();
-            for &(id, pos, yaw) in &snap.creatures {
-                s.frame.creatures.push(CreatureView { id, pos, yaw, alive: true, flying: false, parts_start: 0, parts_len: 0 });
-            }
-            r.cur = Some(snap);
             1
         })
     }
 }
 
-/// Moves a replica `dt` seconds on: positions blend from the previous snapshot toward the newest
-/// over the usual gap between them, and the tick advances at 30 Hz so the view's per-tick work
-/// (sounds, animation) runs at its normal rate. Call once a frame before [`pik_view_update`].
+/// Shows every queued snapshot the replica's playback has reached: each is applied to the sim
+/// in turn, with its events queued for the view.
+fn replica_show_due(s: &mut PikSim) {
+    loop {
+        let Some(r) = s.replica.as_mut() else { return };
+        if !r.due() {
+            return;
+        }
+        let Some(mut next) = r.queue.pop_front() else { return };
+        // Several may be shown before a render. Don't resolve an older occupant's deferred
+        // spatial cue through a recycled slot. Ghosts carry their own position.
+        if let Some(previous) = &r.to {
+            s.view_log.retain(|event| matches!(event, Event::PikiGone { .. }) || event.piki_ids().all(|id| {
+                previous.pikis.get(id.0 as usize).zip(next.pikis.get(id.0 as usize))
+                    .is_some_and(|(a, b)| a.generation == b.generation)
+            }));
+        }
+        let events = std::mem::take(&mut next.events);
+        if s.view_log.len() + events.len() <= EVENT_BACKLOG {
+            s.view_log.extend(events);
+        }
+        let clock = s.sim.tick();
+        s.sim.apply_snapshot(&next);
+        s.sim.set_tick(clock.max(next.tick.min(r.play.max(0.0) as u64)));
+        // Where the creatures were, for the sounds of what they do.
+        s.frame.clear();
+        for &(id, pos, yaw) in &next.creatures {
+            s.frame.creatures.push(CreatureView { id, pos, yaw, alive: true, flying: false, parts_start: 0, parts_len: 0 });
+        }
+        r.from = r.to.replace(next);
+    }
+}
+
+/// Moves a replica `dt` seconds on: its playback clock runs at the server's tick rate a little
+/// behind the newest snapshot, shows each snapshot it reaches, and blends positions between the
+/// two either side of it; the tick follows the clock so the view's per-tick work (sounds,
+/// animation) runs at its normal rate. Call once a frame before [`pik_view_update`].
 ///
 /// # Safety
 /// `sim` from [`pik_replica_new`].
@@ -1881,14 +1993,18 @@ pub unsafe extern "C" fn pik_replica_update(sim: *mut PikSim, dt: f32) {
     unsafe {
         with(sim, (), |s| {
             let Some(r) = s.replica.as_mut() else { return };
-            let Some(cur) = r.cur.as_ref() else { return };
-            r.since += dt.clamp(0.0, 0.25);
-            let from = r.prev.as_ref().unwrap_or(cur);
-            let t = (r.since / r.interval).min(1.0);
-            s.sim.blend_snapshot_motion(from, cur, t);
-            // Time past the newest snapshot, so the view still sees ticks go by while waiting.
-            let ahead = (r.since * libpikmin::TICK_HZ as f32) as u64;
-            s.sim.set_tick(s.sim.tick().max(cur.tick + ahead));
+            if r.to.is_none() && r.queue.is_empty() {
+                return;
+            }
+            r.step_clock(dt);
+            replica_show_due(s);
+            let Some(r) = s.replica.as_ref() else { return };
+            let Some(to) = r.to.as_ref() else { return };
+            let from = r.from.as_ref().unwrap_or(to);
+            let t = r.fraction();
+            s.sim.blend_snapshot_motion(from, to, t);
+            let play = r.play.max(0.0) as u64;
+            s.sim.set_tick(s.sim.tick().max(play));
         })
     }
 }
