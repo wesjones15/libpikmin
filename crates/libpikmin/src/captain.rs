@@ -601,6 +601,7 @@ impl Sim {
             && let Some(id) = c.lock_pellet
             && let Some(pel) = self.pellets.iter().find(|p| p.id == id).filter(|p| {
                 matches!(p.state, crate::carry::PelletState::Idle | crate::carry::PelletState::Carried { .. })
+                    && p.carriers.len() < p.desc.max_carriers as usize
             })
         {
             // The middle of the thing, with the cursor stood up in front of it like an enemy's.

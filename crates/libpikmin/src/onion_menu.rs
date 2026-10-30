@@ -14,8 +14,8 @@
 //!   slides down it at 70 units/s (`ActExit`, aiExit.cpp), growing back from 72%. On the
 //!   ground it joins the captain's squad (`TopAction::exec` with `mActionState` 0).
 //! - Host-controlled hovering Onions can also call Pikmin out: they slide to the midpoint
-//!   of a leg, then let go into the normal ballistic/falling state. Putting away still
-//!   requires a grounded Onion. This is a host extension, not the original game's exit.
+//!   of a leg, then let go into the normal ballistic/falling state. Returning Pikmin
+//!   jump to the midpoint and climb the upper half. These are host extensions.
 
 use glam::Vec3;
 
@@ -124,7 +124,7 @@ impl Sim {
     /// Sends up to `n` of the captain's squad Pikmin of `color` into the Onion. Returns how
     /// many were sent.
     pub fn onion_put_away(&mut self, captain: CaptainId, onion: OnionId, color: PikiColor, n: u32) -> u32 {
-        if !self.onions[onion.0 as usize].accepts(color) || !self.onions[onion.0 as usize].grounded() {
+        if !self.onions[onion.0 as usize].accepts(color) || !self.onions[onion.0 as usize].takes_deliveries() {
             return 0;
         }
         let ids: Vec<_> = self.squad_of_color(captain, color).into_iter().take(n as usize).collect();
@@ -133,6 +133,8 @@ impl Sim {
             // `ActEnter::findLeg`: a random leg.
             let leg = (self.rng.f32() * 3.0) as u8 % 3;
             let p = &mut self.pikis[id.0 as usize];
+            p.jump = None;
+            p.jump_queue.clear();
             p.state = PikiState::Enter {
                 onion,
                 leg,
@@ -157,8 +159,8 @@ impl Sim {
         ids.len() as u32
     }
 
-    /// Host extension: the Pikmin a captain left behind that stand about go into the landed `onion` (the
-    /// ones of a colour it takes), walking to it. Returns how many were sent.
+    /// Host extension: a dead captain's living Pikmin abandon their jobs and walk home.
+    /// Returners already on a leg keep their progress; dying/swallowed Pikmin cannot be saved.
     pub fn send_orphans_home(&mut self, from: CaptainId, onion: OnionId) -> u32 {
         let Some(o) = self.onions.get(onion.0 as usize) else { return 0 };
         if o.ship.is_some() || !o.grounded() {
@@ -168,9 +170,29 @@ impl Sim {
         for &id in &ids {
             self.leave_current(id);
             let leg = (self.rng.f32() * 3.0) as u8 % 3;
+            self.pikis[id.0 as usize].jump = None;
+            self.pikis[id.0 as usize].jump_queue.clear();
             self.pikis[id.0 as usize].state = PikiState::Enter { onion, leg, climbing: false, ratio: 0.0 };
         }
         ids.len() as u32
+    }
+
+    /// Host recovery after a death-recall timeout or stage unload. Prevent unreachable
+    /// returners being lost to host terrain; preserve their colour and leaf stage.
+    pub fn finish_orphan_recall(&mut self, captain: CaptainId, onion: OnionId) {
+        let Some(o) = self.onions.get(onion.0 as usize) else { return };
+        if o.ship.is_some() { return; }
+        let ids: Vec<_> = self.pikis.iter().filter(|p| p.is_alive() && p.captain == Some(captain)
+            && o.accepts(p.color) && !matches!(p.state, PikiState::Dying { .. } | PikiState::Swallowed { .. }))
+            .map(|p| p.id).collect();
+        for id in ids {
+            self.leave_current(id);
+            let p = &mut self.pikis[id.0 as usize];
+            self.onions[onion.0 as usize].stored[p.color.index()][p.happa as usize] += 1;
+            p.state = PikiState::Dead;
+            p.jump = None;
+            self.events.push(Event::PikiEnteredOnion { piki: id, onion });
+        }
     }
 
     /// Pikmin that were `captain`'s and are not doing anything else: standing about or still following
@@ -178,7 +200,9 @@ impl Sim {
     fn orphans_of(&self, captain: CaptainId, onion: Option<OnionId>) -> Vec<PikiId> {
         self.pikis
             .iter()
-            .filter(|p| p.is_alive() && p.captain == Some(captain) && matches!(p.state, PikiState::Idle | PikiState::Squad { .. }))
+            .filter(|p| p.is_alive() && p.captain == Some(captain) &&
+                (onion.is_some() || matches!(p.state, PikiState::Idle | PikiState::Squad { .. })) &&
+                !matches!(p.state, PikiState::Enter { .. } | PikiState::Exit { .. } | PikiState::Dying { .. } | PikiState::Swallowed { .. }))
             .filter(|p| onion.is_none_or(|o| self.onions[o.0 as usize].accepts(p.color)))
             .map(|p| p.id)
             .collect()
@@ -299,18 +323,42 @@ impl Sim {
                 climbing,
                 ratio,
             } => {
-                let opos = self.onions[onion.0 as usize].pos;
+                let o = &self.onions[onion.0 as usize];
+                let opos = o.pos;
+                let hovering = o.anim == crate::onion::OnionAnim::Hover;
+                if !o.takes_deliveries() {
+                    self.pikis[pi].state = PikiState::Idle;
+                    return;
+                }
                 if !climbing {
-                    let foot = leg_point(opos, leg, 0.0);
+                    // Host extension: JUMP (21) to the middle of a flying leg,
+                    // then ActEnter::gotoLeg/climb's HNoboru (62) up its top half.
+                    // Negative ratio is the remaining jump time; snapshots already carry it.
+                    let foot = leg_point(opos, leg, if hovering { 0.5 } else { 0.0 });
+                    if ratio < 0.0 {
+                        let p = &mut self.pikis[pi];
+                        let remaining = -ratio;
+                        let step = dt.min(remaining);
+                        p.pos += (foot - p.pos) * (step / remaining);
+                        p.vel = Vec3::ZERO;
+                        p.on_ground = false;
+                        p.state = if remaining <= dt {
+                            PikiState::Enter { onion, leg, climbing: true, ratio: 0.5 }
+                        } else {
+                            PikiState::Enter { onion, leg, climbing: false, ratio: ratio + step }
+                        };
+                        return;
+                    }
                     let to = (foot - self.pikis[pi].pos).with_y(0.0);
                     if to.length() < 8.0 {
                         let p = &mut self.pikis[pi];
                         p.vel = Vec3::ZERO;
+                        p.on_ground = false;
                         p.state = PikiState::Enter {
                             onion,
                             leg,
-                            climbing: true,
-                            ratio: 0.0,
+                            climbing: !hovering,
+                            ratio: if hovering { -0.65 } else { 0.0 },
                         };
                         return;
                     }

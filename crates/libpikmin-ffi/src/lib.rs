@@ -1622,6 +1622,36 @@ pub unsafe extern "C" fn pik_sim_spawn_piki(sim: *mut PikSim, color: u32, pos: *
     }
 }
 
+/// Restores a Pikmin's leaf stage without changing its task.
+/// # Safety
+/// `sim` from `pik_sim_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_piki_happa(sim: *mut PikSim, piki: u32, happa: u32) {
+    let Some(happa) = happa_arg(happa) else { return };
+    unsafe { with(sim, (), |s| {
+        if (piki as usize) < s.sim.pikis().len() { s.sim.piki_mut(PikiId(piki)).happa = happa; }
+    }) }
+}
+
+/// Stored count for one colour and leaf stage; preserves maturity across host stage transfers.
+/// # Safety
+/// `sim` from `pik_sim_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_onion_stock(sim: *mut PikSim, onion: u32, color: u32, happa: u32) -> u32 {
+    if color_arg(color).is_none() || happa_arg(happa).is_none() { return 0; }
+    unsafe { with(sim, 0, |s| s.sim.onions().get(onion as usize).map_or(0, |o| o.stored[color as usize][happa as usize])) }
+}
+
+/// Settles living death-recall stragglers in their Onion with their leaf stages intact.
+/// # Safety
+/// `sim` from `pik_sim_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_finish_orphan_recall(sim: *mut PikSim, captain: u32, onion: u32) {
+    unsafe { with(sim, (), |s| {
+        if captain_ok(&s.sim, captain) { s.sim.finish_orphan_recall(CaptainId(captain), OnionId(onion)); }
+    }) }
+}
+
 /// Places an Onion at `pos` taking the colours in the bit mask `colors` (bit
 /// [`PikiColor::index`]). Returns its id.
 ///

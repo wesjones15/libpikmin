@@ -511,7 +511,19 @@ pub(crate) fn integrate(
     }
     let sub = dt / steps as f32;
     for _ in 0..steps {
+        let before = *pos;
         *pos += *vel * sub;
+        // Resolve a descending landing before the wall sphere. Fast Quail jumps
+        // otherwise dip below terrain during a sub-step, lose all horizontal
+        // velocity to a false wall contact, then snap onto the floor at tick end.
+        if vel.y <= 0.0
+            && let Some(g) = host.ground_height(Vec3::new(pos.x, before.y + radius, pos.z))
+            && before.y >= g - 0.001 && pos.y <= g
+        {
+            pos.y = g;
+            vel.y = 0.0;
+            *on_ground = true;
+        }
         let centre = *pos + Vec3::Y * radius;
         let moved = host.walls(centre, radius) - centre;
         let push = Vec3::new(moved.x, 0.0, moved.z);
@@ -579,6 +591,25 @@ mod ground_motion_tests {
         assert!(grounded);
         assert!(pos.x > 50.0, "floor contact must not arrest horizontal walking");
         assert_eq!(pos.y, 0.0);
+    }
+
+    #[test]
+    fn fast_descending_jump_lands_before_the_wall_probe_can_stop_it() {
+        struct Landing;
+        impl Host for Landing {
+            fn ground_height(&self, pos: Vec3) -> Option<f32> { (pos.y >= 0.0).then_some(0.0) }
+            fn walls(&self, centre: Vec3, radius: f32) -> Vec3 {
+                if centre.y < radius { centre - Vec3::X } else { centre }
+            }
+        }
+        let mut pos = Vec3::Y;
+        let mut vel = Vec3::new(600.0, -180.0, 0.0);
+        let mut grounded = false;
+        integrate(&Landing, &mut pos, &mut vel, Vec3::X * 600.0, &mut grounded, 10.0, 0.2, 300.0, 1.0 / 30.0);
+        assert!(grounded);
+        assert_eq!(pos.y, 0.0);
+        assert!(vel.x > 599.0, "a floor landing must not consume the Quail boost");
+        assert!(pos.x > 19.0);
     }
 
     /// A ramp falling toward +X at `tan` (rise over run).

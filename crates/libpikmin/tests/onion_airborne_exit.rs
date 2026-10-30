@@ -55,7 +55,7 @@ fn hovering_call_out_slides_half_a_leg_then_falls_independently() {
 }
 
 #[test]
-fn airborne_pending_exits_keep_the_field_limit_and_storage_requires_landing() {
+fn airborne_pending_exits_keep_the_field_limit_and_cannot_be_put_away_before_they_exit() {
     let mut params = Params::default();
     params.ai.max_pikis_on_field = 2;
     let mut sim = Sim::new(params, 22);

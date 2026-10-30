@@ -3,6 +3,32 @@
 use super::*;
 
 #[test]
+fn leaf_stages_cross_stage_storage_and_death_recall_abi() {
+    unsafe {
+        let sim = pik_sim_new(std::ptr::null(), 27);
+        let origin = PikVec3::default();
+        let captain = pik_sim_add_captain(sim, &origin);
+        let onion = pik_sim_add_onion(sim, &origin, 31);
+        for colour in 0..5 {
+            for stage in 0..3 {
+                pik_sim_store_in_onion(sim, onion as u32, colour, stage, colour + stage + 1);
+                assert_eq!(pik_sim_onion_stock(sim, onion as u32, colour, stage), colour + stage + 1);
+            }
+            let id = pik_sim_spawn_piki(sim, colour, &origin, captain);
+            pik_sim_set_piki_happa(sim, id as u32, 2);
+            assert_eq!((*sim).sim.piki(PikiId(id as u32)).happa, Happa::Flower);
+        }
+        pik_sim_finish_orphan_recall(sim, captain as u32, onion as u32);
+        for colour in 0..5 { assert_eq!(pik_sim_onion_stock(sim, onion as u32, colour, 2), colour + 4); }
+        assert_eq!(pik_sim_onion_stock(sim, 99999, 0, 0), 0);
+        assert_eq!(pik_sim_onion_stock(sim, 0, 5, 0), 0);
+        pik_sim_set_piki_happa(sim, u32::MAX, 2);
+        assert_eq!(pik_sim_poisoned(sim), 0);
+        pik_sim_free(sim);
+    }
+}
+
+#[test]
 fn all_disc_parts_cross_the_spawn_abi_with_valid_weights_and_ids() {
     let Some(assets) = libpikmin_assets::Assets::discover(None) else { return };
     let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
@@ -533,7 +559,7 @@ fn calling_pikmin_out_of_an_onion_and_putting_them_back() {
 }
 
 #[test]
-fn unified_onion_flight_allows_call_out_but_blocks_put_away() {
+fn unified_onion_flight_allows_call_out_and_upper_leg_put_away() {
     unsafe {
         let sim = pik_sim_new(std::ptr::null(), 17);
         let ground = PikVec3::default();
@@ -563,7 +589,9 @@ fn unified_onion_flight_allows_call_out_but_blocks_put_away() {
             assert_eq!((counts.in_squad, counts.in_onion), (1, 3));
         }
         pik_sim_set_onion_pose(sim, o, &air, 1);
-        for color in 0..3 { assert_eq!(pik_sim_onion_put_away(sim, c, o, color, 1), 0); }
+        for color in 0..3 { assert_eq!(pik_sim_onion_put_away(sim, c, o, color, 1), 1); }
+        for _ in 0..600 { pik_sim_advance(sim, &h, 1.0 / 30.0); }
+        for color in 0..3 { assert_eq!(pik_sim_onion_stock(sim, o, color, 0), 4); }
         assert_eq!(pik_sim_poisoned(sim), 0);
         pik_sim_free(sim);
     }

@@ -236,6 +236,7 @@ pub fn piki_look(params: &Params, p: &Piki) -> Option<PikiLook> {
         }
         PikiState::Absorb { frame, .. } => (Motion::Mizunomi, Clock::Sim(frame)),
         // `ActEnter` / `ActExit`: climbing a leg, shrinking into the pod near the top.
+        PikiState::Enter { climbing: false, ratio, .. } if ratio < 0.0 => (Motion::Jump, Clock::Once(30.0)),
         PikiState::Enter { climbing: false, .. } => walk,
         PikiState::Enter { ratio, .. } | PikiState::Exit { ratio, .. } => {
             let k = libpikmin::onion_menu::SHRINK_FROM;

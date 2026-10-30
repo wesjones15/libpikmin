@@ -485,7 +485,11 @@ squad and navigation jumps inherit their captain's takeoff speed, including extr
   - Host extension: a host-controlled hovering Onion can also call Pikmin out. Each plays
     the first half of the same leg slide, detaches at ratio 0.5, and falls under the normal
     Pikmin flight physics from that position. Grounded call-outs still use the whole leg;
-    putting Pikmin away still requires landing. Stock and pending exits retain the field cap.
+    a hovering Onion also accepts returns. Pikmin walk below the midpoint of a random leg,
+    use JUMP (motion 21 / AnimInfo 9) for a 0.65-second ascent to it, then HNoboru
+    (motion 62 / AnimInfo 87) along ratios 0.5–0.9. Climbing and shrinking remain
+    `aiEnter.cpp::ActEnter::gotoLeg/climb`; the jump transfer is a host extension.
+    Stock and pending exits retain the field cap.
 - **Safety.** The whistle and enemy attacks leave Pikmin in either mode alone.
 - **Geometry.** Legs are measured on `goal.mod`: feet about 115 out at 180° and ±60°, tops at
   height 88. The `cont` reach is 70 from the Onion's centre. The real sphere is in the

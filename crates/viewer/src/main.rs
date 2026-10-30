@@ -179,6 +179,16 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
     // a sprout/throw composition. Source: PikiHeadItem, PikiFlyingState, NaviGatherState.
     if let Ok(portrait) = std::env::var("PIKMIN_PORTRAIT") {
         match portrait.as_str() {
+            "flying-fill" => {
+                let onion = sim.add_onion(Vec3::new(0.0, 65.0, 0.0), &[PikiColor::Red]);
+                sim.set_onion_pose(onion, Vec3::new(0.0, 65.0, 0.0), true);
+                sim.set_onion_flight_motion(onion, false, 0.0);
+                for leg in 0..3 {
+                    let at = libpikmin::onion_menu::LEG_FEET[leg].lerp(libpikmin::onion_menu::LEG_TOPS[leg], 0.5).with_y(0.0);
+                    sim.spawn_piki_in_squad(PikiColor::Red, at, olimar);
+                }
+                sim.onion_put_away(olimar, onion, PikiColor::Red, 3);
+            }
             "pluckers" => { sim.plant_sprout(PikiColor::Red, Vec3::ZERO); }
             "throw" => { sim.spawn_piki_in_squad(PikiColor::Red, Vec3::new(0.0, 0.0, 12.0), olimar); }
             "onion" => {
@@ -906,6 +916,12 @@ async fn main() {
                 }
             }
             frames += 1;
+            if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("flying-fill") {
+                draw_text("Pikmin: JUMP 21/AnimInfo 9 -> HNoboru 62/87", 12.0, 26.0, 22.0, WHITE);
+                draw_text("panipikianimator.cpp: createMotionTable", 12.0, 50.0, 20.0, WHITE);
+                draw_text("aiEnter.cpp: ActEnter::gotoLeg / climb", 12.0, 74.0, 20.0, WHITE);
+                draw_text(&format!("Viewer frame {frames}: {:?}", g.sim.pikis()[0].state), 12.0, 100.0, 16.0, WHITE);
+            }
             if let Some(path) = shot.as_ref().filter(|_| frames == shot_frame) {
                 if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("throw") {
                     assert!(g.sim.pikis().iter().any(|p| matches!(p.state, PikiState::Flying { .. })), "portrait must show a flying Pikmin");

@@ -73,3 +73,27 @@ fn the_lock_lapses_when_the_pellet_is_gone() {
     step(&mut sim, c, Some(PelletId(999)), false);
     assert!(sim.captain(c).lock_view.is_none());
 }
+
+#[test]
+fn a_full_carry_team_drops_the_marker_and_a_vacancy_reopens_it() {
+    let mut sim = Sim::new(Params::default(), 5);
+    let c = sim.add_captain(Vec3::ZERO);
+    let pel = pellet(&mut sim, Vec3::Z * 200.0);
+    sim.add_onion(Vec3::X * 10000.0, &[PikiColor::Red]);
+    for slot in 0..4 {
+        sim.spawn_piki(PikiColor::Red, sim.pellet(pel).slot_world(slot)).unwrap();
+    }
+    step(&mut sim, c, Some(pel), false);
+    assert!(sim.captain(c).lock_view.is_some());
+    sim.recruit_to_pellet(pel, None, 100.0);
+    for _ in 0..300 {
+        step(&mut sim, c, Some(pel), false);
+        if sim.pellet(pel).carriers.len() == 4 { break; }
+    }
+    assert_eq!(sim.pellet(pel).carriers.len(), 4);
+    step(&mut sim, c, Some(pel), false);
+    assert!(sim.captain(c).lock_view.is_none());
+    assert!(sim.recover_pellet(pel, Vec3::Z * 200.0));
+    step(&mut sim, c, Some(pel), false);
+    assert!(sim.captain(c).lock_view.is_some());
+}
