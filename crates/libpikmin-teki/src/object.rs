@@ -793,7 +793,13 @@ impl Teki {
                 anim::Event::Sound(i) => w.out.push(Out::TableSound { teki: self.id, index: i }),
                 anim::Event::Effect(i) => {
                     for id in crate::effects::keyed(self.kind, i) {
-                        w.out.push(Out::Effect { id, pos: self.pos });
+                        // TaiPalmStrategy::createEffect orients A1, A2 and C
+                        // to the plant's facing; B keeps its authored direction.
+                        if self.kind == crate::info::PELLET_POSY && id != crate::effects::GROW_PELLET_B {
+                            w.out.push(Out::EffectDir { id, pos: self.pos, dir: Vec3::new(self.yaw.sin(), 0.0, self.yaw.cos()) });
+                        } else {
+                            w.out.push(Out::Effect { id, pos: self.pos });
+                        }
                     }
                 }
             }

@@ -1082,6 +1082,7 @@ dependencies = [
  "libpikmin-assets",
  "libpikmin-audio",
  "libpikmin-present",
+ "libpikmin-teki",
  "macroquad",
 ]
 

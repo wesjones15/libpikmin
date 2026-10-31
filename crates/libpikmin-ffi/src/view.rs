@@ -1303,6 +1303,7 @@ pub struct PikTekiInfo {
 pub struct PikTekiInstance {
     /// Stable while it lives: the draw's `id`.
     pub id: u32,
+    /// Low byte enemy kind; next byte optional material-animation frame + 1.
     pub kind: u32,
     pub pos: PikVec3,
     /// Radians about +Y; it faces `(sin, 0, cos)`.
@@ -1377,7 +1378,8 @@ pub unsafe extern "C" fn pik_view_set_tekis(view: *mut PikView, list: *const Pik
                 .filter_map(|t| {
                     Some(libpikmin_present::teki::TekiInstance {
                         id: t.id,
-                        kind: u8::try_from(t.kind).ok()?,
+                        // Low byte: kind. Next byte: optional material frame + 1.
+                        kind: (t.kind & 255) as u8,
                         pos: t.pos.into(),
                         yaw: t.yaw,
                         motion: t.motion,
@@ -1385,6 +1387,7 @@ pub unsafe extern "C" fn pik_view_set_tekis(view: *mut PikView, list: *const Pik
                         flash: t.flash,
                         scale: t.scale,
                         alpha: t.alpha,
+                        material_frame: ((t.kind >> 8) & 255).checked_sub(1).map(|f| f as f32),
                     })
                 })
                 .collect();

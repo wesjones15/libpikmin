@@ -23,4 +23,6 @@ pub struct TekiInstance {
     pub scale: f32,
     /// 1 opaque .. 0 gone.
     pub alpha: f32,
+    /// BTeki::refresh's material-animation frame (Pellet Posy's cycling flower colour).
+    pub material_frame: Option<f32>,
 }

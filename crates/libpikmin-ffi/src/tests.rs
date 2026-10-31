@@ -3,6 +3,27 @@
 use super::*;
 
 #[test]
+fn posy_palette_crosses_the_enemy_state_abi_in_each_colour() {
+    use crate::teki_ai::*;
+    let Some(assets) = libpikmin_assets::Assets::discover(None) else { eprintln!("SKIP: Pellet Posy assets absent"); return };
+    let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
+    unsafe {
+        let enemies = pik_tekis_new(dir.as_ptr(), 9);
+        assert!(!enemies.is_null());
+        let id = pik_tekis_spawn(enemies, 23, 123, &PikVec3::default(), 0.0);
+        assert!(id >= 0);
+        for colour in 0..3 {
+            pik_tekis_set_count(enemies, id as u32, 1, colour);
+            let mut state = PikTekiState::default();
+            assert_eq!(pik_tekis_state(enemies, id as u32, &mut state), 1);
+            assert_eq!((state.flags >> 8) & 3, colour as u32);
+            assert_eq!(state.kind, 23, "the palette must not change the actual enemy kind");
+        }
+        pik_tekis_free(enemies);
+    }
+}
+
+#[test]
 fn leaf_stages_cross_stage_storage_and_death_recall_abi() {
     unsafe {
         let sim = pik_sim_new(std::ptr::null(), 27);
@@ -911,7 +932,7 @@ fn every_enemy_kind_draws_and_sounds() {
             assert!(models.insert(info.model), "kind {k} shares a model");
             assert!(info.life > 0.0 && info.hi.y > info.lo.y);
             list.push(crate::view::PikTekiInstance {
-                id: k + 1, kind: k, motion: info.motions[2].index, frame: 5.0, scale: 1.0, alpha: 1.0,
+                id: k + 1, kind: if k == 23 { k | (3 << 8) } else { k }, motion: info.motions[2].index, frame: 5.0, scale: 1.0, alpha: 1.0,
                 pos: PikVec3 { x: k as f32 * 60.0, y: 0.0, z: 0.0 }, ..Default::default()
             });
         }

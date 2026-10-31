@@ -44,13 +44,15 @@ fn palm_dying() -> Act {
             t.start_motion(motion_for(t, DEAD));
             t.clear_option(opt::ALIVE);
             t.hp = 0.0;
-            if t.count[0] >= 2 {
-                w.out.push(Out::SpawnPellets { pos: t.pos + glam::Vec3::Y * 10.0, number: 1, color: t.count[1].rem_euclid(3) as u32, count: 1 });
-            }
             w.out.push(Out::Dying { teki: t.id });
         })
         .on_act(|t, w| {
             if t.animation_finished() {
+                // TaiPalmSettingPelletAction + TaiPalmDyingAction::act: the
+                // grown model bears a 1 pellet, released after its fall finishes.
+                if t.count[0] >= 2 {
+                    w.out.push(Out::SpawnPellets { pos: t.pos + glam::Vec3::Y * 10.0, number: 0, color: t.count[1].rem_euclid(3) as u32, count: 1 });
+                }
                 t.die(w);
                 return true;
             }

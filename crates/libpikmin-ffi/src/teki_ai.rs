@@ -362,6 +362,8 @@ pub unsafe extern "C" fn pik_tekis_state(t: *const PikTekis, id: u32, out: *mut 
     flags |= (e.option(opt::ATARI) as u32) << 3;
     flags |= (e.held.is_some() as u32) << 4;
     flags |= (e.airborne() as u32) << 5;
+    // Bits 8..9: Pellet Posy's BTeki::_3BC material-animation frame.
+    if e.kind == libpikmin_teki::info::PELLET_POSY { flags |= (e.count[1].rem_euclid(3) as u32) << 8; }
     // SAFETY: as documented.
     unsafe {
         out.write(PikTekiState {

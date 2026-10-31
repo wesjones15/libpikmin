@@ -2076,7 +2076,10 @@ impl View {
             let pose = self.models[model as usize].skel.pose(srt_matrix(Vec3::splat(scale), Vec3::ZERO, Vec3::ZERO), anim);
             let flags = if t.flash > 0.0 { flags::FLASH } else { 0 };
             let k = key(kinds::TEKI, t.id as u64);
-            self.push(k, kinds::TEKI, model, t.pos, Quat::from_rotation_y(t.yaw), pose, &no_inputs, t.alpha.clamp(0.0, 1.0), flags);
+            // BTeki::refresh: AnimationType 1 animates materials at _3BC,
+            // which TaiPalmChangingColorAction advances independently of its motion.
+            let inputs = |_| Inputs { frame: t.material_frame, ..Default::default() };
+            self.push(k, kinds::TEKI, model, t.pos, Quat::from_rotation_y(t.yaw), pose, &inputs, t.alpha.clamp(0.0, 1.0), flags);
         }
 
         self.teki_played.retain(|id, _| heard.contains(id));
