@@ -99,6 +99,9 @@ pub struct Effects {
     /// Effects that follow something (`setEmitPosPtr`), by the host's key. They run until
     /// detached, then run down as one-shots.
     attached: Vec<(u64, Generator)>,
+    /// The ship's light beams (`WhistleTemplate`), by the host's key: two generators whose particles
+    /// ride the line from the hatch to the goal spot. They run until detached.
+    beams: Vec<(u64, [Generator; 2], Vec3, Vec3)>,
     whistles: HashMap<CaptainId, Whistle>,
     /// `Navi::renderCircle`'s spinning angle (a static shared by every captain).
     ring_angle: f32,
@@ -227,6 +230,8 @@ impl Effects {
                 effects::ROCKET_TROUBLE[1],
                 effects::ROCKET_TROUBLE[2],
                 effects::ROCKET_TROUBLE[3],
+                effects::ROCKET_BEAM[0],
+                effects::ROCKET_BEAM[1],
                 effects::ROCKET_LAND_S,
                 effects::ROCKET_SMOKE_D,
                 effects::ONYON_SUCK,
@@ -253,6 +258,7 @@ impl Effects {
             root: Some(assets.clone()),
             oneshots: Vec::new(),
             attached: Vec::new(),
+            beams: Vec::new(),
             whistles: HashMap::new(),
             ring_angle: 0.0,
             acc: 0.0,
@@ -267,7 +273,7 @@ impl Effects {
 
     /// How many effects (one-shots and attached) are running.
     pub fn running(&self) -> usize {
-        self.oneshots.len() + self.attached.len()
+        self.oneshots.len() + self.attached.len() + self.beams.len() * 2
     }
 
     /// `EffectMgr::create` for a one-shot effect at `pos`; the generator, to set up further.
@@ -298,6 +304,27 @@ impl Effects {
         self.attached.last_mut().map(|(_, g)| g)
     }
 
+    /// Starts the ship's light beam from `from` (the hatch) to `to` (the goal spot): `WhistleTemplate::emit`,
+    /// which skips a second start under the same key. A's normal stays fixed (`setOrientedConstZAxis`).
+    pub fn attach_beam(&mut self, key: u64, from: Vec3, to: Vec3) {
+        if self.beams.iter().any(|b| b.0 == key) {
+            return;
+        }
+        let (Some(a), Some(b)) = (self.pcr_of(effects::ROCKET_BEAM[0]), self.pcr_of(effects::ROCKET_BEAM[1])) else { return };
+        let mut ga = self.generator(&a, from);
+        ga.fixed_normal = true;
+        let gb = self.generator(&b, from);
+        self.beams.push((key, [ga, gb], from, to));
+    }
+
+    /// Moves the beam under `key`.
+    pub fn move_beam(&mut self, key: u64, from: Vec3, to: Vec3) {
+        for (_, gens, f, t) in self.beams.iter_mut().filter(|b| b.0 == key) {
+            (*f, *t) = (from, to);
+            gens.iter_mut().for_each(|g| g.emit_pos = from);
+        }
+    }
+
     /// Moves the effect under `key`.
     pub fn move_attached(&mut self, key: u64, pos: Vec3) {
         for (_, g) in self.attached.iter_mut().filter(|(k, _)| *k == key) {
@@ -318,6 +345,18 @@ impl Effects {
 
     /// Stops every attached effect whose key matches.
     pub fn detach_where(&mut self, f: impl Fn(u64) -> bool) {
+        let mut i = 0;
+        while i < self.beams.len() {
+            if f(self.beams[i].0) {
+                let (_, gens, _, _) = self.beams.swap_remove(i);
+                for mut g in gens {
+                    g.finish();
+                    self.oneshots.push(g);
+                }
+            } else {
+                i += 1;
+            }
+        }
         let mut i = 0;
         while i < self.attached.len() {
             if f(self.attached[i].0) {
@@ -401,6 +440,13 @@ impl Effects {
             for (_, g) in self.attached.iter_mut() {
                 g.update(1.0, &mut |_| {});
             }
+            // `WhistleTemplate::invoke`: the flat-ground branch always applies (the goal spot is below the hatch).
+            for (_, gens, from, to) in self.beams.iter_mut() {
+                let (from, to) = (*from, *to);
+                for g in gens.iter_mut() {
+                    g.update(1.0, &mut |p| place_on_beam(p, from, to, from.y));
+                }
+            }
             // Effects of captains that have left the list still run down.
             for (id, w) in self.whistles.iter_mut() {
                 if frames.iter().any(|f| f.captain == *id) {
@@ -436,6 +482,7 @@ impl Effects {
             .oneshots
             .iter_mut()
             .chain(self.attached.iter_mut().map(|(_, g)| g))
+            .chain(self.beams.iter_mut().flat_map(|b| b.1.iter_mut()))
             .chain(self.whistles.values_mut().flat_map(|w| w.beam.iter_mut().chain(w.circle.iter_mut())));
         let mut out = Vec::new();
         for g in gens {
@@ -487,7 +534,7 @@ mod tests {
                 tex: Texture { image: Image { width: 1, height: 1, rgba: vec![255; 4] }, wrap: [false; 2] },
                 child_tex: None,
             })).collect();
-        Effects { defs, root: None, oneshots: Vec::new(), attached: Vec::new(), whistles: HashMap::new(), ring_angle: 0.0, acc: 0.0, seed: 1 }
+        Effects { defs, root: None, oneshots: Vec::new(), attached: Vec::new(), beams: Vec::new(), whistles: HashMap::new(), ring_angle: 0.0, acc: 0.0, seed: 1 }
     }
 
     fn frame(state: WhistleState) -> WhistleFrame {
@@ -497,6 +544,37 @@ mod tests {
             cursor: Vec3::new(100.0, 240.0, 0.0),
             captain_pos: Vec3::new(0.0, 240.0, 0.0), radius: 30.0,
         }
+    }
+
+    /// The ship's beam (`WhistleTemplate`): its particles ride the line from the hatch to the goal spot, and it
+    /// runs down once detached. Skipped without the extracted assets.
+    #[test]
+    fn the_ships_beam_runs_from_the_hatch_to_the_goal_spot() {
+        let Some(assets) = Assets::discover(None) else {
+            println!("SKIP: assets not extracted");
+            return;
+        };
+        let Some(mut fx) = Effects::load(&assets) else { return };
+        let (from, to) = (Vec3::new(0.0, 120.0, 0.0), Vec3::new(0.0, 0.0, 200.0));
+        fx.attach_beam(7, from, to);
+        fx.attach_beam(7, from, to);
+        assert_eq!(fx.beams.len(), 1, "a second start under the same key is ignored");
+        for _ in 0..40 {
+            fx.update(&[], 1.0, 1.0 / 30.0);
+        }
+        let on_line = fx.beams[0].1.iter().flat_map(|g| &g.particles).all(|p| {
+            let at = p.global + p.local;
+            let t = (at - from).dot(to - from) / (to - from).length_squared();
+            (-0.01..=1.01).contains(&t) && (at - (from + (to - from) * t)).length() < 30.0
+        });
+        assert!(on_line && fx.beams[0].1.iter().any(|g| !g.particles.is_empty()));
+        assert!(!fx.batches(Vec3::X, Vec3::Y).is_empty());
+        fx.detach_where(|k| k == 7);
+        assert!(fx.beams.is_empty());
+        for _ in 0..600 {
+            fx.update(&[], 1.0, 1.0 / 30.0);
+        }
+        assert!(fx.batches(Vec3::X, Vec3::Y).is_empty(), "the beam runs down after detaching");
     }
 
     #[test]

@@ -2290,15 +2290,16 @@ impl View {
                         fx.spawn(fx_defs::NAVI_RECOVER, pos);
                         fx.attach(fx_key, fx_defs::NAVI_SPARKLE, pos);
                         // The Dolphin's own doorstep rings (`UfoItem::setSpotActive`), on its goal
-                        // spot nearest him.
-                        let goal = sim
+                        // spot nearest him, and its light beam from the hatch down to that spot
+                        // (`UfoItem::startConeEffect`).
+                        let ship = sim
                             .onions()
                             .iter()
                             .filter(|o| o.ship.is_some())
-                            .map(|o| o.goal_pos())
-                            .min_by(|a, b| a.distance(c.pos).total_cmp(&b.distance(c.pos)));
-                        if let Some(goal) = goal {
-                            fx.attach(fx_key | 1, fx_defs::NAVI_RINGS, goal);
+                            .min_by(|a, b| a.goal_pos().distance(c.pos).total_cmp(&b.goal_pos().distance(c.pos)));
+                        if let Some(o) = ship {
+                            fx.attach(fx_key | 1, fx_defs::NAVI_RINGS, o.goal_pos());
+                            fx.attach_beam(fx_key | 2, o.suck_pos(), o.goal_pos());
                         }
                     }
                     fx.move_attached(fx_key, pos);

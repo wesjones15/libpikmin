@@ -137,6 +137,13 @@ pub mod effects {
         one("effects/pcr/pca1.pcr", "effects/tex/p_cloud05.bti"),
         one("effects/pcr/pca2.pcr", "effects/tex/p_hsbs3.bti"),
     ];
+    /// `EFF_Rocket_Bm1o` / `Bm2o`: the ship's light beam from its hatch to the goal spot
+    /// (`UfoItem::startConeEffect`, `WhistleTemplate` in uteffect.h; its particles ride the line like the
+    /// whistle's).
+    pub const ROCKET_BEAM: [EffectDef; 2] = [
+        one("effects/pcr/rct_bm1o.pcr", "effects/tex/ring_i4.bti"),
+        one("effects/pcr/rct_bm2o.pcr", "effects/tex/ps_ball.bti"),
+    ];
     /// `EFF_Rocket_Land`: dust as the ship is back (`UfoItem::startAI`).
     pub const ROCKET_LAND: EffectDef = one("effects/pcr/rkt_land.pcr", "effects/tex/p_cloud05.bti");
     /// `EFF_Kafun_NG`: sparkles trailing from a flying Onion (`GoalItem::setFlowEffect`).
