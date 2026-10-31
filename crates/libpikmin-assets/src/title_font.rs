@@ -6,8 +6,9 @@
 //! files are copied out by `libsms::extract::p2_treasure` into `p2/treasure/titlefont/`.
 //!
 //! The letter textures are placed one by one by the screens' layouts, so they carry no common baseline. This
-//! module re-aligns them: small letters sit on a baseline, descenders hang from the x-height line. Letters the
-//! disc lacks come from the nearest relative, in the order the user chose:
+//! module re-aligns them: small letters sit on a baseline, descenders hang from the x-height line. The disc's
+//! floor-name screen (`res_floor_name_eng_pal.szs`) has all 52 letters, so a full cache needs no substitutes.
+//! For an older cache that has only the course-name letters, the missing ones come from the nearest relative:
 //! - `b`, `q`, `z` mirror `d`, `p`, `s`;
 //! - `c` is a shrunken `C`, `m` a widened `n`, `v` and `h` come from "Challenge Cave", `y` from "Valley of Repose";
 //! - capitals the disc has no letter for (everything but A C P R V W) are the lowercase letter at capital height.

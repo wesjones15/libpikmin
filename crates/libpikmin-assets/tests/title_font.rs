@@ -22,6 +22,20 @@ fn every_letter_has_a_glyph_on_one_canvas() {
     }
 }
 
+/// With the floor-name letters every glyph is a real texture, so the capitals are not scaled lowercase.
+#[test]
+fn capitals_are_the_discs_own() {
+    let Some(assets) = Assets::discover(None) else { return };
+    let dir = assets.root.join(DIR);
+    if !dir.join("al_l_q.bti").is_file() {
+        println!("SKIP: cache has no floor-name letters");
+        return;
+    }
+    let font = TitleFont::load(&dir).unwrap();
+    let (b, q) = (font.glyph('B').unwrap(), font.glyph('Q').unwrap());
+    assert!(b.width > 20 && q.width > 20);
+}
+
 /// Dumps a contact sheet to `$TITLE_FONT_DUMP` (raw RGBA, width in the file name) for a look by eye.
 #[test]
 fn dump_sheet() {
