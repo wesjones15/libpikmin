@@ -642,6 +642,10 @@ pub struct Generator {
     pass: u8,
     /// `finish`: no more emission; the generator dies when its particles have.
     finished: bool,
+    /// Host extension: run the authored pass curve again and again instead of stopping after
+    /// `max_passes` (the Onion's one-pass lift cloud while it stays aloft). Keeps `pcr` shared
+    /// with the effect table, which is what drawing looks the generator up by.
+    pub loop_forever: bool,
     rng: u32,
 }
 
@@ -664,6 +668,7 @@ impl Generator {
             frame: 0.0,
             pass: 0,
             finished: false,
+            loop_forever: false,
             rng: seed | 1,
         }
     }
@@ -715,7 +720,7 @@ impl Generator {
             self.pass_timer = 0.0;
             self.frame = 0.0;
             self.pass = self.pass.saturating_add(1);
-            if self.pcr.max_passes != 0 && self.pass >= self.pcr.max_passes {
+            if !self.loop_forever && self.pcr.max_passes != 0 && self.pass >= self.pcr.max_passes {
                 self.pass = self.pcr.max_passes;
                 self.finish();
             }

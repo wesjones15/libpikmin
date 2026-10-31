@@ -434,6 +434,43 @@ struct ShipFlight {
     trouble_spark_time: f32,
 }
 
+/// A flying Onion's lean into its travel, like a helicopter: a small pitch toward the way it is
+/// moving, eased in and out. Host extension: the disc's flight clips have no horizontal travel
+/// at all (the Onion only ever rises or descends), so this has to come from the host's trajectory.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OnionLean {
+    pub quat: Quat,
+}
+
+impl OnionLean {
+    /// Full lean, in radians (about 11 degrees).
+    pub const MAX: f32 = 0.20;
+    /// The speed (sim units a second) that reaches full lean; faster only holds it.
+    pub const FULL_SPEED: f32 = 500.0;
+    /// How long the lean takes to follow a change of speed or direction.
+    const EASE: f32 = 0.18;
+
+    /// Follows the Onion from `from` to `to` over `seconds`. `flying` off eases the lean back to
+    /// upright, so a landed Onion stands straight. Returns the tilt to draw it with.
+    pub fn advance(&mut self, from: Vec3, to: Vec3, seconds: f32, flying: bool) -> Quat {
+        let target = if !flying || seconds <= 0.0 {
+            Quat::IDENTITY
+        } else {
+            let travel = (to - from) / seconds;
+            let flat = Vec3::new(travel.x, 0.0, travel.z);
+            let speed = flat.length();
+            if speed < 0.5 {
+                Quat::IDENTITY
+            } else {
+                let axis = Vec3::Y.cross(flat / speed);
+                Quat::from_axis_angle(axis, Self::MAX * (speed / Self::FULL_SPEED).clamp(0.0, 1.0))
+            }
+        };
+        self.quat = self.quat.slerp(target, 1.0 - (-seconds / Self::EASE).exp());
+        self.quat
+    }
+}
+
 // Strip only cinematic travel; the clip still supplies every articulated pose. Hosts
 // place the model along their collision-safe trajectory instead of adding both motions.
 fn rebase_pose(pose: &mut libpikmin_assets::pose::Pose, offset: Vec3) {
@@ -505,6 +542,8 @@ pub struct View {
     /// Host-controlled hovering Onion menu beams (pellet suction supplies its own beam).
     pub onion_menu_beams: HashSet<u32>,
     onion_lift_smoke: HashSet<u32>,
+    /// Per flying Onion: the tick and position its lean was last measured from, and the lean.
+    onion_lean: HashMap<u32, (u64, Vec3, OnionLean)>,
     pub ship_sounds: Vec<(libpikmin::onion::OnionId, &'static str, bool)>,
     pub demo_sounds: Vec<Option<(u16, u16)>>,
     pikihead_anims: AnimSet,
@@ -620,6 +659,14 @@ const CONE_TIME: f32 = 0.8;
 const CONE_SCALE: f32 = 0.1;
 /// The longest a hovering Onion's beam is stretched to reach the ground, in sim units (about 32 m).
 const BEAM_MAX_DROP: f32 = 800.0;
+/// A flying Onion this close to its ground (sim units, about 5.6 m) is *descended*: its lift's
+/// ground cloud runs, as `GoalItem` does while the rocket is near the floor.
+const ONION_DESCENDED: f32 = 140.0;
+/// Height (sim units, about 2.4 m) under which a flying Onion also puts its beam down, so the
+/// Onion menu's descent has it out by the time the Onion settles.
+const ONION_BEAM_HEIGHT: f32 = 60.0;
+/// Height over which the lifted ground cloud fades out, in sim units.
+const ONION_CLOUD_FADE: f32 = 180.0;
 /// `GoalEffect::invoke`: no more gravity from this frame of the suck effect.
 const SUCK_GRAVITY_FRAMES: f32 = 50.0;
 
@@ -774,6 +821,7 @@ impl View {
             onion_ground: HashMap::new(),
             onion_menu_beams: HashSet::new(),
             onion_lift_smoke: HashSet::new(),
+            onion_lean: HashMap::new(),
             ship_sounds: Vec::new(),
             demo_sounds: Vec::new(),
             pikihead_anims: AnimSet::load(assets, paths::PIKIHEAD_ANIM_MGR, paths::PIKIHEAD_BUNDLE)?,
@@ -935,7 +983,13 @@ impl View {
         // PelletGoalState::init uses the Onion beam while an airborne Onion ingests a pellet.
         let ingesting = sim.pellets().iter().any(|p| matches!(p.state,
             libpikmin::PelletState::Sucking { onion, .. } if onion == o.id));
-        let beam_active = grounded || ingesting || self.onion_menu_beams.contains(&o.id.0);
+        // Host extension: a flying Onion that has come down to its ground (the Onion menu's
+        // descent, Pikmin climbing aboard) keeps its beam out, as a landed one does.
+        let ground = self.onion_ground.get(&o.id.0).copied();
+        let airborne = !grounded;
+        let height = ground.map_or(0.0, |g| (o.pos.y - g).max(0.0));
+        let beam_active = grounded || ingesting || self.onion_menu_beams.contains(&o.id.0)
+            || (airborne && ground.is_some() && height <= ONION_BEAM_HEIGHT);
         let cone = self.cones.entry(o.id.0).or_insert(if beam_active { 1.0 } else { 0.0 });
         let step = dt / CONE_TIME;
         *cone = if beam_active { (*cone + step).min(1.0) } else { (*cone - step).max(0.0) };
@@ -945,8 +999,8 @@ impl View {
             let (lo, hi) = (self.models[model as usize].lo.y, self.models[model as usize].hi.y);
             // A flying Onion hovers above the ground, so its beam would hang in the air. Host extension:
             // the beam is stretched down to the ground below it, its top staying where it was.
-            let drop = if o.anim == OnionAnim::Hover && hi > lo {
-                self.onion_ground.get(&o.id.0).map_or(0.0, |g| (o.pos.y - g).clamp(0.0, BEAM_MAX_DROP))
+            let drop = if airborne && hi > lo {
+                ground.map_or(0.0, |g| (o.pos.y - g).clamp(0.0, BEAM_MAX_DROP))
             } else { 0.0 };
             let (height, base) = if drop > 1.0 {
                 let height = (drop + hi * CONE_SCALE) / (hi - lo);
@@ -1882,21 +1936,30 @@ impl View {
             self.onion_light(sim, i, o, dt);
             let smoke_key = (8u64 << 48) | ((o.id.0 as u64) << 8);
             let flow_key = smoke_key | 1;
-            let lifting = matches!(o.anim, libpikmin::onion::OnionAnim::TakeOff { .. } | libpikmin::onion::OnionAnim::Hover);
-            if lifting {
-                let ground = self.onion_ground.get(&o.id.0).copied().unwrap_or(o.pos.y);
-                let at = Vec3::new(o.pos.x, ground, o.pos.z);
+            // `GoalItem::playEffect`'s EFF_Rocket_TakeS: the lift's ground cloud. The disc runs it
+            // from the takeoff clip's key; a host-flown Onion keeps it while it is flying near its
+            // ground (descended), so a low hover, a boarding Onion and an Onion Ride all have it.
+            let ground = self.onion_ground.get(&o.id.0).copied();
+            let height = ground.map_or(0.0, |g| (o.pos.y - g).max(0.0));
+            let cloud = !o.grounded()
+                && o.anim != libpikmin::onion::OnionAnim::Away
+                && ground.is_none_or(|_| height <= ONION_DESCENDED);
+            if cloud {
+                // A hair above the floor so the quads start out of the terrain.
+                let at = Vec3::new(o.pos.x, ground.unwrap_or(o.pos.y) + 2.0, o.pos.z);
                 if let Some(fx) = self.effects.as_mut() {
                     if self.onion_lift_smoke.insert(o.id.0) {
                         if let Some(g) = fx.attach(smoke_key, fx_defs::ROCKET_TAKE_S, at) {
-                            // take_s.pcr is a one-pass burst. Recycle its authored
-                            // 100-frame curve while the Onion is aloft.
-                            std::sync::Arc::make_mut(&mut g.pcr).max_passes = 0;
+                            // take_s.pcr is a one-pass burst. Run its authored 100-frame curve
+                            // again and again while the Onion is aloft. (Do not rewrite
+                            // `pcr.max_passes`: a copied `Arc` stops matching the effect table,
+                            // which is how the particles are looked up for drawing.)
+                            g.loop_forever = true;
                         }
                     }
                     fx.move_attached(smoke_key, at);
                     fx.attached_emission_scale(smoke_key,
-                        (1.0 - (o.pos.y - ground).max(0.0) / 180.0).clamp(0.0, 1.0));
+                        (1.0 - height / ONION_CLOUD_FADE).clamp(0.0, 1.0));
                 }
             } else if self.onion_lift_smoke.remove(&o.id.0) {
                 if let Some(fx) = self.effects.as_mut() { fx.detach(smoke_key); }
@@ -2015,7 +2078,19 @@ impl View {
                 + o.dormancy.map_or(0.0, |d| ((1.0 - d.progress) * 4.0).round() * 0.25);
             let inputs = move |_: usize| Inputs { frame: Some(frame), ..Default::default() };
             let pos = self.place(k, o.pos, tick, alpha);
-            self.push(k, kinds::ONION, models::ONION, pos, Quat::IDENTITY, pose, &inputs, 1.0, 0);
+            // A flying Onion tips toward its travel, like a helicopter (the disc clips only ever
+            // rise or descend, so the host's own trajectory supplies the direction).
+            let lean = {
+                let state = self.onion_lean.entry(o.id.0).or_insert((tick, o.pos, OnionLean::default()));
+                if state.0 != tick {
+                    let seconds = tick.saturating_sub(state.0).max(1) as f32 / 30.0;
+                    state.2.advance(state.1, o.pos, seconds, !o.grounded());
+                    state.0 = tick;
+                    state.1 = o.pos;
+                }
+                state.2.quat
+            };
+            self.push(k, kinds::ONION, models::ONION, pos, lean, pose, &inputs, 1.0, 0);
         }
         self.arrivals.clear();
 

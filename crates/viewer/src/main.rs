@@ -200,6 +200,11 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
                 sim.set_onion_pose(onion, Vec3::new(0.0, 100.0, 0.0), true);
                 sim.set_onion_flight_motion(onion, false, 0.0);
             }
+            // A flying Onion travelling at ride speed, for the lean into its travel.
+            "ride" => {
+                let onion = sim.add_onion(Vec3::new(0.0, 87.5, 0.0), &[PikiColor::Red]);
+                sim.set_onion_pose(onion, Vec3::new(0.0, 87.5, 0.0), true);
+            }
             "strike" => {
                 sim.set_dismiss_strike(1.0, 150.0, 0.0, 1.0);
                 for i in 0..12 {
@@ -818,6 +823,11 @@ async fn main() {
         }
         if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("onion") {
             g.sim.set_onion_flight_motion(libpikmin::onion::OnionId(0), false, frames as f32 / 60.0);
+        }
+        if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("ride") {
+            // 600 sim units a second: a full lean (a boosted ride is 750).
+            let at = Vec3::new(frames as f32 * 20.0, 87.5, 0.0);
+            g.sim.set_onion_pose(libpikmin::onion::OnionId(0), at, true);
         }
         let mut events: Vec<_> = g.sim.drain_events().collect();
         if let Some(r) = replica.as_mut() {

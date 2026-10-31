@@ -29,6 +29,7 @@ use macroquad::prelude::{
 };
 
 use libpikmin_present::animator::{Animator, piki_look, piki_rgb};
+use libpikmin_present::view::OnionLean;
 
 use crate::effects::{Effects, WhistleFrame};
 use crate::teki::{Ai, TekiKind, Tekis};
@@ -466,6 +467,10 @@ pub struct Scene3d {
     /// preview of the host's arrival, see `libpikmin_present::View::set_materialize`).
     pub arrive: Option<f32>,
     arrive_fx: bool,
+    /// Each flying Onion's lean into its travel: where it was last frame and the tilt.
+    onion_lean: Vec<(GVec3, OnionLean)>,
+    /// Onions whose lift ground cloud is running (the flat viewer's ground is y = 0).
+    onion_cloud: Vec<bool>,
 }
 
 impl Scene3d {
@@ -539,6 +544,8 @@ impl Scene3d {
             camera: Camera3D::default(),
             arrive: None,
             arrive_fx: false,
+            onion_lean: Vec::new(),
+            onion_cloud: Vec::new(),
         })
     }
 
@@ -628,6 +635,8 @@ impl Scene3d {
         // `PIKMIN_FOCUS=x,y,z` pins the camera target (for screenshots).
         let target = if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("strike") {
             sim.captain(focus).pos - GVec3::Y * 3.0
+        } else if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("ride") {
+            sim.onions().first().map_or(GVec3::ZERO, |o| o.pos)
         } else if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("throw") {
             sim.pikis().iter().find(|p| matches!(p.state, PikiState::Flying { .. }))
                 .map_or(GVec3::ZERO, |p| {
@@ -848,6 +857,37 @@ impl Scene3d {
                 let pose = self.onion.skel.pose(Mat4::IDENTITY, anim);
                 let rest = self.onion.skel.pose(Mat4::IDENTITY, self.onion_anims.get(1).map(|(_, a)| (a, 0.0)));
                 root *= Mat4::from_translation(rest.joints[1].w_axis.truncate() - pose.joints[1].w_axis.truncate());
+            }
+            // A flying Onion tips into its travel, like a helicopter (the disc clips only rise
+            // or descend; the host's trajectory gives the direction).
+            while self.onion_lean.len() <= i { self.onion_lean.push((o.pos, OnionLean::default())); }
+            let lean = {
+                let state = &mut self.onion_lean[i];
+                let q = state.1.advance(state.0, o.pos, dt, !o.grounded());
+                state.0 = o.pos;
+                q
+            };
+            root *= Mat4::from_quat(lean);
+            // EFF_Rocket_TakeS: the lift's ground cloud. A flying Onion keeps it while it is
+            // near its ground, as the shared host view does (the viewer's ground is y = 0).
+            let cloud_key = (9u64 << 40) | i as u64;
+            let cloud = !o.grounded() && o.pos.y <= 140.0;
+            if self.onion_cloud.len() <= i { self.onion_cloud.resize(i + 1, false); }
+            if cloud {
+                let at = GVec3::new(o.pos.x, 2.0, o.pos.z);
+                if let Some(e) = self.effects.as_mut() {
+                    if !std::mem::replace(&mut self.onion_cloud[i], true)
+                        && let Some(g) = e.attach(cloud_key, effects::ROCKET_TAKE_S, at)
+                    {
+                        // One-pass burst; loop its curve while the Onion stays aloft (never by
+                        // copying `pcr`, which would stop it matching the effect table for draw).
+                        g.loop_forever = true;
+                    }
+                    e.move_attached(cloud_key, at);
+                    e.attached_emission_scale(cloud_key, (1.0 - o.pos.y / 180.0).clamp(0.0, 1.0));
+                }
+            } else if std::mem::take(&mut self.onion_cloud[i]) {
+                if let Some(e) = self.effects.as_mut() { e.detach(cloud_key); }
             }
             let now = anim.map_or(0.0, |(_, f)| f);
             let joints = draw_model(

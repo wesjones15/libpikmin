@@ -467,3 +467,34 @@ fn jumps_use_disc_geyser_and_pikmin_airborne_motions_then_resume_walking() {
     assert_ne!(view.animator.players[&captain_key(c)].anim, Motion::OCarry.anim_index().unwrap());
     assert_ne!(view.animator.players[&piki_key(sim.piki(p))].anim, Motion::RollJmp.anim_index().unwrap());
 }
+
+#[test]
+fn a_flying_onion_leans_into_its_travel_and_lands_upright() {
+    let Some(assets) = assets() else { return };
+    let mut view = View::load(&assets).unwrap();
+    let mut sim = Sim::default();
+    let onion = sim.add_onion(Vec3::ZERO, &[PikiColor::Red]);
+    let mut at = Vec3::new(0.0, 100.0, 0.0);
+    sim.set_onion_pose(onion, at, true);
+    view.update(&sim, 1.0, TICK_DT);
+    let tilt = |view: &View| view.draws.iter().find(|d| d.kind == kinds::ONION).unwrap().rot;
+    assert!(tilt(&view).angle_between(glam::Quat::IDENTITY) < 1e-3, "still at first");
+    // 20 sim units a tick is 600 a second: a full lean.
+    for _ in 0..12 {
+        at.x += 20.0;
+        sim.set_onion_pose(onion, at, true);
+        sim.step(&mut FlatHost);
+        view.update(&sim, 1.0, TICK_DT);
+    }
+    let lean = tilt(&view);
+    let (axis, angle) = lean.to_axis_angle();
+    assert!(angle > 0.15, "leans into its travel: {angle}");
+    assert!(axis.z < -0.9 && axis.y.abs() < 0.1, "a pitch about the travel's horizontal axis: {axis:?}");
+    // Landed, it stands upright again.
+    sim.set_onion_pose(onion, at.with_y(0.0), false);
+    for _ in 0..24 {
+        sim.step(&mut FlatHost);
+        view.update(&sim, 1.0, TICK_DT);
+    }
+    assert!(tilt(&view).angle_between(glam::Quat::IDENTITY) < 0.02, "upright once landed");
+}
