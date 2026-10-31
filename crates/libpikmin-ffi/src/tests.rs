@@ -590,7 +590,9 @@ fn unified_onion_flight_allows_call_out_and_upper_leg_put_away() {
         }
         pik_sim_set_onion_pose(sim, o, &air, 1);
         for color in 0..3 { assert_eq!(pik_sim_onion_put_away(sim, c, o, color, 1), 1); }
+        assert_eq!(pik_sim_onion_returning_count(sim, o), 3);
         for _ in 0..600 { pik_sim_advance(sim, &h, 1.0 / 30.0); }
+        assert_eq!(pik_sim_onion_returning_count(sim, o), 0);
         for color in 0..3 { assert_eq!(pik_sim_onion_stock(sim, o, color, 0), 4); }
         assert_eq!(pik_sim_poisoned(sim), 0);
         pik_sim_free(sim);

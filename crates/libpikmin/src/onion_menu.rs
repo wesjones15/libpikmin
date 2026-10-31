@@ -343,7 +343,7 @@ impl Sim {
                         p.vel = Vec3::ZERO;
                         p.on_ground = false;
                         p.state = if remaining <= dt {
-                            PikiState::Enter { onion, leg, climbing: true, ratio: 0.5 }
+                            PikiState::Enter { onion, leg, climbing: true, ratio: if hovering { 0.5 } else { 0.0 } }
                         } else {
                             PikiState::Enter { onion, leg, climbing: false, ratio: ratio + step }
                         };

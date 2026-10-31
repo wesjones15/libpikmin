@@ -1652,6 +1652,15 @@ pub unsafe extern "C" fn pik_sim_finish_orphan_recall(sim: *mut PikSim, captain:
     }) }
 }
 
+/// Living Pikmin still entering this Onion, including walking, jumping and climbing.
+/// # Safety
+/// `sim` from `pik_sim_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_onion_returning_count(sim: *mut PikSim, onion: u32) -> u32 {
+    unsafe { with(sim, 0, |s| s.sim.pikis().iter().filter(|p| p.is_alive()
+        && matches!(p.state, PikiState::Enter { onion: on, .. } if on.0 == onion)).count() as u32) }
+}
+
 /// Places an Onion at `pos` taking the colours in the bit mask `colors` (bit
 /// [`PikiColor::index`]). Returns its id.
 ///

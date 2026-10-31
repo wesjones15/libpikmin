@@ -277,15 +277,21 @@ impl Sim {
         &self.onions
     }
 
-    /// Host-controlled flight/landing. Takeoff resolves climbers before moving the goal;
+    /// Host-controlled flight/landing. Returners adapt to the new leg entry height;
     /// stock, queued exits and seeds survive the flight. Hosts supply terrain-safe poses.
     pub fn set_onion_pose(&mut self, onion: OnionId, pos: Vec3, flying: bool) {
         if !pos.is_finite() || self.onions.get(onion.0 as usize).is_none() { return; }
         if self.onions[onion.0 as usize].dormancy.is_some() { return; }
         if flying && self.onions[onion.0 as usize].grounded() {
-            self.onion_take_off(onion);
-            // Finish exits at the old feet before moving the Onion's airborne legs.
+            // Host hovering is not the end-of-day departure (`onion_take_off`).
+            // Keep the return job alive. A lower-leg climber jumps to the new
+            // midpoint; someone already on the top half keeps climbing.
             for p in &mut self.pikis {
+                if let PikiState::Enter { onion: on, leg, climbing: true, ratio } = p.state
+                    && on == onion && ratio < 0.5 {
+                    p.state = PikiState::Enter { onion, leg, climbing: false, ratio: -0.65 };
+                }
+                // Finish exits at the old feet before moving the airborne legs.
                 if let PikiState::Exit { onion: on, leg, .. } = p.state
                     && on == onion {
                     p.pos = self.onions[onion.0 as usize].pos + crate::onion_menu::LEG_FEET[leg as usize % 3];

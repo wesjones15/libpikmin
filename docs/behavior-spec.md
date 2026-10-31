@@ -490,6 +490,10 @@ squad and navigation jumps inherit their captain's takeoff speed, including extr
     (motion 62 / AnimInfo 87) along ratios 0.5–0.9. Climbing and shrinking remain
     `aiEnter.cpp::ActEnter::gotoLeg/climb`; the jump transfer is a host extension.
     Stock and pending exits retain the field cap.
+    Host-controlled takeoff during entry preserves the task: walkers choose the midpoint;
+    climbers below ratio 0.5 jump to it; climbers on the upper half continue. This differs
+    from the original end-of-day departure, which finishes entry immediately. Hosts hold
+    the flying Onion low and its legs extended while the returning count is nonzero.
 - **Safety.** The whistle and enemy attacks leave Pikmin in either mode alone.
 - **Geometry.** Legs are measured on `goal.mod`: feet about 115 out at 180° and ±60°, tops at
   height 88. The `cont` reach is 70 from the Onion's centre. The real sphere is in the

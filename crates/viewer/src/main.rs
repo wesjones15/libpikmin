@@ -179,10 +179,14 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
     // a sprout/throw composition. Source: PikiHeadItem, PikiFlyingState, NaviGatherState.
     if let Ok(portrait) = std::env::var("PIKMIN_PORTRAIT") {
         match portrait.as_str() {
-            "flying-fill" => {
-                let onion = sim.add_onion(Vec3::new(0.0, 65.0, 0.0), &[PikiColor::Red]);
-                sim.set_onion_pose(onion, Vec3::new(0.0, 65.0, 0.0), true);
-                sim.set_onion_flight_motion(onion, false, 0.0);
+            "flying-fill" | "raising-fill" => {
+                let raising = portrait == "raising-fill";
+                let at_onion = Vec3::Y * if raising { 0.0 } else { 65.0 };
+                let onion = sim.add_onion(at_onion, &[PikiColor::Red]);
+                if !raising {
+                    sim.set_onion_pose(onion, at_onion, true);
+                    sim.set_onion_flight_motion(onion, false, 0.0);
+                }
                 for leg in 0..3 {
                     let at = libpikmin::onion_menu::LEG_FEET[leg].lerp(libpikmin::onion_menu::LEG_TOPS[leg], 0.5).with_y(0.0);
                     sim.spawn_piki_in_squad(PikiColor::Red, at, olimar);
@@ -802,6 +806,16 @@ async fn main() {
             }
         }
         g.sim.advance(&mut g.world, sim_dt);
+        if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("raising-fill") && frames == 120 {
+            g.sim.set_onion_pose(libpikmin::onion::OnionId(0), Vec3::Y * 20.0, true);
+            assert!(g.sim.pikis().iter().any(|p| matches!(p.state, PikiState::Enter { climbing: false, ratio, .. } if ratio < 0.0)), "lower climbers must jump after takeoff");
+            assert_eq!(g.sim.onions()[0].stored_total(), 0, "takeoff cannot instantly store returners");
+        }
+        if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("raising-fill") && frames >= 120 {
+            // Match the host's low filling hover: retain the takeoff's extended
+            // legs until returners finish, rather than folding the leg under them.
+            g.sim.set_onion_flight_motion(libpikmin::onion::OnionId(0), false, 0.0);
+        }
         if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("onion") {
             g.sim.set_onion_flight_motion(libpikmin::onion::OnionId(0), false, frames as f32 / 60.0);
         }
@@ -916,7 +930,7 @@ async fn main() {
                 }
             }
             frames += 1;
-            if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("flying-fill") {
+            if matches!(std::env::var("PIKMIN_PORTRAIT").as_deref(), Ok("flying-fill" | "raising-fill")) {
                 draw_text("Pikmin: JUMP 21/AnimInfo 9 -> HNoboru 62/87", 12.0, 26.0, 22.0, WHITE);
                 draw_text("panipikianimator.cpp: createMotionTable", 12.0, 50.0, 20.0, WHITE);
                 draw_text("aiEnter.cpp: ActEnter::gotoLeg / climb", 12.0, 74.0, 20.0, WHITE);
