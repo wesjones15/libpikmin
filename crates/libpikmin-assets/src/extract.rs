@@ -33,7 +33,7 @@ use std::path::{Component, Path, PathBuf};
 use crate::{Disc, Error};
 
 /// Folders under `files/dataDir/` copied whole.
-pub const FOLDERS: [&str; 20] = [
+pub const FOLDERS: [&str; 21] = [
     "parms/",
     "pikis/",
     "objects/goal/",
@@ -44,6 +44,7 @@ pub const FOLDERS: [&str; 20] = [
     "tekis/",
     "tekikeys/",
     "tekipara/",
+    "bosses/kogane/",
     "SndData/",
     "effects/",
     "shapes/cursor/",
@@ -57,7 +58,7 @@ pub const FOLDERS: [&str; 20] = [
 ];
 
 /// Files that must exist for the sim and viewer to work.
-pub const REQUIRED: [&str; 33] = [
+pub const REQUIRED: [&str; 37] = [
     "parms/naviMgr.bin",
     "parms/pikiMgr.bin",
     "parms/aiconst.bin",
@@ -79,6 +80,10 @@ pub const REQUIRED: [&str; 33] = [
     "tekis/swallow/swallow.mod",
     "tekikeys/swallow.key",
     "tekipara/swallow.bin",
+    "bosses/kogane/kogane.mod",
+    "bosses/kogane/kogane.anm",
+    "bosses/kogane/anims.bin",
+    "bosses/kogane/parms.bin",
     "SndData/Banks/pikibank.bx",
     "effects/pcr/g_curs00.pcr",
     "shapes/cursor/cursor.mod",

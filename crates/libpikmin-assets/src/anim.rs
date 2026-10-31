@@ -219,7 +219,7 @@ pub struct AnimMgr {
 
 /// Reads a `Parameters` block (plugPikiColin/parameters.cpp), handing each entry to `f`.
 /// `Parm<String>` entries are length-prefixed whatever their header says.
-fn read_params(
+pub(crate) fn read_params(
     r: &mut Reader,
     string_ids: &[&[u8; 3]],
     mut f: impl FnMut(&[u8; 3], ParmValue),
@@ -241,7 +241,7 @@ fn read_params(
     }
 }
 
-enum ParmValue {
+pub(crate) enum ParmValue {
     Str(String),
     Word(Option<u32>),
 }

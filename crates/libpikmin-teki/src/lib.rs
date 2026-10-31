@@ -33,6 +33,7 @@ pub mod kabuto;
 pub mod king;
 pub mod kinoko;
 pub mod kogane;
+pub mod flint;
 pub mod legs;
 pub mod longlegs;
 pub mod mar;
@@ -111,6 +112,10 @@ impl Tekis {
             infos.push(info);
             strategies.push(strategy);
         }
+        assert_eq!(infos.len(), info::P1_FLINT as usize);
+        let flint = TekiInfo::load(assets, info::P1_FLINT, 0, &pellets).ok().map(Arc::new);
+        strategies.push(flint.as_ref().map(|_| Arc::new(flint::strategy())));
+        infos.push(flint);
         Tekis { infos, strategies, list: Vec::new(), next_id: 0, rng: Rng(0x9E37_79B9_7F4A_7C15), pending: Vec::new(), buried: Vec::new(), rigs }
     }
 
@@ -149,6 +154,10 @@ impl Tekis {
 
     /// A hit (the host damage, in the disc life units).
     pub fn damage(&mut self, id: TekiId, amount: f32, attacker: Option<Target>) {
+        // Kogane::init/collisionCallback: never mortal, even to a host's lethal hit.
+        if self.get(id).is_some_and(|t|t.kind==info::P1_FLINT) {
+            return;
+        }
         // Pikmin 2's invulnerable enemies (the Kogane family) answer a hit the way they answer a Pikmin landing on
         // them: `pressCallBack`.
         if self.get(id).is_some_and(|t| t.kind >= p2::FIRST && t.option(opt::INVINCIBLE) && t.alive()) && amount < 1.0e5 {

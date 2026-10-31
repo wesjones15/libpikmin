@@ -7,6 +7,7 @@
 //! renderer-agnostic: hosts get triangle batches, decoded RGBA images and posed joint matrices.
 
 pub mod anim;
+pub mod boss;
 pub mod disc;
 pub mod effect_table;
 pub mod extract;

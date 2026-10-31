@@ -16,16 +16,21 @@ fn baked_textures_match_baseline() {
     };
     let view = View::load(&assets).expect("models load");
     let mut hash = 0xcbf29ce484222325u64;
-    for t in &view.textures.list {
+    for (i,t) in view.textures.list.iter().enumerate() {
         hash = fnv(hash, &t.width.to_le_bytes());
         hash = fnv(hash, &t.height.to_le_bytes());
         hash = fnv(hash, &t.wrap);
         hash = fnv(hash, &t.rgba);
+        // The original 19-model palette remains pinned independently of
+        // the newly appended falling-nectar and puddle materials.
+        if i + 1 == BASELINE.0 { assert_eq!(hash, BASELINE.1); }
     }
     println!("{} textures, hash {hash:#x}", view.textures.list.len());
     assert!(!view.textures.list.is_empty());
-    assert_eq!((view.textures.list.len(), hash), BASELINE);
+    assert_eq!((view.textures.list.len(), hash), WITH_NECTAR);
 }
 
 // Recorded from the evaluator before it moved to libcommon::tev.
 const BASELINE: (usize, u64) = (59, 0x997693f070023756);
+// Exact water/fl_water materials appended by ItemMgr's shared presentation.
+const WITH_NECTAR: (usize, u64) = (61, 0x49f6160fa9011236);

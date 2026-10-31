@@ -314,7 +314,7 @@ fn the_view_poses_a_sim_through_the_abi() {
     unsafe {
         let view = pik_view_new(dir.as_ptr(), 0);
         assert!(!view.is_null());
-        assert_eq!(pik_view_model_count(view), 19);
+        assert_eq!(pik_view_model_count(view), 21);
         for m in 0..19 {
             let mut info = PikModelInfo::default();
             assert_eq!(pik_view_model(view, m, &mut info), 1);
@@ -916,7 +916,7 @@ fn every_enemy_kind_draws_and_sounds() {
         return;
     }
     let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
-    let kinds = libpikmin_present::teki::KINDS as u32;
+    let kinds = libpikmin_present::teki::KINDS as u32 + 1;
     // SAFETY: every pointer below is live for its call.
     unsafe {
         crate::view::pik_view_set_teki_models(1);
@@ -926,11 +926,16 @@ fn every_enemy_kind_draws_and_sounds() {
         let sim = pik_sim_new(dir.as_ptr(), 1);
         let mut models = std::collections::HashSet::new();
         let mut list = Vec::new();
-        for k in 0..kinds {
+        for k in (0..kinds-1).chain([libpikmin_teki::info::P1_FLINT as u32]) {
             let mut info = crate::view::PikTekiInfo::default();
             assert_eq!(crate::view::pik_view_teki_info(view, k, &mut info), 1, "kind {k} not loaded");
             assert!(models.insert(info.model), "kind {k} shares a model");
             assert!(info.life > 0.0 && info.hi.y > info.lo.y);
+            if k == libpikmin_teki::info::P1_FLINT as u32 {
+                assert_eq!(crate::view::pik_teki_info(dir.as_ptr(), k, &mut info), 1, "P1 boss metadata also loads without a view");
+                // Restore this view's model index after checking the host-only metadata path.
+                assert_eq!(crate::view::pik_view_teki_info(view, k, &mut info), 1);
+            }
             list.push(crate::view::PikTekiInstance {
                 id: k + 1, kind: if k == 23 { k | (3 << 8) } else { k }, motion: info.motions[2].index, frame: 5.0, scale: 1.0, alpha: 1.0,
                 pos: PikVec3 { x: k as f32 * 60.0, y: 0.0, z: 0.0 }, ..Default::default()
@@ -990,6 +995,7 @@ fn an_enemy_with_its_own_ai_runs_through_the_abi() {
         assert_eq!(pik_tekis_has_strategy(t, 0), 1, "Dwarf Bulborb");
         assert_eq!(pik_tekis_has_strategy(t, 18), 1, "Honeywisp");
         assert_eq!(pik_tekis_has_strategy(t, 19), 1, "Breadbug");
+        assert_eq!(pik_tekis_has_strategy(t, libpikmin_teki::info::P1_FLINT as u32), 1, "P1 Iridescent Flint Beetle");
         let at = PikVec3::default();
         let id = pik_tekis_spawn(t, 0, 4242, &at, 0.0);
         assert!(id > 0);
@@ -1030,14 +1036,15 @@ fn the_pianta_skin_draws_through_the_abi() {
     unsafe {
         let view = pik_view_new(dir.as_ptr(), 0);
         assert!(!view.is_null());
-        assert_eq!(pik_view_load_pianta(view, sms.as_ptr(), 0, u32::MAX), 19);
-        assert_eq!(pik_view_model_count(view), 20);
+        let base = pik_view_model_count(view);
+        assert_eq!(pik_view_load_pianta(view, sms.as_ptr(), 0, u32::MAX), base as i32);
+        assert_eq!(pik_view_model_count(view), base + 1);
         let mut info = PikModelInfo::default();
-        assert_eq!(pik_view_model(view, 19, &mut info), 1);
+        assert_eq!(pik_view_model(view, base, &mut info), 1);
         let mut batches = vec![PikBatch::default(); info.batch_count as usize];
-        assert_eq!(pik_view_batches(view, 19, batches.as_mut_ptr(), info.batch_count), info.batch_count);
+        assert_eq!(pik_view_batches(view, base, batches.as_mut_ptr(), info.batch_count), info.batch_count);
         let mut idx = vec![0u32; info.index_count as usize];
-        assert_eq!(pik_view_indices(view, 19, idx.as_mut_ptr(), info.index_count), info.index_count);
+        assert_eq!(pik_view_indices(view, base, idx.as_mut_ptr(), info.index_count), info.index_count);
         assert!(idx.iter().all(|&i| i < info.vertex_count));
         for b in batches.iter().filter(|b| b.texture >= 0) {
             let mut t = PikTexture::default();
@@ -1076,7 +1083,7 @@ fn the_pianta_skin_draws_through_the_abi() {
                 let mut draws = vec![PikDraw::default(); n as usize];
                 pik_view_draws(view, draws.as_mut_ptr(), n);
                 let me = draws.iter().find(|d| d.kind == 0).expect("no captain");
-                assert_eq!(me.model, 19, "the captain is not the Pianta");
+                assert_eq!(me.model, base, "the captain is not the Pianta");
                 let mut vc = 0u32;
                 let pos = std::slice::from_raw_parts(pik_view_positions(view, &mut vc), vc as usize);
                 let mine = &pos[me.first_vertex as usize..(me.first_vertex + info.vertex_count) as usize];
@@ -1117,13 +1124,14 @@ fn the_louie_skin_draws_through_the_abi() {
         let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
         let view = pik_view_new(dir.as_ptr(), 0);
         assert!(!view.is_null());
+        let base = pik_view_model_count(view);
         let model = pik_view_load_louie(view, p2s.as_ptr());
-        assert_eq!(model, 19);
-        assert_eq!(pik_view_model_count(view), 21);
+        assert_eq!(model, base as i32);
+        assert_eq!(pik_view_model_count(view), base + 2);
         let mut info = PikModelInfo::default();
-        assert_eq!(pik_view_model(view, 19, &mut info), 1);
+        assert_eq!(pik_view_model(view, base, &mut info), 1);
         let mut idx = vec![0u32; info.index_count as usize];
-        assert_eq!(pik_view_indices(view, 19, idx.as_mut_ptr(), info.index_count), info.index_count);
+        assert_eq!(pik_view_indices(view, base, idx.as_mut_ptr(), info.index_count), info.index_count);
         assert!(idx.iter().all(|&i| i < info.vertex_count));
         let sim = pik_sim_new(dir.as_ptr(), 1);
         let c = pik_sim_add_captain(sim, &PikVec3::default());
@@ -1155,7 +1163,7 @@ fn the_louie_skin_draws_through_the_abi() {
                 let mut draws = vec![PikDraw::default(); n as usize];
                 pik_view_draws(view, draws.as_mut_ptr(), n);
                 let me = draws.iter().find(|d| d.kind == 0).expect("no captain");
-                assert_eq!(me.model, 19, "the captain is not Louie");
+                assert_eq!(me.model, base, "the captain is not Louie");
                 let mut vc = 0u32;
                 let pos = std::slice::from_raw_parts(pik_view_positions(view, &mut vc), vc as usize);
                 let mine = &pos[me.first_vertex as usize..(me.first_vertex + info.vertex_count) as usize];
@@ -1285,9 +1293,10 @@ fn the_pikachu_skin_draws_pikachu_and_his_climbers_through_the_abi() {
         let dir = CString::new(assets.root.to_string_lossy().as_bytes()).unwrap();
         let view = pik_view_new(dir.as_ptr(), 0);
         assert!(!view.is_null());
-        assert_eq!(pik_view_load_pikachu(view, melee_c.as_ptr()), 19);
-        assert_eq!(pik_view_model_count(view), 28);
-        for m in 19..28 {
+        let base = pik_view_model_count(view);
+        assert_eq!(pik_view_load_pikachu(view, melee_c.as_ptr()), base as i32);
+        assert_eq!(pik_view_model_count(view), base + 9);
+        for m in base..base+9 {
             let mut info = PikModelInfo::default();
             assert_eq!(pik_view_model(view, m, &mut info), 1);
             let mut idx = vec![0u32; info.index_count as usize];
@@ -1329,17 +1338,17 @@ fn the_pikachu_skin_draws_pikachu_and_his_climbers_through_the_abi() {
         let mut draws = vec![PikDraw::default(); n as usize];
         pik_view_draws(view, draws.as_mut_ptr(), n);
         let me = draws.iter().find(|d| d.kind == 0).expect("no captain");
-        assert_eq!(me.model, 19, "the captain is not Pikachu");
+        assert_eq!(me.model, base, "the captain is not Pikachu");
         let climbers: Vec<_> = draws.iter().filter(|d| d.kind == 1).collect();
         assert_eq!(climbers.len(), 30);
         let mut models: Vec<u32> = climbers.iter().map(|d| d.model).collect();
         models.sort();
         models.dedup();
-        assert!(models.iter().all(|&m| (20..28).contains(&m)), "{models:?}");
+        assert!(models.iter().all(|&m| (base+1..base+9).contains(&m)), "{models:?}");
         assert!(models.len() >= 6, "the squad wears several costumes: {models:?}");
         let mut vc = 0u32;
         let pos = std::slice::from_raw_parts(pik_view_positions(view, &mut vc), vc as usize);
-        for d in me.model..=27 {
+        for d in me.model..base+9 {
             let Some(draw) = draws.iter().find(|x| x.model == d && (x.kind == 0 || x.kind == 1)) else { continue };
             let mut info = PikModelInfo::default();
             pik_view_model(view, d, &mut info);
@@ -1347,7 +1356,7 @@ fn the_pikachu_skin_draws_pikachu_and_his_climbers_through_the_abi() {
             assert!(mine.iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()));
             let (lo, hi) = mine.iter().fold((f32::MAX, f32::MIN), |(l, h), p| (l.min(p.y), h.max(p.y)));
             assert!(lo.abs() < 0.01, "model {d}: feet at {lo}");
-            let want = if d == 19 { 25.1 } else { 25.1 * 0.42 };
+            let want = if d == base { 25.1 } else { 25.1 * 0.42 };
             assert!(hi > want * 0.6 && hi < want * 1.5, "model {d} stands {hi}, wanted about {want}");
         }
         pik_view_free(view);

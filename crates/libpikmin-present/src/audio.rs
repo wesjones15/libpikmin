@@ -503,6 +503,9 @@ impl Audio {
                 s.stop_from(pellet_owner(pellet), "SE_LIFT_MOVE");
                 s.stop_from(pellet_owner(pellet), "SE_LIFT_TRY");
             }
+            // FallWaterAI::CollideInit and PikiNormalState's AS_Drinking entry.
+            Event::NectarSplash { pos } => { s.play("SE_KURIONE_WATER", pos); }
+            Event::PikiDrinking { piki } => { s.play("SEF_PIKI_DRINK", piki_pos(piki)); }
             // `PelletGoalState` (pelletState.cpp): on the Onion's emitter.
             Event::PelletArrived { onion, pellet } => {
                 // `ActTransport` at the goal: `stopEventSound(pel, SE_LIFT_MOVE)`.

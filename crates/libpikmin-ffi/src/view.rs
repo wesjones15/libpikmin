@@ -1243,6 +1243,12 @@ pub unsafe extern "C" fn pik_view_particle_texture(
 
 const _: () = assert!(std::mem::size_of::<PikVec3>() == std::mem::size_of::<Vec3>());
 
+/// zen::NumberPicCallBack per-digit pulse. Direction is the sign of the count change.
+#[unsafe(no_mangle)]
+pub extern "C" fn pik_number_change_scale(direction:i32,elapsed:f32)->f32 {
+    libpikmin_present::hud_numbers::change_scale(direction,elapsed)
+}
+
 // ------------------------------------------------------------------------------------------
 // Enemies (teki) that a host's own AI moves: the view only draws them.
 
@@ -1413,7 +1419,7 @@ pub unsafe extern "C" fn pik_teki_info(assets_dir: *const c_char, kind: u32, out
         let pellets = assets.read("parms/pelMgr.bin").ok()
             .and_then(|d| libpikmin::pellet_config::parse_pellet_configs(&d).ok()).unwrap_or_default();
         let kind = u8::try_from(kind).ok()?;
-        if kind >= libpikmin_teki::p2::FIRST {
+        if libpikmin_teki::p2::kind(kind).is_some() {
             return libpikmin_present::p2enemy::load_info(&assets.root.join("p2"), kind).ok();
         }
         libpikmin_present::teki::TekiInfo::load(&assets, kind, 0, &pellets).ok()

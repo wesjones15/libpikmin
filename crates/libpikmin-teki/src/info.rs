@@ -63,6 +63,17 @@ pub const PELLET_POSY: u8 = 23;
 pub const CLAMCLAMP: u8 = 24;
 pub const PEARL: u8 = 25;
 pub const ROCPE: u8 = 26;
+/// Pikmin 1's BossMgr Kogane; appended after existing P2 IDs to preserve them.
+pub const P1_FLINT: u8 = 56;
+const FLINT: Kind = Kind { name: "kogane", ints: 0, corpse: "", sound_base: "SE_KOGANE_WALK", motions: [2,2,6,1,1,1,0,1,2,2] };
+pub fn definition(kind: u8) -> Option<&'static Kind> {
+    if kind == P1_FLINT { Some(&FLINT) } else { KIND_TABLE.get(kind as usize) }
+}
+pub fn paths(kind: u8) -> Option<[String;4]> {
+    Some(if kind == P1_FLINT {
+        ["bosses/kogane/kogane.mod", "bosses/kogane/kogane.anm", "bosses/kogane/anims.bin", "bosses/kogane/parms.bin"].map(str::to_owned)
+    } else { teki_paths(name(kind)?) })
+}
 
 /// Every kind a host can draw, indexed by the constants above.
 pub const KIND_TABLE: [Kind; 27] = [
@@ -113,7 +124,7 @@ pub mod slot {
 
 /// `TekiMgr::typeNames`.
 pub fn name(kind: u8) -> Option<&'static str> {
-    KIND_TABLE.get(kind as usize).map(|k| k.name)
+    definition(kind).map(|k| k.name)
 }
 
 /// Frame keys of one motion (`AnimInfo::keys` / `info_keys`), in animation frames (30 a second).
@@ -204,12 +215,23 @@ pub struct TekiInfo {
 
 impl TekiInfo {
     pub fn load(assets: &Assets, kind: u8, model_index: u32, pellets: &[PelletConfig]) -> Result<Self, String> {
-        let name = name(kind).ok_or("unknown teki kind")?;
-        let [model_path, anm, key, para] = teki_paths(name);
+        let def = definition(kind).ok_or("unknown teki kind")?;
+        let [model_path, anm, key, para] = paths(kind).ok_or("unknown teki paths")?;
         let e = |e: libpikmin_assets::Error| e.to_string();
-        let p = TekiParams::parse_any(&assets.read(&para).map_err(e)?, KIND_TABLE[kind as usize].ints).map_err(e)?;
+        let bytes = assets.read(&para).map_err(e)?;
+        let p = if kind == P1_FLINT {
+            let own = libpikmin_assets::boss::kogane_params(&bytes).map_err(e)?;
+            let mut floats = vec![0.0; 65];
+            let ids = ["o00","o01","o02","p00","p10","p50","p51","p52","p53","t00","t01","t10","t11","t50","s00"];
+            for (i,id) in ids.iter().enumerate() { floats[50+i] = *own.get(id.as_bytes()).ok_or_else(|| format!("missing Kogane parm {id}"))?; }
+            floats[tpf::LIFE]=100.0; floats[tpf::SCALE]=floats[64]; floats[tpf::WEIGHT]=10.0;
+            floats[tpf::RUN_VELOCITY]=floats[53]; floats[tpf::TURN_VELOCITY]=floats[54];
+            floats[tpf::VISIBLE_RANGE]=floats[50]; floats[tpf::COLLISION_RADIUS]=25.0;
+            floats[tpf::ATTACKABLE_RANGE]=25.0;
+            TekiParams { version: 1, floats, ints: vec![0;20] }
+        } else { TekiParams::parse_any(&bytes, def.ints).map_err(e)? };
         let mgr = AnimMgr::parse(&assets.read(&key).map_err(e)?).map_err(e)?;
-        let motions = KIND_TABLE[kind as usize].motions.map(|index| {
+        let motions = def.motions.map(|index| {
             let Some(i) = mgr.infos.get(index) else { return TekiMotion { index: index as u32, ..Default::default() } };
             let key_at = |n: i32| usize::try_from(n).ok().and_then(|n| i.keys.get(n)).map(|&f| f as f32);
             let of = |ty: u8| i.info_keys.iter().find(|(_, t)| *t == ty).and_then(|&(n, _)| key_at(n));
@@ -263,7 +285,7 @@ impl TekiInfo {
                 frames: set.get(i).map_or(0.0, |(_, a)| a.frames as f32),
             })
             .collect();
-        let corpse = pellet_config::find(pellets, KIND_TABLE[kind as usize].corpse);
+        let corpse = pellet_config::find(pellets, def.corpse);
         Ok(TekiInfo {
             kind,
             model: model_index,

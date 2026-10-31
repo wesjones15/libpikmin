@@ -82,6 +82,8 @@ pub mod kinds {
     pub const SHIP_PART: u8 = 11;
     /// An enemy the host asked for ([`super::View::set_tekis`]); its id is the host's.
     pub const TEKI: u8 = 12;
+    pub const NECTAR_DROP: u8 = 13;
+    pub const NECTAR_PUDDLE: u8 = 14;
 }
 
 /// Draw flags.
@@ -477,6 +479,8 @@ pub struct View {
     pub models: Vec<ViewModel>,
     piki_anims: AnimSet,
     onion_anims: AnimSet,
+    nectar_models: [u32;2],
+    nectar_anims: [AnimSet;2],
     boot_sounds: [(Vec<(f32, u16)>, f32); 3],
     boot_progress: HashMap<u32, f32>,
     ship_anims: AnimSet,
@@ -641,9 +645,8 @@ impl View {
         if TEKI_MODELS.load(std::sync::atomic::Ordering::Relaxed) {
             let pellets = assets.read("parms/pelMgr.bin").ok()
                 .and_then(|d| libpikmin::pellet_config::parse_pellet_configs(&d).ok()).unwrap_or_default();
-            for kind in 0..crate::teki::KINDS as u8 {
-                let Some(name) = crate::teki::name(kind) else { continue };
-                let [model_path, anm, key, _] = libpikmin_assets::teki::teki_paths(name);
+            for kind in (0..crate::teki::KINDS as u8).chain([crate::teki::P1_FLINT]) {
+                let Some([model_path, anm, key, _]) = crate::teki::paths(kind) else { continue };
                 let loaded = (|| {
                     let vm = ViewModel::load(assets, &model_path).ok()?;
                     let info = crate::teki::TekiInfo::load(assets, kind, models.len() as u32, &pellets).ok()?;
@@ -651,7 +654,7 @@ impl View {
                     let sound_keys = anims.mgr.infos.iter()
                         .map(|i| i.event_keys.iter().filter(|e| e.event == 0).map(|e| (e.frame as f32, e.value)).collect())
                         .collect();
-                    let base = crate::teki::KIND_TABLE[kind as usize].sound_base;
+                    let base = crate::teki::definition(kind)?.sound_base;
                     Some((vm, TekiView { info, anims, base, sound_keys }))
                 })();
                 if let Some((vm, teki)) = loaded {
@@ -660,6 +663,11 @@ impl View {
                 }
             }
         }
+        // ItemMgr::initialise registers these exact MizuItem shapes. Append them
+        // after optional ship/enemy models so the existing fixed model IDs stay put.
+        let nectar_models = [models.len() as u32, models.len() as u32 + 1];
+        models.push(ViewModel::load(assets, paths::FALL_WATER)?);
+        models.push(ViewModel::load(assets, paths::WATER)?);
         // Each material baked as it is with no per-draw inputs, which also says how opaque it is.
         let mut textures = Textures::default();
         for (mi, vm) in models.iter_mut().enumerate() {
@@ -725,6 +733,8 @@ impl View {
             models,
             piki_anims: AnimSet::load(assets, paths::PIKI_ANIM_MGR, paths::PIKI_BUNDLE)?,
             onion_anims: AnimSet::load(assets, paths::ONION_ANIM_MGR, paths::ONION_BUNDLE)?,
+            nectar_models,
+            nectar_anims: [AnimSet::load(assets, paths::FALL_WATER_ANIM_MGR, paths::FALL_WATER_BUNDLE)?, AnimSet::load(assets, paths::WATER_ANIM_MGR, paths::WATER_BUNDLE)?],
             boot_sounds: [
                 libpikmin_assets::sound::tables::onion_boot_commands(assets, false)?,
                 libpikmin_assets::sound::tables::onion_boot_commands(assets, true)?,
@@ -1906,6 +1916,30 @@ impl View {
             self.push(k, kinds::ONION, models::ONION, pos, Quat::IDENTITY, pose, &inputs, 1.0, 0);
         }
         self.arrivals.clear();
+
+        // FallWaterAI / WaterAI, using the same animation selection as the
+        // original viewer's nectar path. Keep the authored root height.
+        for d in sim.nectar_drops() {
+            use libpikmin::nectar::DropState;
+            let (motion,frame)=match d.state {
+                DropState::Falling{frame,leaving:true}=>(1,frame),
+                DropState::Falling{frame,..}|DropState::Splash{frame,..}=>(0,frame),
+            };
+            let model=self.nectar_models[0];
+            let anim=self.nectar_anims[0].get(motion).map(|(_,a)|(a,frame.min(a.frames.saturating_sub(1) as f32)));
+            let pose=self.models[model as usize].skel.pose(Mat4::IDENTITY,anim);
+            self.no_lift=true;
+            self.push(key(kinds::NECTAR_DROP,d.id.0 as u64),kinds::NECTAR_DROP,model,d.pos,Quat::IDENTITY,pose,&no_inputs,1.0,0);
+        }
+        for n in sim.puddles() {
+            use libpikmin::PuddleState::*;
+            let (motion,frame)=match n.state {Wait{frame}=>(0,frame),Touched{frame}=>(1,frame),Appear{frame}=>(2,frame),Drain{frame}=>(3,frame)};
+            let model=self.nectar_models[1];
+            let anim=self.nectar_anims[1].get(motion).map(|(_,a)|(a,frame.min(a.frames.saturating_sub(1) as f32)));
+            let pose=self.models[model as usize].skel.pose(Mat4::IDENTITY,anim);
+            self.no_lift=true;
+            self.push(key(kinds::NECTAR_PUDDLE,n.id.0 as u64),kinds::NECTAR_PUDDLE,model,n.pos,Quat::IDENTITY,pose,&no_inputs,1.0,0);
+        }
 
         // Pellets and corpses: the numbered pellets, sized to the thing being carried
         // (corpses too: a host's enemies have no Pikmin model). The model goes by carriers,

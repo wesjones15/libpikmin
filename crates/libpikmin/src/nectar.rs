@@ -106,11 +106,16 @@ impl Sim {
     /// Drops nectar from `pos` (it falls, splashes and leaves a puddle), as a Honeywisp does
     /// when hit (`TaiMizinko`, taimizinko.cpp).
     pub fn spawn_nectar(&mut self, pos: Vec3) -> NectarId {
+        self.spawn_nectar_with_velocity(pos, Vec3::ZERO)
+    }
+
+    /// KoganeAi::birthItemWater throws the same nectar through a short upward arc.
+    pub fn spawn_nectar_with_velocity(&mut self, pos: Vec3, vel: Vec3) -> NectarId {
         let id = self.next_nectar_id();
         self.nectar_drops.push(NectarDrop {
             id,
             pos,
-            vel: Vec3::ZERO,
+            vel,
             state: DropState::Falling {
                 frame: 0.0,
                 leaving: true,

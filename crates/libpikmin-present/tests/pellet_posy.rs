@@ -32,10 +32,10 @@ fn flower_materials_really_change_colour_without_changing_model_or_pose() {
 }
 
 #[test]
-fn all_five_posy_sound_cues_resolve_and_render_audibly_from_the_disc() {
+fn posy_flint_and_nectar_sound_cues_resolve_and_render_audibly_from_the_disc() {
     let Some(assets) = assets() else { return };
     let data = Arc::new(SoundData::load(&assets).unwrap());
-    for name in ["SE_FLOWER_DOWN", "SE_FLOWER_CONVULSION", "SE_FLOWER_GROW0", "SE_FLOWER_GROW1", "SE_FLOWER_GROW2"] {
+    for name in ["SE_FLOWER_DOWN", "SE_FLOWER_CONVULSION", "SE_FLOWER_GROW0", "SE_FLOWER_GROW1", "SE_FLOWER_GROW2", "SE_KOGANE_WALK", "SE_KOGANE_DAMAGE", "SE_KURIONE_WATER", "SEF_PIKI_DRINK"] {
         let tables = JaudioTables::load(&assets).unwrap();
         let mut system = SoundSystem::new(data.clone(), tables);
         system.set_listener(glam::Mat4::IDENTITY, Vec3::ZERO);
@@ -48,4 +48,20 @@ fn all_five_posy_sound_cues_resolve_and_render_audibly_from_the_disc() {
         assert!(pcm.iter().all(|f| f.is_finite()));
         assert!(pcm.iter().any(|f| f.abs() > 0.001), "silent {name}");
     }
+}
+
+#[test]
+fn nectar_drops_and_puddles_reach_the_shared_host_draw_list() {
+    let Some(assets) = assets() else {return};
+    let mut view=View::load(&assets).unwrap();
+    let mut sim=Sim::new(Params::default(),1);
+    sim.spawn_nectar_with_velocity(Vec3::new(0.0,80.0,0.0),Vec3::Y*200.0);
+    sim.add_nectar_puddle(Vec3::new(100.0,0.0,0.0));
+    view.update(&sim,1.0,1.0/30.0);
+    let drop=view.draws.iter().find(|d|d.kind==view::kinds::NECTAR_DROP).expect("falling nectar is visible in RoR2's draw path");
+    let puddle=view.draws.iter().find(|d|d.kind==view::kinds::NECTAR_PUDDLE).expect("drinkable puddle is visible in RoR2's draw path");
+    assert_ne!(drop.model,puddle.model);
+    assert_eq!(drop.pos.y,80.0,"retain the authored flying-drop origin");
+    assert_eq!(puddle.pos.x,100.0);
+    for draw in [drop,puddle] {assert!(view.models[draw.model as usize].vertex_count>0);}
 }

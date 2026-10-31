@@ -19,6 +19,7 @@ fn texture(width: u32, height: u32, rgba: &[u8]) -> Texture2D {
 async fn main() {
     let args: Vec<_> = std::env::args().collect();
     let shot = args.get(1);
+    let flint = args.iter().any(|a| a == "--flint");
     let last: u32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(90);
     let assets = Assets::discover(None).expect("extract your Pikmin disc first");
     libpikmin_present::view::set_teki_models(true);
@@ -26,21 +27,22 @@ async fn main() {
     let mut sim = Sim::new(Params::default(), 9);
     let mut tekis = Tekis::load(&assets);
     let mut ids = Vec::new();
-    for size in 0..3 {
-        let id = tekis.spawn(info::PELLET_POSY, size + 1, GVec3::new((size as f32 - 1.0) * 110.0, 0.0, 0.0), 0.0).unwrap();
+    for size in 0..if flint {1} else {3} {
+        let id = tekis.spawn(if flint {info::P1_FLINT}else{info::PELLET_POSY}, size + 1, GVec3::new((size as f32 - 1.0) * 110.0, 0.0, 0.0), 0.0).unwrap();
         let t = tekis.get_mut(id).unwrap();
-        t.count = [size as i32, size as i32, 1, 0];
+        if !flint { t.count = [size as i32, size as i32, 1, 0]; }
         ids.push(id);
     }
-    let facts = view.teki_info(info::PELLET_POSY).unwrap();
-    println!("kind23 palm: life {} bounds {:?}..{:?}", facts.life, facts.lo, facts.hi);
+    let facts = view.teki_info(if flint {info::P1_FLINT}else{info::PELLET_POSY}).unwrap();
+    println!("asset facts: life {} bounds {:?}..{:?}", facts.life, facts.lo, facts.hi);
     for (i, m) in facts.motion_data.iter().enumerate() { println!("motion {i}: frames {} events {:?}", m.frames, m.events); }
-    let eye = vec3(210.0, 150.0, 390.0);
-    let target = vec3(0.0, 40.0, 0.0);
+    let eye = if flint { vec3(120.0, 140.0, 240.0) } else { vec3(210.0, 150.0, 390.0) };
+    let target = if flint {vec3(0.0,35.0,0.0)} else {vec3(0.0, 40.0, 0.0)};
     let forward = (target - eye).normalize();
     let right = forward.cross(Vec3::Y).normalize();
     let up = right.cross(forward).normalize();
     let gv = |v: Vec3| GVec3::new(v.x, v.y, v.z);
+    let digits:Vec<_>=(0..10).map(|d| {let i=libpikmin_assets::screen::number_texture(&assets,d,false).unwrap();texture(i.width,i.height,&i.rgba)}).collect();
     let mut textures = Vec::new();
     let mut effect_textures = Vec::new();
     let additive = load_material(ShaderSource::Glsl {
@@ -51,16 +53,17 @@ async fn main() {
         depth_test: miniquad::Comparison::LessOrEqual, depth_write: false, ..Default::default()
     }, ..Default::default() }).unwrap();
     for tick in 0..=last {
-        if tick == 30 { tekis.damage(ids[2], 0.2, None); }
-        if tick == 70 { for &id in &ids[..2] { tekis.get_mut(id).unwrap().timers[0] = 0.0; } }
-        if tick == 140 { tekis.get_mut(ids[0]).unwrap().timers[0] = 0.0; }
-        if tick == 180 { tekis.damage(ids[2], 1e6, None); }
+        if flint && tick >= 30 && (tick-30)%60==0 { tekis.damage(ids[0], 1e6, None); tekis.press(ids[0]); }
+        if !flint && tick == 30 { tekis.damage(ids[2], 0.2, None); }
+        if !flint && tick == 70 { for &id in &ids[..2] { tekis.get_mut(id).unwrap().timers[0] = 0.0; } }
+        if !flint && tick == 140 { tekis.get_mut(ids[0]).unwrap().timers[0] = 0.0; }
+        if !flint && tick == 180 { tekis.damage(ids[2], 1e6, None); }
         sim.step(&mut FlatHost);
-        for out in tekis.update(&mut sim, &FlatHost, &[], 1.0 / 30.0) {
+        for out in tekis.update(&mut sim, &FlatHost, &[libpikmin_teki::Navi{id:1,pos:GVec3::ZERO,size:8.0,alive:true}], 1.0 / 30.0) {
             match out {
                 Out::Effect { id, pos } => { println!("tick {tick} effect {id}"); view.spawn_effect(id, pos); }
                 Out::EffectDir { id, pos, dir } => { println!("tick {tick} oriented effect {id}"); view.spawn_effect_dir(id, pos, dir); }
-                Out::TableSound { teki, index } => println!("tick {tick} sound teki {teki}, table {index} (SE_FLOWER_DOWN + index)"),
+                Out::TableSound { teki, index } => println!("tick {tick} sound teki {teki}, table {index} (asset sound base + index)"),
                 Out::SpawnPellets { pos, number, color, count } => {
                     println!("tick {tick} pellet index {number} color {color}");
                     for _ in 0..count { sim.spawn_pellet(libpikmin::PelletDesc::numbered(sim.params(), [1,5,10,20][number as usize], libpikmin::PikiColor::ALL[color as usize], pos, 0.0)); }
@@ -70,8 +73,9 @@ async fn main() {
         }
         let instances: Vec<_> = tekis.list.iter().filter(|t| t.option(opt::VISIBLE)).map(|t| TekiInstance {
             id: t.id, kind: t.kind, pos: t.pos, yaw: t.yaw, motion: t.anim.motion as u32,
-            frame: t.anim.counter, flash: t.flash, scale: 1.0, alpha: 1.0, material_frame: Some(t.count[1] as f32),
+            frame: t.anim.counter, flash: t.flash, scale: if flint {t.fade} else {1.0}, alpha: 1.0, material_frame: if flint {None}else{Some(t.count[1] as f32)},
         }).collect();
+        if flint { for t in &mut tekis.list { t.pos=GVec3::ZERO; } }
         view.set_tekis(&instances);
         view.set_camera(gv(right), gv(up), gv(forward));
         view.update(&sim, 1.0, 1.0 / 30.0);
@@ -105,9 +109,17 @@ async fn main() {
         }
         gl_use_default_material();
         set_default_camera();
-        draw_text("Pellet Posy | kind 23 | tekis/palm/palm.mod | palm.key motions 0-10", 18., 27., 24., WHITE);
-        draw_text("taipalm.cpp: translateMotionIndex / createEffect | particle emitters 70-73", 18., 54., 23., WHITE);
-        draw_text(&format!("Tick {tick}: growth / hit / drop | SE_FLOWER_DOWN..GROW2 (0x2E-0x32)"), 18., 81., 22., WHITE);
+        draw_text(if flint {"P1 Flint Beetle | kind 56 | bosses/kogane/kogane.mod + .anm"} else {"Pellet Posy | kind 23 | tekis/palm/palm.mod | palm.key motions 0-10"}, 18., 27., 24., WHITE);
+        draw_text(if flint {"KoganeAi.cpp: initCreate / keyAction1 | particle emitters 19,87-89,120"} else {"taipalm.cpp: translateMotionIndex / createEffect | particle emitters 70-73"}, 18., 54., 23., WHITE);
+        draw_text(&if flint {format!("Tick {tick}: walk / flip / burrow | Kogane sounds 0x76-0x77")} else {format!("Tick {tick}: growth / hit / drop | SE_FLOWER_DOWN..GROW2 (0x2E-0x32)")}, 18., 81., 22., WHITE);
+        if flint {
+            draw_text("HUD | zen/Number.h NumberPicCallBack | unchanged / +1 / -1",18.,610.,22.,WHITE);
+            for (col,dir) in [0,1,-1].into_iter().enumerate() {
+                let phase=(tick%30) as f32/30.0;
+                let scale=libpikmin_present::hud_numbers::change_scale(dir,phase);
+                for n in 0..3 {let s=if n==2 {scale}else{1.0};let x=180.0+col as f32*290.0+n as f32*44.0;draw_texture_ex(&digits[if n==2 {1}else{0}],x-22.0*s,670.0-22.0*s,WHITE,DrawTextureParams{dest_size:Some(vec2(44.0*s,44.0*s)),..Default::default()});}
+            }
+        }
         if tick == last {
             if let Some(path) = shot { get_screen_data().export_png(path); }
             break;
