@@ -36,6 +36,8 @@ impl Sim {
                 | PikiState::Fading { .. }
                 | PikiState::Dead
                 | PikiState::Swallowed { .. }
+                // Piki::isVisible excludes NUKARE during the pluck.
+                | PikiState::Plucked { .. }
                 // `InteractAttack` leaves Pikmin going into or out of an Onion alone
                 // (interactBattle.cpp).
                 | PikiState::Enter { .. }

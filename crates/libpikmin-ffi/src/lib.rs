@@ -42,7 +42,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 53;
+pub const PIK_ABI_VERSION: u32 = 54;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
@@ -306,6 +306,7 @@ pub mod piki_state {
     pub const DEAD: u8 = 16;
     /// The Onion's plucker, out pulling sprouts nobody plucked.
     pub const PLUCKER: u8 = 17;
+    pub const PLUCKED: u8 = 18;
 }
 
 #[repr(C)]
@@ -493,6 +494,8 @@ pub mod event_kind {
     pub const BULB_SHOT: u32 = 51;
     /// `a` the heaviest Pikmin latched on, `b` the weight (a Purple counts five); the creature fields name the flier.
     pub const WEIGHED_DOWN: u32 = 52;
+    pub const PLUCK_STARTED: u32 = 53;
+    pub const PLUCK_BURST: u32 = 54;
 }
 
 /// One [`Event`]. `a` is the Pikmin, pellet, sprout or captain it's about (the first id in the
@@ -2755,6 +2758,7 @@ fn state_code(s: &PikiState) -> u8 {
         PikiState::Enter { .. } => ENTER,
         PikiState::Exit { .. } => EXIT,
         PikiState::Plucker(_) => PLUCKER,
+        PikiState::Plucked { .. } => PLUCKED,
         PikiState::Dead => DEAD,
     }
 }
@@ -2845,6 +2849,8 @@ fn event(e: Event) -> PikEvent {
         Event::Plucked { captain, piki, sprout } => {
             (v.kind, v.a, v.b, v.c) = (PLUCKED, piki.0, captain.0 as i32, sprout.0 as i32)
         }
+        Event::PluckStarted { piki } => (v.kind, v.a) = (PLUCK_STARTED, piki.0),
+        Event::PluckBurst { piki } => (v.kind, v.a) = (PLUCK_BURST, piki.0),
         Event::EmergencyPikmin { onion, captain, count } => {
             (v.kind, v.a, v.b, v.c) = (EMERGENCY_PIKMIN, captain.0, onion.0 as i32, count as i32)
         }

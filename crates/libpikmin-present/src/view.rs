@@ -582,6 +582,7 @@ pub struct View {
 }
 
 enum Grown {
+    Plucked(libpikmin::PikiId),
     Sprout(libpikmin::SproutId),
     Piki(libpikmin::PikiId),
     Deflowered(libpikmin::PikiId),
@@ -844,6 +845,7 @@ impl View {
             self.arrivals.push(*onion);
         }
         match e {
+            Event::PluckBurst { piki } => self.grown.push(Grown::Plucked(*piki)),
             Event::SproutGrew { sprout, .. } => self.grown.push(Grown::Sprout(*sprout)),
             Event::PikiGrew { piki, .. } => self.grown.push(Grown::Piki(*piki)),
             Event::Deflowered { piki } => self.grown.push(Grown::Deflowered(*piki)),
@@ -875,6 +877,9 @@ impl View {
         self.sparkled.retain(|id, _| sim.sprouts().any(|s| s.id == *id));
         for g in grown {
             match g {
+                Grown::Plucked(id) => {
+                    for def in fx_defs::PLUCK_DIRT { fx.spawn(def, sim.piki(id).pos); }
+                }
                 Grown::Sprout(id) => {
                     if let Some(sp) = sim.sprouts().find(|s| s.id == id) {
                         fx.spawn(fx_defs::PIKI_GROW_UP2, sp.pos + lift);

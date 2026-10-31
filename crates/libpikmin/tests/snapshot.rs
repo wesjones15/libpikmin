@@ -249,6 +249,8 @@ fn every_pikmin_state_round_trips() {
         PikiState::Plucker(Plucker { onion: OnionId(0), job: PluckerJob::Walk { sprout: SproutId(3), best: 4.0, stuck: 0.5 } }),
         PikiState::Plucker(Plucker { onion: OnionId(0), job: PluckerJob::Pull { sprout: SproutId(3), frame: 7.0, popped: true } }),
         PikiState::Dead,
+        PikiState::Plucked { sprout: SproutId(3), frame: 23.0, fast: false, burst: true },
+        PikiState::Plucked { sprout: SproutId(4), frame: 4.0, fast: true, burst: false },
     ];
     let mut sim = Sim::new(Params::default(), 1);
     sim.add_captain(Vec3::ZERO);
@@ -304,6 +306,8 @@ fn every_pikmin_state_round_trips() {
         Event::SproutGrew { sprout: sp, happa: Happa::Bud },
         Event::SproutWilted { sprout: sp },
         Event::Plucked { captain: cap, piki: p, sprout: sp },
+        Event::PluckStarted { piki: p },
+        Event::PluckBurst { piki: p },
         Event::EmergencyPikmin { onion: o, captain: cap, count: 3 },
         Event::PluckerOut { piki: p, onion: o },
         Event::PluckerPulled { plucker: p, plucked: PikiId(2), captain: Some(cap) },

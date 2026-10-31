@@ -800,7 +800,7 @@ impl Sim {
                 PikiState::Enter { .. } | PikiState::Exit { .. } => false,
                 // The Onion's plucker answers to its Onion.
                 PikiState::Plucker(_) => false,
-                PikiState::Dead => false,
+                PikiState::Dead | PikiState::Plucked { .. } => false,
             };
             if !eligible {
                 continue;

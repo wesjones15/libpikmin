@@ -313,8 +313,16 @@ goalItem.cpp, pelletState.cpp, itemAI.cpp `GoalAI`:
   tick (at least π/20) and moves at 100/s, slowing to 0.5 per tick when close. This ends when
   facing within π/10 and closer than 1. It gives up if he moves less than 4 units in 0.4 s
   (`mOdoMeter.start(0.4, 4.0)`).
-- **Pull.** "NUKU" plays; the Pikmin comes out at `KEY_Action0` (frame 23) with the sprout's
-  colour and leaf stage, and joins the squad. The captain is locked until frame 39.
+- **Pull.** `NaviNukuAdjustState::exec` replaces the sprout with a Pikmin of the same
+  colour and leaf stage when both clips start. The captain plays NUKU (frame 23 pull cue,
+  end 39); the Pikmin plays NUKARERU (motion 6, AnimInfo 29), remaining rooted until
+  frame 59 before joining the squad. Chained Pikmin use NUKARE fast (motion 83,
+  AnimInfo 93, end 49), while the captain uses NUKU fast (end 19).
+- **Presentation.** `PikiNukareState::procAnimMsg(KEY_Action0)` emits dirt particles
+  50/51 (`sd_rakk1.pcr` / `sd_rakk2.pcr`) at frame 22 normally, 9 fast.
+  `NaviNukuState::init` plays `SE_PIKI_PULLING` (0x136); its pull key plays
+  `SE_PIKI_PULLED2` (0x137) and `SE_PIKI_PULLED` (0x147). The Onion plucker shares
+  the rooted Pikmin clip and cues. See [pluck presentation proof](pluck-presentation.md).
 - **Chaining** (`NaviNukuState::exec` / `procAnimMsg`, `mFastPluckKeyTaps`).
   - During a pull, once the button has been seen up (`keyUp` is a level, reset at each pull's
     start), pressing or holding it asks for another.

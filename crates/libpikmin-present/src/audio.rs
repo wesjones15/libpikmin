@@ -450,11 +450,17 @@ impl Audio {
                 s.play("SE_PIKI_DEAD", pos);
                 s.release_emitter(piki_owner(piki));
             }
-            // `NaviPluckState` (naviState.cpp): `SE_PIKI_PULLED` once out.
-            Event::Plucked { captain, .. } => {
-                if mine(captain) {
-                    s.play("SE_PIKI_PULLED", Vec3::ZERO);
-                }
+            // NaviNukuState::init and procAnimMsg(KEY_Action0), naviState.cpp.
+            Event::PluckStarted { piki } => {
+                let at = sim.piki(piki).captain.filter(|&c| mine(c)).map_or(piki_pos(piki), |_| Vec3::ZERO);
+                s.play("SE_PIKI_PULLING", at);
+            }
+            Event::Plucked { captain, piki, .. } => {
+                let at = if mine(captain) { Vec3::ZERO } else { piki_pos(piki) };
+                for name in ["SE_PIKI_PULLED2", "SE_PIKI_PULLED"] { s.play(name, at); }
+            }
+            Event::PluckerPulled { plucked, .. } => {
+                for name in ["SE_PIKI_PULLED2", "SE_PIKI_PULLED"] { s.play(name, piki_pos(plucked)); }
             }
             // `NaviBreakupState` (naviState.cpp).
             Event::Dismissed { captain } | Event::StrikeStarted { captain } => {

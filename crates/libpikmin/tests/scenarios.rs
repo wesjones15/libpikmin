@@ -994,6 +994,8 @@ fn corpse_is_delivered_seeds_fly_out_and_sprouts_can_be_plucked() {
     });
     let plucked = plucked.expect("the sprout should be plucked");
     assert_eq!(sim.piki(plucked).color, PikiColor::Red);
+    // NUKARERU runs for 59 frames; squad control starts at KEY_Finished.
+    run(&mut sim, &mut host, 1.0, &mut ev);
     assert_eq!(sim.captain(c).plate.len(), squad_before + 1);
 }
 

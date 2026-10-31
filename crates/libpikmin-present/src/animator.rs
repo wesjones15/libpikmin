@@ -188,6 +188,9 @@ pub fn piki_look(params: &Params, p: &Piki) -> Option<PikiLook> {
         PikiState::Dead | PikiState::Swallowed { .. } => return None,
         PikiState::Idle | PikiState::Squad { .. } | PikiState::GoHang { .. } => walk,
         PikiState::Held { .. } => (Motion::Hang, Clock::Loop(30.0)),
+        PikiState::Plucked { frame, fast, .. } => (
+            if fast { Motion::NukareFast } else { Motion::Nukareru }, Clock::Sim(frame)
+        ),
         PikiState::Flying { .. } => (Motion::RollJmp, Clock::Loop(30.0)),
         PikiState::Attack(a) => match a.mode {
             AttackMode::Approach | AttackMode::StrikeRush => walk,

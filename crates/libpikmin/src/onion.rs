@@ -782,6 +782,13 @@ impl Sim {
                 let to = Vec3::new(approach.x - c.pos.x, 0.0, approach.z - c.pos.z);
                 let len = to.length();
                 if ang.abs() < PI / 10.0 && len < 1.0 {
+                    // NaviNukuAdjustState::exec / InteractPullout::actPiki: replace the
+                    // sprout at motion start, so the Pikmin plays the entire NUKARERU.
+                    let face = c.face;
+                    if self.begin_plucked(pl.sprout, Some(cid), face, fast).is_none() {
+                        return self.cancel_pluck(ci);
+                    }
+                    let c = &mut self.captains[ci];
                     c.vel = Vec3::ZERO;
                     c.target_vel = Vec3::ZERO;
                     c.pluck = Some(Pluck {
@@ -850,13 +857,11 @@ impl Sim {
                 let f = frame + fps * dt * self.captains[ci].attack_rate;
                 if !popped && f >= anim.action0 {
                     popped = true;
-                    if let Some(s) = self.sprouts[pl.sprout.0 as usize].take()
-                        && let Some(piki) = self.spawn_plucked(s.color, s.happa, s.pos, cid)
-                    {
+                    if let Some(piki) = self.plucked_from(pl.sprout) {
                         self.events.push(Event::Plucked {
                             captain: cid,
                             piki,
-                            sprout: s.id,
+                            sprout: pl.sprout,
                         });
                     }
                 }
@@ -899,19 +904,29 @@ impl Sim {
         false
     }
 
-    fn spawn_plucked(
+    pub(crate) fn begin_plucked(
         &mut self,
-        color: PikiColor,
-        happa: Happa,
-        pos: Vec3,
-        captain: CaptainId,
+        sprout: SproutId,
+        captain: Option<CaptainId>,
+        face: f32,
+        fast: bool,
     ) -> Option<PikiId> {
+        let s = self.sprouts.get(sprout.0 as usize)?.as_ref()?;
+        let (color, happa, pos) = (s.color, s.happa, s.pos);
         let id = self.spawn_piki(color, pos)?;
+        self.sprouts[sprout.0 as usize] = None;
         let p = &mut self.pikis[id.0 as usize];
         p.happa = happa;
-        p.vel = Vec3::new(0.0, 120.0, 0.0);
-        p.on_ground = false;
-        self.join_squad(id, captain);
+        p.face = face;
+        p.on_ground = true;
+        p.captain = captain;
+        p.state = PikiState::Plucked { sprout, frame: 0.0, fast, burst: false };
+        self.events.push(Event::PluckStarted { piki: id });
         Some(id)
+    }
+
+    pub(crate) fn plucked_from(&self, sprout: SproutId) -> Option<PikiId> {
+        self.pikis.iter().find_map(|p| matches!(p.state,
+            PikiState::Plucked { sprout: s, .. } if s == sprout).then_some(p.id))
     }
 }

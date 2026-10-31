@@ -23,6 +23,9 @@ pub const ANIM_PUNCH: usize = 94;
 pub const ANIM_NUKU_FAST: usize = 43;
 /// `PIKIANIM_Nuku` (5) → 28 "nuku.dca", captain plucking.
 pub const ANIM_NUKU: usize = 28;
+/// `InteractPullout::actPiki`: normal and chained Pikmin pluck clips.
+pub const ANIM_NUKARERU: usize = 29;
+pub const ANIM_NUKARE_FAST: usize = 93;
 /// `PIKIANIM_Attack` (23) → 18 "attack1.dca".
 pub const ANIM_ATTACK: usize = 18;
 /// `PIKIANIM_PickLoop` (46) → 68 "pickloop.dca", lifting a pellet.
@@ -104,6 +107,8 @@ pub struct AnimTimings {
     pub punch: AnimTiming,
     /// Chained, faster plucking.
     pub nuku_fast: AnimTiming,
+    pub nukareru: AnimTiming,
+    pub nukare_fast: AnimTiming,
     /// Drinking nectar: drinks during the loop.
     pub mizunomi: AnimTiming,
     /// Blooming: `KEY_Action0` makes the flower. First bloom and later ones.
@@ -135,6 +140,8 @@ impl Default for AnimTimings {
             damage: AnimTiming::new(INF, INF, None, 19.0),
             punch: AnimTiming::new(1.0, 4.0, None, 9.0),
             nuku_fast: AnimTiming::new(9.0, INF, None, 19.0),
+            nukareru: AnimTiming::new(22.0, INF, None, 59.0),
+            nukare_fast: AnimTiming::new(9.0, INF, None, 49.0),
             mizunomi: AnimTiming::new(INF, INF, Some((10.0, 30.0)), 39.0),
             grow_up1: AnimTiming::new(49.0, INF, None, 84.0),
             grow_up2: AnimTiming::new(32.0, INF, None, 69.0),
@@ -254,6 +261,8 @@ impl AnimTimings {
         self.damage = timing_at(&infos, ANIM_DAMAGE)?;
         self.punch = timing_at(&infos, ANIM_PUNCH)?;
         self.nuku_fast = timing_at(&infos, ANIM_NUKU_FAST)?;
+        self.nukareru = timing_at(&infos, ANIM_NUKARERU)?;
+        self.nukare_fast = timing_at(&infos, ANIM_NUKARE_FAST)?;
         self.mizunomi = timing_at(&infos, ANIM_MIZUNOMI)?;
         self.grow_up1 = timing_at(&infos, ANIM_GROW_UP[0])?;
         self.grow_up2 = timing_at(&infos, ANIM_GROW_UP[1])?;

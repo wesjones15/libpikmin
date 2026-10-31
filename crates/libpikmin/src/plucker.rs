@@ -18,7 +18,7 @@ use crate::math::{ang_dist, dist_xz, round_ang, yaw_of};
 use crate::onion::{OnionId, SproutId};
 use crate::onion_menu::{SLIDE_SPEED, leg_length, leg_point};
 use crate::piki::{Happa, PikiState};
-use crate::{CaptainId, Host, Sim};
+use crate::{Host, Sim};
 
 /// How far from its Onion a plucker goes for sprouts (sim units, about 29 m in Risk of Rain 2;
 /// seeds land within about 200).
@@ -215,6 +215,7 @@ impl Sim {
                         job: PluckerJob::Pull { sprout, frame: 0.0, popped: false },
                         ..pl
                     });
+                    self.begin_plucked(sprout, self.pikis[pi].captain, self.pikis[pi].face, false);
                     return;
                 }
                 // Slow into the pulling spot instead of overshooting it.
@@ -239,6 +240,7 @@ impl Sim {
                         job: PluckerJob::Pull { sprout, frame: 0.0, popped: false },
                         ..pl
                     });
+                    self.begin_plucked(sprout, self.pikis[pi].captain, self.pikis[pi].face, false);
                     return;
                 }
                 p.state = PikiState::Plucker(Plucker { job: PluckerJob::Walk { sprout, best, stuck }, ..pl });
@@ -254,15 +256,8 @@ impl Sim {
                     popped = true;
                     let plucker = self.pikis[pi].id;
                     let captain = self.pikis[pi].captain.filter(|c| !self.captains[c.0 as usize].down);
-                    let free = self.sprouts.get(sprout.0 as usize).and_then(Option::as_ref)
-                        .is_some_and(|s| s.pluckable() && s.claimed_by.is_none());
-                    if free && let Some(s) = self.sprouts[sprout.0 as usize].take() {
-                        if let Some(plucked) = self.spawn_from_sprout(s.color, s.happa, s.pos, captain) {
-                            self.events.push(Event::PluckerPulled { plucker, plucked, captain });
-                        } else {
-                            // Field full: leave it in the ground.
-                            self.sprouts[sprout.0 as usize] = Some(s);
-                        }
+                    if let Some(plucked) = self.plucked_from(sprout) {
+                        self.events.push(Event::PluckerPulled { plucker, plucked, captain });
                     }
                 }
                 if f >= anim.end {
@@ -274,27 +269,6 @@ impl Sim {
                 });
             }
         }
-    }
-
-    /// A plucked Pikmin: it pops up and runs to `captain`'s squad, or stands about if there's
-    /// no captain.
-    fn spawn_from_sprout(
-        &mut self,
-        color: crate::PikiColor,
-        happa: Happa,
-        pos: Vec3,
-        captain: Option<CaptainId>,
-    ) -> Option<crate::PikiId> {
-        let id = self.spawn_piki(color, pos)?;
-        let p = &mut self.pikis[id.0 as usize];
-        p.happa = happa;
-        p.vel = Vec3::new(0.0, 120.0, 0.0);
-        p.on_ground = false;
-        p.captain = captain;
-        if let Some(c) = captain {
-            self.join_squad(id, c);
-        }
-        Some(id)
     }
 }
 

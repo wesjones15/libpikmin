@@ -31,7 +31,7 @@ use crate::strike::Strike;
 use crate::{CaptainId, PikiId};
 
 /// Bumped when the encoding changes.
-pub const SNAPSHOT_VERSION: u8 = 11;
+pub const SNAPSHOT_VERSION: u8 = 12;
 
 // Far more than any real sim has; a corrupt length can't make decoding allocate wildly.
 const MAX_ENTITIES: usize = 4096;
@@ -744,6 +744,9 @@ fn w_state(w: &mut Writer, s: &PikiState) {
             w_pluck_job(w, &p.job);
         }
         PikiState::Dead => w.u8(17),
+        PikiState::Plucked { sprout, frame, fast, burst } => {
+            w.u8(18); w.u32(sprout.0); w.f32(*frame); w.bool(*fast); w.bool(*burst);
+        }
     }
 }
 
@@ -778,6 +781,7 @@ fn r_state(r: &mut Reader) -> Option<PikiState> {
         15 => PikiState::Exit { onion: OnionId(r.u32()?), leg: r.u8()?, ratio: r.f32()? },
         16 => PikiState::Plucker(Plucker { onion: OnionId(r.u32()?), job: r_pluck_job(r)? }),
         17 => PikiState::Dead,
+        18 => PikiState::Plucked { sprout: SproutId(r.u32()?), frame: r.f32()?, fast: r.bool()?, burst: r.bool()? },
         _ => return None,
     })
 }
@@ -1850,6 +1854,8 @@ fn w_event(w: &mut Writer, e: &Event) {
             w.u32(count);
             w.vec3(pos);
         }
+        PluckStarted { piki } => { w.u8(53); w.u32(piki.0); }
+        PluckBurst { piki } => { w.u8(54); w.u32(piki.0); }
         WeighedDown { creature, piki, weight } => {
             w.u8(52);
             w.u64(creature);
@@ -1919,6 +1925,8 @@ fn r_event(r: &mut Reader) -> Option<Event> {
         49 => PoisonedEater { piki: piki(r)?, creature: r.u64()? },
         50 => BulbSwallowed { piki: piki(r)?, bulb: BulbId(r.u32()?), colour: r_color(r)?, pos: r.vec3()? },
         51 => BulbShot { bulb: BulbId(r.u32()?), colour: r_color(r)?, count: r.u32()?, pos: r.vec3()? },
+        53 => PluckStarted { piki: piki(r)? },
+        54 => PluckBurst { piki: piki(r)? },
         52 => WeighedDown { creature: r.u64()?, piki: piki(r)?, weight: r.u32()? },
         _ => return None,
     })

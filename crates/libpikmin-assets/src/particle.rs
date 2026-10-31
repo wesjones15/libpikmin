@@ -31,6 +31,13 @@ pub struct EffectDef {
 pub mod effects {
     use super::EffectDef;
 
+    /// EffectMgr ids 50/51; PikiNukareState::procAnimMsg(KEY_Action0),
+    /// plugPikiKando/pikiState.cpp; resource table in plugPikiYamashita/effectMgr.cpp.
+    pub const PLUCK_DIRT: [EffectDef; 2] = [
+        one("effects/pcr/sd_rakk1.pcr", "effects/tex/hokori4.bti"),
+        one("effects/pcr/sd_rakk2.pcr", "effects/tex/iwa_1_32.bti"),
+    ];
+
     /// `EFF_Navi_Whistle1..3`: the whistle's beam from the antenna to the cursor
     /// (`NaviWhistle::emit`, NaviWhistle.h).
     pub const NAVI_WHISTLE: [EffectDef; 3] = [

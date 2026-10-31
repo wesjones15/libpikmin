@@ -196,6 +196,8 @@ pub enum PikiState {
     },
     /// Host extension: an Onion's plucker, out pulling forgotten sprouts (`plucker.rs`).
     Plucker(crate::plucker::Plucker),
+    /// `PikiNukareState`: rooted while the authored pluck clip plays.
+    Plucked { sprout: crate::onion::SproutId, frame: f32, fast: bool, burst: bool },
     /// Gone.
     Dead,
 }
@@ -358,6 +360,31 @@ impl Sim {
             PikiState::Absorb { .. } | PikiState::GrowUp { .. } => self.piki_nectar(pi, host, dt),
             PikiState::Enter { .. } | PikiState::Exit { .. } => self.piki_onion_travel(pi, host, dt),
             PikiState::Plucker(pl) => self.piki_plucker(pi, pl, host, dt),
+            PikiState::Plucked { sprout, frame, fast, burst } => {
+                let anim = if fast { self.params.anim.nukare_fast } else { self.params.anim.nukareru };
+                let next = frame + self.params.anim.fps * dt * self.attack_rate_of(pi);
+                // Both clips start together in NaviNukuAdjustState::exec. Captains
+                // step before Pikmin; sample their counter to avoid a one-tick lead.
+                let f = self.pikis[pi].captain.and_then(|c| self.captains[c.0 as usize].pluck)
+                    .filter(|p| p.sprout == sprout)
+                    .and_then(|p| match p.phase { crate::onion::PluckPhase::Pull { frame, .. } => Some(frame), _ => None })
+                    .unwrap_or(next);
+                if !burst && f >= anim.action0 {
+                    self.events.push(Event::PluckBurst { piki: self.pikis[pi].id });
+                }
+                let p = &mut self.pikis[pi];
+                p.vel = Vec3::ZERO;
+                p.target_vel = Vec3::ZERO;
+                p.state = PikiState::Plucked { sprout, frame: f, fast, burst: burst || f >= anim.action0 };
+                if f >= anim.end {
+                    // PikiNukareState::procAnimMsg KEY_Finished returns to formation.
+                    if let Some(c) = p.captain.filter(|c| !self.captains[c.0 as usize].down) {
+                        self.join_squad(self.pikis[pi].id, c);
+                    } else {
+                        self.pikis[pi].state = PikiState::Idle;
+                    }
+                }
+            }
             PikiState::Knocked { phase, whistled } => self.piki_knocked(pi, phase, whistled, host, dt),
         }
     }

@@ -10,6 +10,10 @@ use crate::{CaptainId, PikiId};
 /// Drain with [`crate::Sim::drain_events`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Event {
+    /// `NaviNukuState::init`: start the pull sound when both pluck clips begin.
+    PluckStarted { piki: PikiId },
+    /// `PikiNukareState::procAnimMsg(KEY_Action0)`: dirt at the rooted Pikmin.
+    PluckBurst { piki: PikiId },
     /// A Pikmin climbed into an Onion and is stored.
     PikiEnteredOnion { piki: PikiId, onion: OnionId },
     /// A Pikmin started sliding out of an Onion (`SE_PIKI_OUTHOME`).
@@ -241,7 +245,8 @@ impl Event {
             | Hit { piki, .. } | KnockedOff { piki, .. } | PikiHurt { piki, .. }
             | CarrierGrabbed { piki, .. } | Deflowered { piki } | PikiGone { piki, .. }
             | PikiDied { piki, .. } | Swallowed { piki, .. } | SpitOut { piki }
-            | Plucked { piki, .. } | PluckerOut { piki, .. } | PikiGrew { piki, .. }
+            | Plucked { piki, .. } | PluckStarted { piki } | PluckBurst { piki }
+            | PluckerOut { piki, .. } | PikiGrew { piki, .. }
             | PikiStomped { piki, .. } | PikiLaunched { piki, .. } | Pounded { piki, .. }
             | Grounded { piki, .. } | PoisonedEater { piki, .. } | BulbSwallowed { piki, .. }
             | WeighedDown { piki, .. } => [Some(piki), None],
