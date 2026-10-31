@@ -132,9 +132,13 @@ pub fn is_complete(dir: &Path) -> bool {
     REQUIRED.iter().all(|r| dir.join(r).is_file())
 }
 
-/// A complete extraction that predates the other enemies: only the disc has them.
+/// Olimar's motion from the bad ending where the Pikmin feed him into the Onion (`DEMOID_BadEndingOlimin`,
+/// cinemas/demo74.cin: the actor `pikis/nv3Model.mod` on `navi.anm`). Onion Ride boards with its lift.
+pub const BOARDING_CLIP: &str = "cinemas/demo74/navi.anm";
+
+/// A complete extraction that predates the other enemies or the boarding clip: only the disc has them.
 pub fn needs_teki_top_up(dir: &Path) -> bool {
-    is_complete(dir) && !dir.join(TEKI_STAMP).is_file()
+    is_complete(dir) && (!dir.join(TEKI_STAMP).is_file() || !dir.join(BOARDING_CLIP).is_file())
 }
 
 /// A destination built from disc-supplied names must stay under the output folder.
@@ -167,6 +171,18 @@ pub fn extract_assets(iso: &Path, out: &Path, log: &mut dyn FnMut(&str)) -> Resu
     };
     log(&format!("disc: {} {region}", disc.game_id));
     if needs_teki_top_up(out) {
+        let clip = format!("dataDir/{BOARDING_CLIP}");
+        if !out.join(BOARDING_CLIP).is_file() && disc.exists(&clip) {
+            let dest = safe_join(out, BOARDING_CLIP)?;
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(dest, disc.read(&clip)?)?;
+            log("boarding clip added");
+        }
+        if out.join(TEKI_STAMP).is_file() {
+            return Ok(Report { game_id: disc.game_id.clone(), files: 1, out: out.to_path_buf() });
+        }
         let files: Vec<&str> = disc.paths().filter(|p| p.to_ascii_lowercase().starts_with("datadir/tekis/")).collect();
         for path in &files {
             let dest = safe_join(out, &path["dataDir/".len()..])?;
@@ -211,6 +227,16 @@ pub fn extract_assets(iso: &Path, out: &Path, log: &mut dyn FnMut(&str)) -> Resu
         }
         log(&format!("dataDir/{folder} ({n} files)"));
         total += n;
+    }
+
+    let clip = format!("dataDir/{BOARDING_CLIP}");
+    if disc.exists(&clip) {
+        let dest = safe_join(out, BOARDING_CLIP)?;
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(dest, disc.read(&clip)?)?;
+        total += 1;
     }
 
     let dol = disc.read_dol()?;

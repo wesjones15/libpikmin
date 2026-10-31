@@ -644,6 +644,32 @@ pub unsafe extern "C" fn pik_victory_pcm(assets_dir: *const c_char, out: *mut f3
     samples.len() as u32
 }
 
+/// Captain `captain` is boarding an Onion: plays Olimar's motion from the bad ending that feeds him into it at
+/// `frame`, relative to the Onion's foot `at`; a negative frame ends it. 0 when the clip was not extracted.
+///
+/// # Safety
+/// `view` from [`pik_view_new`]; `at` points to a vector.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_boarding(view: *mut PikView, captain: u32, frame: f32, at: *const PikVec3) -> u8 {
+    if at.is_null() { return 0; }
+    // SAFETY: as documented.
+    let at = unsafe { *at };
+    unsafe { with_view(view, 0, |v| v.view.set_boarding(captain, frame, at.into()) as u8) }
+}
+
+/// Where the boarding clip starts and ends, in its own frames (30 a second).
+///
+/// # Safety
+/// Each pointer is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_boarding_frames(first: *mut f32, last: *mut f32) {
+    // SAFETY: as documented.
+    unsafe {
+        if !first.is_null() { *first = libpikmin_present::View::BOARDING_FRAMES.0; }
+        if !last.is_null() { *last = libpikmin_present::View::BOARDING_FRAMES.1; }
+    }
+}
+
 /// Captain `captain` appears in a beam: `progress` 0 (a thin column) to 1 (himself, which ends it).
 ///
 /// # Safety

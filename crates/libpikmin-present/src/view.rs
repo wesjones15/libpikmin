@@ -478,6 +478,10 @@ pub struct View {
     pub celebrating: bool,
     pub models: Vec<ViewModel>,
     piki_anims: AnimSet,
+    /// Olimar's motion from the bad ending that feeds him into the Onion, if extracted (Onion Ride's boarding).
+    boarding: Option<libpikmin_assets::Anim>,
+    /// Captains playing it: the frame and the Onion's foot it is relative to.
+    boarding_clips: HashMap<u32, (f32, Vec3)>,
     onion_anims: AnimSet,
     nectar_models: [u32;2],
     nectar_anims: [AnimSet;2],
@@ -734,6 +738,9 @@ impl View {
             celebrating: false,
             models,
             piki_anims: AnimSet::load(assets, paths::PIKI_ANIM_MGR, paths::PIKI_BUNDLE)?,
+            boarding: assets.read(libpikmin_assets::extract::BOARDING_CLIP).ok()
+                .and_then(|d| libpikmin_assets::anim::parse_bundle(&d).ok()).and_then(|v| v.into_iter().next()),
+            boarding_clips: HashMap::new(),
             onion_anims: AnimSet::load(assets, paths::ONION_ANIM_MGR, paths::ONION_BUNDLE)?,
             nectar_models,
             nectar_anims: [AnimSet::load(assets, paths::FALL_WATER_ANIM_MGR, paths::FALL_WATER_BUNDLE)?, AnimSet::load(assets, paths::WATER_ANIM_MGR, paths::WATER_BUNDLE)?],
@@ -1464,6 +1471,22 @@ impl View {
     /// How tall Louie stands, as a multiple of Olimar.
     pub fn set_louie_height(&mut self, ratio: f32) {
         if let Some(l) = self.louie.as_mut() { l.set_height_ratio(ratio); }
+    }
+
+    /// First and last frame of the boarding clip worth playing: Olimar lying at the Onion's foot, then lifted
+    /// into it (`DEMOID_BadEndingOlimin`; the clip is 30 frames a second).
+    pub const BOARDING_FRAMES: (f32, f32) = (465.0, 552.0);
+
+    /// Captain `captain` plays the boarding clip at `frame`, relative to the Onion whose foot is `at`; a negative
+    /// frame ends it. False when the clip was not extracted.
+    pub fn set_boarding(&mut self, captain: u32, frame: f32, at: Vec3) -> bool {
+        if self.boarding.is_none() { return false; }
+        if frame.is_finite() && frame >= 0.0 {
+            self.boarding_clips.insert(captain, (frame, at));
+        } else {
+            self.boarding_clips.remove(&captain);
+        }
+        true
     }
 
     /// Captain `captain` is appearing in a beam, `progress` 0 (a thin column) to 1 (himself); 1 or more
@@ -2255,11 +2278,18 @@ impl View {
             live.insert(crate::animator::captain_key(c.id));
             let k = key(kinds::CAPTAIN, c.id.0 as u64);
             let (mut pos, rot) = self.place_rot(k, c.pos, Quat::from_rotation_y(c.face), tick, alpha);
-            let anim = if self.celebrating {
+            let mut anim = if self.celebrating {
                 libpikmin_assets::motion::Motion::WaveJmp.anim_index().and_then(|i| self.piki_anims.get(i))
                     .map(|(info, a)| (a, (self.time * 30.0) % info.keys.last().copied().unwrap_or(1).max(1) as f32))
             } else { self.animator.captain(&self.piki_anims, &params, c, dt) };
             let mut root = crate::animator::captain_root(&params, c);
+            // Boarding an Onion: the bad ending's motion, in the Onion's own space.
+            let clip = self.boarding_clips.get(&c.id.0).copied().zip(self.boarding.as_ref());
+            if let Some(((frame, at), body)) = clip {
+                pos = at;
+                anim = Some((body, frame));
+                root = Mat4::IDENTITY;
+            }
             let pianta_body = self.pianta.is_some() && self.captain_skins.get(&c.id.0) == Some(&crate::pianta::SKIN_PIANTA);
             let louie_body = self.louie.is_some() && self.captain_skins.get(&c.id.0) == Some(&crate::louie::SKIN_LOUIE);
             let pikachu_body = self.pikachu.is_some() && self.captain_skins.get(&c.id.0) == Some(&crate::pikachu::SKIN_PIKACHU);
