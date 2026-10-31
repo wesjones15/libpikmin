@@ -1525,6 +1525,8 @@ impl View {
                         seen: on_board.clone(), pending: VecDeque::new(), repair: None }
                 });
                 let mut cues = Vec::new();
+                // `UfoItem::finishSuck`: a puff where a part goes in (spawned once the ship's facing is known).
+                let mut gep = false;
                 let sucking = sim.pellets().iter().any(|p| p.desc.ship_part.is_some()
                     && matches!(p.state, PelletState::Sucking { onion, .. } if onion == o.id));
                 let was_sucking = flight.sucking;
@@ -1540,6 +1542,7 @@ impl View {
                         if was_sucking || sucking {
                             let fitted = on_board.iter().position(|&p| p == part).map_or(1, |i| i + 1);
                             flight.animator.suck_finish(part as usize, params.ai.ship_level(fitted as u32), &mut cues);
+                            gep = true;
                             flight.repair = Some((part, 0.5));
                         } else {
                             flight.animator.suck_start();
@@ -1551,6 +1554,7 @@ impl View {
                         if age < 0.5 && next >= 0.5 {
                             let fitted = on_board.iter().position(|&p| p == part).map_or(1, |i| i + 1);
                             flight.animator.suck_finish(part as usize, params.ai.ship_level(fitted as u32), &mut cues);
+                            gep = true;
                         }
                         flight.repair = if next > 6.0 || (next > 0.6 && flight.animator.repair_finished()) {
                             None
@@ -1567,6 +1571,14 @@ impl View {
                 } else if flight.progress.is_some() {
                     flight.animator.land_progress(1.0, &mut cues);
                     cues.push(ShipCue::Effect { fx: fx_defs::ROCKET_LAND, lift: 0.0, normal: None });
+                    // Host extension: Ship Repair's first stage crash-lands the bare wreck. Pikmin 1's crash site
+                    // (`kiso_t`'s effect keys 0 and 2, `UfoItem::animationKeyUpdated`) throws debris and a
+                    // cloud of dust as the hull hits the ground.
+                    if self.repair_mode && on_board.is_empty() {
+                        for fx in fx_defs::ROCKET_NKE.into_iter().chain([fx_defs::CLOUD_OF_DUST_1]) {
+                            cues.push(ShipCue::Effect { fx, lift: 0.0, normal: None });
+                        }
+                    }
                 } else {
                     if o.flight_motion.is_some_and(|m| !m.0) && !flight.animator.taking_off() {
                         flight.pending.clear(); flight.repair = None;
@@ -1669,17 +1681,22 @@ impl View {
                                     o.pos + rot * pose.joints[j].transform_point3(trouble_points[slot].1));
                             }
                         }
-                        flight.trouble_spark_time += dt;
-                        if flight.trouble_spark_time >= 2.7 {
-                            flight.trouble_spark_time = 0.0;
-                            for slot in [2usize] {
-                                if let Some(j) = vm.model.joint_index(trouble_points[slot].0) {
-                                    e.spawn(fx_defs::ROCKET_TROUBLE[slot],
-                                        o.pos + rot * pose.joints[j].transform_point3(trouble_points[slot].1));
-                                }
+                        // `UfoItem::updateTroubleEffect`: an 80-frame loop; sparks fly (`rkt_hiba`, with
+                        // `SE_UFO_SPARK`) at the first hull point on frame 0, the third on 13 and the second on 50.
+                        let before = flight.trouble_spark_time;
+                        let after = before + dt * 30.0;
+                        for (key, slot) in [(0.0f32, 0usize), (13.0, 2), (50.0, 1)] {
+                            let due = if key == 0.0 { before == 0.0 } else { before < key && after >= key };
+                            if !due { continue; }
+                            if let Some(j) = vm.model.joint_index(trouble_points[slot].0) {
+                                e.spawn(fx_defs::ROCKET_TROUBLE[2],
+                                    o.pos + rot * pose.joints[j].transform_point3(trouble_points[slot].1));
+                                self.ship_sounds.push((o.id, "SE_UFO_SPARK", true));
                             }
                         }
+                        flight.trouble_spark_time = if after >= 80.0 { 0.0 } else { after };
                     } else if flight.trouble {
+                        flight.trouble_spark_time = 0.0;
                         e.detach_where(|k| k & !255 == trouble_key);
                     }
                 }
@@ -1738,6 +1755,11 @@ impl View {
                             }
                         }
                     }
+                }
+                if gep && let Some(e) = self.effects.as_mut()
+                    && let Some(g) = e.spawn(fx_defs::ROCKET_GEP, o.suck_pos())
+                {
+                    g.emit_dir = rot * Vec3::Z;
                 }
                 if let Some(e) = self.effects.as_mut() {
                     for &(slot, id) in &flight.flames {
