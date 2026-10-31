@@ -314,10 +314,13 @@ pub unsafe extern "C" fn pik_tekis_outs(t: *const PikTekis, out: *mut PikTekiOut
     if out.is_null() {
         return t.outs.len() as u32;
     }
-    let n = t.outs.len().min(max as usize);
-    for (i, o) in t.outs.iter().take(n).enumerate() {
+    let visible:Vec<_>=t.outs.iter().filter(|o|!matches!(o,Out::TableSound {..}|Out::Message {..})).take(max as usize).collect();
+    let n=visible.len();
+    for (i, o) in visible.into_iter().enumerate() {
         let mut r = PikTekiOut::default();
         match o {
+            Out::FollowEffect {key,id,pos,dir,scale} => (r.kind,r.b,r.a,r.pos,r.vel,r.x)=(11,*key,*id as u32,(*pos).into(),(*dir).into(),*scale),
+            Out::StopEffect {key} => (r.kind,r.b)=(12,*key),
             Out::Effect { id, pos } => (r.kind, r.a, r.pos) = (1, *id as u32, (*pos).into()),
             Out::Sound { name, pos } => {
                 r.kind = 2;
@@ -364,6 +367,7 @@ pub unsafe extern "C" fn pik_tekis_state(t: *const PikTekis, id: u32, out: *mut 
     flags |= (e.airborne() as u32) << 5;
     // Bits 8..9: Pellet Posy's BTeki::_3BC material-animation frame.
     if e.kind == libpikmin_teki::info::PELLET_POSY { flags |= (e.count[1].rem_euclid(3) as u32) << 8; }
+    if (27..=55).contains(&e.kind) { flags |= (libpikmin_teki::presentation::flags(e) as u32) << 8; }
     // SAFETY: as documented.
     unsafe {
         out.write(PikTekiState {

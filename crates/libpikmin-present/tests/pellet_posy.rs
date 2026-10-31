@@ -20,7 +20,7 @@ fn flower_materials_really_change_colour_without_changing_model_or_pose() {
     let mut variants = Vec::new();
     for colour in 0..3 {
         view.set_tekis(&[TekiInstance { id: 1, kind: PELLET_POSY, pos: Vec3::ZERO, yaw: 0.0,
-            motion: 8, frame: 5.0, flash: 0.0, scale: 1.0, alpha: 1.0, material_frame: Some(colour as f32) }]);
+            motion: 8, frame: 5.0, flash: 0.0, scale: 1.0, alpha: 1.0, material_frame: Some(colour as f32), presentation: 0 }]);
         view.update(&sim, 1.0, 1.0 / 30.0);
         let draw = view.draws.iter().find(|d| d.kind == view::kinds::TEKI).unwrap();
         let n = view.models[draw.model as usize].batches.len();

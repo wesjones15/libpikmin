@@ -105,6 +105,7 @@ pub struct PikDraw {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PikParticle {
     pub corners: [PikVec3; 4],
+    pub uvs: [[f32;2];4],
     /// RGBA 0..1. Additive particles have their alpha folded in already.
     pub color: [f32; 4],
     /// A [`pik_view_particle_texture`] id.
@@ -1008,7 +1009,7 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
             // Named sounds sound from stand-in creatures where they were asked for.
             for (i, (name, at)) in std::mem::take(&mut v.named).into_iter().enumerate() {
                 // Pikmin 2's enemies name `PSSE_EN_*` sounds, which play on the Pikmin 2 output (started on the first).
-                if let Some(sound) = libpikmin_teki::p2::sound_id(name) {
+                if let Some(sound) = libpikmin_teki::p2::sound_id(name).or_else(||libpikmin_teki::presentation::sound_id(name)) {
                     if v.louie_audio.is_none() && !v.louie_audio_tried && v.audio.is_some() {
                         v.louie_audio_tried = true;
                         if let Some(dir) = v.louie_dir.clone().or_else(|| v.p2_dir.clone()) {
@@ -1029,9 +1030,10 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
             v.particles.clear();
             v.particles.extend(v.view.particles.quads.iter().map(|q| PikParticle {
                 corners: q.corners.map(PikVec3::from),
+                uvs: q.uvs,
                 color: q.color,
                 texture: q.texture,
-                additive: q.additive as u8,
+                additive: if q.refraction {2}else{q.additive as u8},
                 _pad: [0; 3],
             }));
             let tick = s.sim.tick();
@@ -1224,8 +1226,8 @@ pub unsafe extern "C" fn pik_view_particle_texture(
                 *info = PikTexture {
                     width: t.image.width,
                     height: t.image.height,
-                    wrap_s: (!t.wrap[0]) as u8,
-                    wrap_t: (!t.wrap[1]) as u8,
+                    wrap_s: t.sampler.map_or((!t.wrap[0]) as u8, |s|s[0]),
+                    wrap_t: t.sampler.map_or((!t.wrap[1]) as u8, |s|s[1]),
                     _pad: [0; 2],
                 };
             }
@@ -1394,6 +1396,7 @@ pub unsafe extern "C" fn pik_view_set_tekis(view: *mut PikView, list: *const Pik
                         scale: t.scale,
                         alpha: t.alpha,
                         material_frame: ((t.kind >> 8) & 255).checked_sub(1).map(|f| f as f32),
+                        presentation: (t.kind >> 16) as u8,
                     })
                 })
                 .collect();
@@ -1559,4 +1562,22 @@ pub unsafe extern "C" fn pik_view_set_teki_legs(view: *mut PikView, list: *const
             v.view.set_teki_legs(&legs);
         })
     }
+}
+
+/// Revision of a particle texture; source stripe/colour animation may rebake its pixels.
+/// # Safety
+/// `view` is a live, serialized PikView handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_particle_texture_version(view:*mut PikView,id:u32)->u32 {
+    unsafe {with_view(view,0,|v|v.view.particles.textures.get(id as usize).map_or(0,|t|t.version))}
+}
+
+/// Source emitter lifecycle, shared by enemy hosts. Zero `on` ends emission and lets live particles fade.
+/// # Safety
+/// Live serialized view; valid vectors.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_follow_effect(view:*mut PikView,key:u32,id:u32,pos:*const PikVec3,dir:*const PikVec3,scale:f32,on:u8) {
+    let Some(pos)=(unsafe {pos.as_ref()}).copied() else {return};
+    let Some(dir)=(unsafe {dir.as_ref()}).copied() else {return};
+    unsafe {with_view(view,(),|v|{if let Some(fx)=v.view.p2_effects.as_mut(){fx.follow(key,id as u16,pos.into(),dir.into(),scale,on!=0);}})}
 }

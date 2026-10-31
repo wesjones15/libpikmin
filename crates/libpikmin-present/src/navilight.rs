@@ -89,6 +89,8 @@ impl Glow {
                 color: [c[0] * strength * tint[0], c[1] * strength * tint[1], c[2] * strength * tint[2], 1.0],
                 texture,
                 additive: true,
+                uvs: crate::effects::QUAD_UVS,
+                refraction: false,
             });
         }
     }

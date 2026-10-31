@@ -73,7 +73,7 @@ async fn main() {
         }
         let instances: Vec<_> = tekis.list.iter().filter(|t| t.option(opt::VISIBLE)).map(|t| TekiInstance {
             id: t.id, kind: t.kind, pos: t.pos, yaw: t.yaw, motion: t.anim.motion as u32,
-            frame: t.anim.counter, flash: t.flash, scale: if flint {t.fade} else {1.0}, alpha: 1.0, material_frame: if flint {None}else{Some(t.count[1] as f32)},
+            frame: t.anim.counter, flash: t.flash, scale: if flint {t.fade} else {1.0}, alpha: 1.0, material_frame: if flint {None}else{Some(t.count[1] as f32)}, presentation:0,
         }).collect();
         if flint { for t in &mut tekis.list { t.pos=GVec3::ZERO; } }
         view.set_tekis(&instances);

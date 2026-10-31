@@ -25,4 +25,6 @@ pub struct TekiInstance {
     pub alpha: f32,
     /// BTeki::refresh's material-animation frame (Pellet Posy's cycling flower colour).
     pub material_frame: Option<f32>,
+    /// P2 source presentation flags (libpikmin_teki::presentation), zero for older hosts.
+    pub presentation: u8,
 }

@@ -230,7 +230,7 @@ fn struct_sizes_are_what_hosts_mirror() {
         (s.captain, s.piki, s.pellet, s.onion, s.sprout, s.event, s.onion_counts),
         (60, 72, 64, 44, 20, 48, 16)
     );
-    assert_eq!((s.model_info, s.batch, s.texture, s.draw, s.view_frame, s.particle), (40, 24, 12, 64, 52, 72));
+    assert_eq!((s.model_info, s.batch, s.texture, s.draw, s.view_frame, s.particle), (40, 24, 12, 64, 52, 104));
 }
 
 #[test]

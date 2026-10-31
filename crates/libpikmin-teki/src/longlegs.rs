@@ -136,6 +136,11 @@ pub fn play_legs(t: &Teki, w: &mut World, events: &[LegEvent], sound: &'static s
             let at = l.legs[*i].foot;
             w.out.push(Out::Sound { name: sound, pos: at });
             w.out.push(Out::Shake { pos: at, strength: shake });
+            if matches!(t.kind,crate::p2::BEADY_LONG_LEGS|crate::p2::RAGING_LONG_LEGS) {
+                let ids:&[u16]=if t.in_water {&[0x28,0x29,0x2a]}else if t.kind==crate::p2::RAGING_LONG_LEGS {&[0xf5,0xf6]}else{&[0x2b,0x2c]};
+                for &id in ids {w.out.push(Out::Effect {id:0x8000|id as usize,pos:at});}
+                for layer in 0..2 {w.out.push(Out::StopEffect {key:t.id.wrapping_mul(64)+16+(*i as u32)*2+layer});}
+            }
         }
     }
 }
@@ -487,6 +492,24 @@ pub fn update_common(t: &mut Teki, w: &mut World) {
         _ => ("HOUDAI_METALFOOT", 1.5),
     };
     play_legs(t, w, &events, sound, shake);
+    // createOffGroundEffect's held dust follows a lifted foot until createOnGroundEffect.
+    if matches!(t.kind,crate::p2::BEADY_LONG_LEGS|crate::p2::RAGING_LONG_LEGS) {
+        let l=t.legs.as_ref().unwrap();
+        for (i,leg) in l.legs.iter().enumerate().filter(|(i,_)|l.states[*i]==crate::legs::SWINGING) {
+            let ids:&[u16]=if t.in_water {&[0x23]}else if t.kind==crate::p2::RAGING_LONG_LEGS {&[0xf1,0x25]}else{&[0x24,0x25]};
+            for (layer,&id) in ids.iter().enumerate() {w.out.push(Out::FollowEffect {key:t.id.wrapping_mul(64)+16+i as u32*2+layer as u32,id,pos:leg.foot,dir:Vec3::Y,scale:1.0});}
+        }
+    }
+    if t.kind==crate::p2::RAGING_LONG_LEGS {
+        for e in &events {if let LegEvent::Lifted(i)=e {
+            let ratio=t.hp/t.f(crate::p2::fp::LIFE).max(0.01);
+            let name=if t.flags[0] {"BIGFOOT_RAISE_FAST"}else if ratio<0.175 {"BIGFOOT_RAISE3"}else if ratio<0.35 {"BIGFOOT_RAISE2"}else{"BIGFOOT_RAISE1"};
+            w.out.push(Out::Sound {name,pos:t.legs.as_ref().unwrap().legs[*i].foot});
+        }}
+    }
+    let pinch=t.alive() && t.hp<t.f(crate::p2::fp::LIFE)*0.35;
+    if pinch && !t.flags[1] {w.out.push(Out::Sound {name:"DAMAGUMO_SMOKE",pos:t.pos});}
+    t.flags[1]=pinch;
     stomp(t, w);
     if t.kind == crate::p2::MAN_AT_LEGS {
         crate::houdai::update_gun(t, w);

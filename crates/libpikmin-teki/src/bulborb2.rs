@@ -546,9 +546,11 @@ pub fn burn_common(t: &mut Teki, w: &mut World) {
     if t.kind != crate::p2::FIERY_BULBLAX {
         return;
     }
-    if t.in_water {
-        t.flags[3] = true;
-    }
+    if t.in_water {t.flags[3]=true;}
+    let burning=!t.flags[3] && t.state!=DEAD;
+    if burning {w.out.push(Out::Sound {name:"FIRE_CHAPPY_FLAME",pos:t.pos});}
+    if !burning && t.flags[2] {w.out.push(Out::Sound {name:"FIRE_CHAPPY_F_END",pos:t.pos});}
+    t.flags[2]=burning;
     if t.flags[3] || t.state == DEAD {
         return;
     }

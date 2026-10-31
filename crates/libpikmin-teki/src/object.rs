@@ -57,6 +57,9 @@ pub mod opt {
 /// What an enemy did that the host must carry out.
 #[derive(Debug, Clone)]
 pub enum Out {
+    /// A persistent source emitter, moved by a stable host key; stop explicitly when its owner ends.
+    FollowEffect { key: u32, id: u16, pos: Vec3, dir: Vec3, scale: f32 },
+    StopEffect { key: u32 },
     /// An `EffectMgr` effect at a place (`EFF_*`).
     Effect { id: usize, pos: Vec3 },
     /// A sound from the kind's sound table (`BTeki::playTableSound`).

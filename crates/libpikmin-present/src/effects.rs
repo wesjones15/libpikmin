@@ -25,6 +25,8 @@ const WHISTLE_DEFS: usize = 4;
 pub struct Texture {
     pub image: Image,
     pub wrap: [bool; 2],
+    pub sampler: Option<[u8; 2]>,
+    pub version: u32,
 }
 
 /// A loaded effect: its `.pcr` and textures.
@@ -37,7 +39,7 @@ pub struct Def {
 
 fn texture(assets: &Assets, path: &str) -> Option<Texture> {
     let (image, s, t) = libpikmin_assets::texture::decode_bti(&assets.read(path).ok()?).ok()?;
-    Some(Texture { image, wrap: [s, t] })
+    Some(Texture { image, wrap: [s, t], sampler: None, version: 0 })
 }
 
 impl Def {
@@ -531,7 +533,7 @@ mod tests {
         let defs = effects::NAVI_WHISTLE.into_iter().chain([effects::WHISTLE_CIRCLE])
             .map(|d| (d, Def {
                 pcr: Arc::new(pcr.clone()),
-                tex: Texture { image: Image { width: 1, height: 1, rgba: vec![255; 4] }, wrap: [false; 2] },
+                tex: Texture { image: Image { width: 1, height: 1, rgba: vec![255; 4] }, wrap: [false; 2], sampler: None, version: 0 },
                 child_tex: None,
             })).collect();
         Effects { defs, root: None, oneshots: Vec::new(), attached: Vec::new(), beams: Vec::new(), whistles: HashMap::new(), ring_angle: 0.0, acc: 0.0, seed: 1 }
@@ -654,7 +656,10 @@ pub struct FlatQuad {
     pub texture: u32,
     /// Added to the screen (`colour * texture`); else blended by alpha.
     pub additive: bool,
+    pub uvs: [[f32; 2]; 4],
+    pub refraction: bool,
 }
+pub const QUAD_UVS: [[f32; 2]; 4] = [[0.,0.],[1.,0.],[1.,1.],[0.,1.]];
 
 /// How a derived texture is made from an effect's: `rgb * a`, `(1 - rgb) * a`, `a`, or as is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -680,7 +685,7 @@ pub struct Flat {
 impl Flat {
     /// Registers a texture of a host's own (not from an effect) and returns its id.
     pub fn add_texture(&mut self, image: Image, wrap: [bool; 2]) -> u32 {
-        self.textures.push(Texture { image, wrap });
+        self.textures.push(Texture { image, wrap, sampler: None, version: 0 });
         self.textures.len() as u32 - 1
     }
 
@@ -707,6 +712,7 @@ impl Flat {
         self.textures.push(Texture {
             image: Image { width: src.image.width, height: src.image.height, rgba },
             wrap: src.wrap,
+            sampler: src.sampler, version: src.version,
         });
         let id = self.textures.len() as u32 - 1;
         self.ids.insert((def, child, how), id);
@@ -726,7 +732,7 @@ impl Flat {
                 if !additive {
                     let texture = self.texture(fx, b.def, b.child, Derive::Same);
                     let color = [prim[0], prim[1], prim[2], pa];
-                    self.quads.push(FlatQuad { corners: q.corners, color, texture, additive });
+                    self.quads.push(FlatQuad { corners: q.corners, color, texture, additive, uvs: QUAD_UVS, refraction: false });
                     continue;
                 }
                 // out += (mode's colour) * tex.a * prim.a, split by what multiplies tex.rgb.
@@ -740,7 +746,7 @@ impl Flat {
                 for &(how, c) in layers {
                     let texture = self.texture(fx, b.def, b.child, how);
                     let color = [c[0] * pa, c[1] * pa, c[2] * pa, 1.0];
-                    self.quads.push(FlatQuad { corners: q.corners, color, texture, additive });
+                    self.quads.push(FlatQuad { corners: q.corners, color, texture, additive, uvs: QUAD_UVS, refraction: false });
                 }
             }
         }

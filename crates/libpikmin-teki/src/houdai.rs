@@ -47,6 +47,7 @@ const HIT_ANGLE: usize = 23;
 /// A shell in flight (`HoudaiShotGunNode`).
 #[derive(Debug, Clone)]
 pub struct Shell {
+    pub slot: u8,
     pub pos: Vec3,
     pub vel: Vec3,
     hit: Vec<u32>,
@@ -58,6 +59,7 @@ pub struct Gun {
     pub rotating: bool,
     pub locked_on: bool,
     pub finished: bool,
+    sight_active: bool,
     /// The barrel's direction as a heading (`atan2(x, z)`) and an angle from straight up.
     pub heading: f32,
     pub elevation: f32,
@@ -147,6 +149,14 @@ pub fn update_gun(t: &mut Teki, w: &mut World) {
         g.heading = h0;
         g.elevation = e0;
     }
+    let key=t.id.wrapping_mul(64)|15;
+    let g=&mut legs(t).gun;
+    let sight=g.rotating && !g.finished && g.locked_on;
+    if sight {
+        w.out.push(Out::FollowEffect {key,id:0x9f,pos:g.target,dir:Vec3::Y,scale:1.0});
+        w.out.push(Out::Sound {name:"HOUDAI_BEAM",pos:g.target});
+    } else if g.sight_active {w.out.push(Out::StopEffect {key});}
+    g.sight_active=sight;
     update_shells(t, w);
 }
 
@@ -157,11 +167,14 @@ fn update_shells(t: &mut Teki, w: &mut World) {
     let damage = t.f(fp::ATTACK_DAMAGE);
     let ground = t.ground_y.unwrap_or(t.pos.y);
     let (me, id) = (t.pos, t.id);
+    let water=t.in_water;
     let g = &mut legs(t).gun;
     let mut shells = std::mem::take(&mut g.shells);
     shells.retain_mut(|s| {
         let from = s.pos;
         s.pos += s.vel * w.dt;
+        let key=id.wrapping_mul(64)|s.slot as u32;
+        w.out.push(Out::FollowEffect {key,id:0x9b,pos:s.pos,dir:s.vel.normalize_or_zero(),scale:1.0});
         let seg = s.pos - from;
         let len = seg.length();
         // What the path passes within the attack radius of.
@@ -184,9 +197,13 @@ fn update_shells(t: &mut Teki, w: &mut World) {
         let far = (s.pos.x - me.x).abs() > 1500.0 || (s.pos.y - me.y).abs() > 1000.0 || (s.pos.z - me.z).abs() > 1500.0;
         if struck {
             let at = Vec3::new(s.pos.x, ground, s.pos.z);
-            w.out.push(Out::Sound { name: "HOUDAI_IMPACT", pos: at });
+            w.out.push(Out::Sound { name: if water {"HOUDAI_WATER_IMPACT"}else{"HOUDAI_IMPACT"}, pos: at });
+            for fx in if water {&[0x97,0x98,0x99,0x9a][..]}else{&[0x8d,0x8e,0x8f,0x90][..]} {
+                w.out.push(Out::Effect {id:0x8000|fx,pos:at});
+            }
             w.out.push(Out::Shake { pos: at, strength: 1.0 });
         }
+        if struck || far {w.out.push(Out::StopEffect {key});}
         !(struck || far)
     });
     legs(t).gun.shells = shells;
@@ -203,7 +220,9 @@ fn emit(t: &mut Teki, w: &mut World) {
     d.z += w.rng.f32() * spread * 2.0 - spread;
     let d = d.normalize_or_zero();
     if g.shells.len() < 10 {
-        g.shells.push(Shell { pos: pos + d * 45.0, vel: d * 600.0, hit: Vec::new() });
+        let slot=(0..10).find(|slot|!g.shells.iter().any(|s|s.slot==*slot)).unwrap();
+        g.shells.push(Shell { slot, pos: pos + d * 45.0, vel: d * 600.0, hit: Vec::new() });
+        for id in [0x9d,0x9e,0x247] {w.out.push(Out::EffectDir {id:0x8000|id,pos:pos+d*45.0,dir:d});}
         w.out.push(Out::Sound { name: "HOUDAI_SHOT", pos });
     }
 }

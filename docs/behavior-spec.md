@@ -538,3 +538,6 @@ Directly planted ready PikiHeadItems start with UGWAIT (3), matching
 ### Onion texture animation
 
 The beam's PVW texture matrices advance independently at 30 frames/second times each layer's disc speed (graphics.cpp PVWTextureData::animate). The presentation rebakes visible beams at 30 Hz into stable texture slots; hosts refresh pixels by texture version. Headless checks cover all three colors, moving pixels and bounded texture storage. In-game visual confirmation remains manual.
+
+### Ship Repair enemy presentation and P2 music
+See [p2-presentations.md](p2-presentations.md) for exact source resource identities, shared TEV/sampler handling, viewer evidence, and directed-music selection.

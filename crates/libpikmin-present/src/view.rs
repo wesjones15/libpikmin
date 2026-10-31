@@ -517,6 +517,7 @@ pub struct View {
     pub effects: Option<Effects>,
     /// [`View::effects`] as quads, after [`View::particles`].
     pub particles: Flat,
+    pub p2_effects: Option<crate::p2effects::P2Effects>,
     /// Olimar's antenna sphere, where the whistle's beam starts (`Navi::demoDraw`).
     ante: Option<CollSphere>,
     whistles: Vec<WhistleFrame>,
@@ -768,6 +769,7 @@ impl View {
             textures,
             effects: Effects::load(assets),
             particles: Flat::default(),
+            p2_effects: None,
             ante,
             whistles: Vec::new(),
             interp: HashMap::new(),
@@ -974,12 +976,14 @@ impl View {
     /// Plays `EffectMgr`'s effect `id` (`EFF_*`, [`libpikmin_assets::effect_table`]) once at `pos`: the
     /// enemies' death smoke and souls, a host's attack effects. False if the effect or its files aren't there.
     pub fn spawn_effect(&mut self, id: usize, pos: Vec3) -> bool {
+        if id&0x8000!=0 {if let Some(fx)=self.p2_effects.as_mut() {fx.emit((id&0x7fff) as u16,Mat4::from_translation(pos),1.0);return true;}return false;}
         let Some(def) = libpikmin_assets::effect_table::by_id(id) else { return false };
         self.effects.as_mut().is_some_and(|e| e.spawn(def, pos).is_some())
     }
 
     /// As [`View::spawn_effect`], with the direction it emits in (a flame from a mouth, wind).
     pub fn spawn_effect_dir(&mut self, id: usize, pos: Vec3, dir: Vec3) -> bool {
+        if id&0x8000!=0 {if let Some(fx)=self.p2_effects.as_mut() {fx.emit((id&0x7fff) as u16,Mat4::from_translation(pos)*Mat4::from_quat(Quat::from_rotation_arc(Vec3::Y,dir.normalize_or(Vec3::Y))),1.0);return true;}return false;}
         let Some(def) = libpikmin_assets::effect_table::by_id(id) else { return false };
         let Some(e) = self.effects.as_mut() else { return false };
         match e.spawn(def, pos) {
@@ -1021,6 +1025,7 @@ impl View {
                 m.batch_lit.iter().map(|l| l & 3).collect(),
             ));
         }
+        self.p2_effects = crate::p2effects::P2Effects::load(dir).ok();
         self.p2_tekis = loaded;
         self.p2_tekis.len()
     }
@@ -1038,6 +1043,7 @@ impl View {
             Some(fx) => self.particles.update(fx, right, up),
             None => self.particles.quads.clear(),
         }
+        if let Some(fx)=self.p2_effects.as_mut() { fx.draw(&mut self.particles,right,up); }
         // Louie's navi light over each captain wearing him.
         if let Some(mut light) = self.navi_light.take() {
             for &(feet, height) in &self.light_spots {
@@ -2100,6 +2106,7 @@ impl View {
                         (at, yaw) = (lv.trace, lv.face);
                     }
                 }
+                if let Some(fx)=self.p2_effects.as_mut() {fx.enemy(&t,&p2,&joints,at,yaw,scale);}
                 let flags = if t.flash > 0.0 { flags::FLASH } else { 0 };
                 let k = key(kinds::TEKI, t.id as u64);
                 self.push_body(&p2.body.model, p2.model, p2.tex_base, scale, kinds::TEKI, k, at, Quat::from_rotation_y(yaw),
@@ -2425,6 +2432,7 @@ impl View {
             fx.update(&self.whistles, params.navi.whistle_hold_time, dt);
         }
 
+        if let Some(fx)=self.p2_effects.as_mut() {fx.advance((self.time as f64*30.0).floor() as u64);}
         self.animator.retain_players(&live);
         let drawn: HashSet<u64> = self.draws.iter().map(|d| d.key).collect();
         self.interp.retain(|k, _| drawn.contains(k));
