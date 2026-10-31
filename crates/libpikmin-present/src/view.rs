@@ -354,6 +354,12 @@ fn icy(c: [u8; 4]) -> [u8; 4] {
     [mix(0), mix(1), mix(2), c[3]]
 }
 
+/// A named joint of a posed body, for the host's attachment points on the Pianta and
+/// Louie rigs (their joint counts differ, so names are the stable mapping).
+fn named(rig: &libsms::Skeleton, joints: &[Mat4], name: &str) -> Option<Mat4> {
+    rig.find(name).and_then(|j| joints.get(j)).copied()
+}
+
 fn key(kind: u8, id: u64) -> u64 {
     (kind as u64) << 56 | (id & ((1 << 56) - 1))
 }
@@ -550,6 +556,15 @@ pub struct View {
     grown: Vec<Grown>,
     /// The stage each sprout already sparkled for (`PikiHeadAI::WaitExec` once per stage).
     sparkled: HashMap<libpikmin::SproutId, libpikmin::Happa>,
+    /// Each captain's body attachment points as last drawn, in that body's model space, for
+    /// a host mounting props (item displays) on him. Same ids as `libsms_view`'s
+    /// `sms_view_anchor`: 0 head, 1 chest, 2 pelvis, 3/4 shoulders, 5/6 elbows, 7/8 hands,
+    /// 9/10 legs, 11/12 knees, 13/14 feet.
+    captain_anchors: HashMap<u32, [Option<glam::Mat4>; 15]>,
+    /// The raw attachment points for the captain a `push_body`/`push_hsd` call is about to
+    /// draw, in his body's own units; the push applies its scale and ground lift and stores
+    /// them in `captain_anchors`.
+    pending_anchors: Option<[Option<Mat4>; 15]>,
     /// The Pianta body some captains wear ([`View::load_pianta`]) and who wears it.
     pub(crate) pianta: Option<crate::pianta::PiantaSkin>,
     /// The Louie body some captains wear ([`View::load_louie`]).
@@ -813,6 +828,8 @@ impl View {
             pikmin2: None,
             pikachu: None,
             captain_skins: HashMap::new(),
+            captain_anchors: HashMap::new(),
+            pending_anchors: None,
             pianta_voices: Vec::new(),
         })
     }
@@ -1226,6 +1243,13 @@ impl View {
         Ok(model)
     }
 
+    /// A body attachment point as this captain's last draw posed it, in his model's space:
+    /// 0 head, 1 chest, 2 pelvis, 3/4 shoulders, 5/6 elbows, 7/8 hands, 9/10 legs,
+    /// 11/12 knees, 13/14 feet. `None` when the skin has no such part.
+    pub fn captain_anchor(&self, captain: u32, id: usize) -> Option<Mat4> {
+        self.captain_anchors.get(&captain).and_then(|a| a.get(id)).copied().flatten()
+    }
+
     /// Who wears which body ([`crate::pianta::SKIN_OLIMAR`] or [`crate::pianta::SKIN_PIANTA`]); anything
     /// unloaded draws Olimar.
     pub fn set_captain_skin(&mut self, captain: u32, skin: u8) {
@@ -1265,15 +1289,17 @@ impl View {
 
     /// Skins the Pianta from `joints` (his own units) with `root` over his scale, lowest vertex on the
     /// ground, and queues him as a captain draw.
-    fn push_pianta(&mut self, k: u64, pos: Vec3, rot: Quat, root: Mat4, joints: &[Mat4], alpha: f32, flags: u8) {
+    fn push_pianta(&mut self, k: u64, pos: Vec3, rot: Quat, root: Mat4, joints: &[Mat4], anchors: &[Option<Mat4>; 15], alpha: f32, flags: u8) {
         let Some(skin) = self.pianta.take() else { return };
+        self.pending_anchors = Some(*anchors);
         self.push_body(&skin.body.model, skin.model, skin.tex_base, skin.scale, kinds::CAPTAIN, k, pos, rot, root, joints, alpha, flags);
         self.pianta = Some(skin);
     }
 
     /// The same for Louie.
-    fn push_louie(&mut self, k: u64, pos: Vec3, rot: Quat, root: Mat4, joints: &[Mat4], alpha: f32, flags: u8) {
+    fn push_louie(&mut self, k: u64, pos: Vec3, rot: Quat, root: Mat4, joints: &[Mat4], anchors: &[Option<Mat4>; 15], alpha: f32, flags: u8) {
         let Some(skin) = self.louie.take() else { return };
+        self.pending_anchors = Some(*anchors);
         self.push_body(&skin.body.model, skin.model, skin.tex_base, skin.scale, kinds::CAPTAIN, k, pos, rot, root, joints, alpha, flags);
         self.louie = Some(skin);
     }
@@ -1286,6 +1312,16 @@ impl View {
         let pose = libsms_assets::Pose::new(&m.bmd, root * Mat4::from_scale(Vec3::splat(scale)), joints);
         let low = m.batches.iter().flat_map(|b| &b.vertices).map(|v| pose.skin(v).0.y).fold(f32::INFINITY, f32::min);
         let low = if low.is_finite() && !std::mem::take(&mut self.no_lift) { low } else { 0.0 };
+        if kind == kinds::CAPTAIN
+            && let Some(raw) = self.pending_anchors.take()
+        {
+            let base = root * Mat4::from_scale(Vec3::splat(scale));
+            let mut out = [None; 15];
+            for (i, m) in raw.iter().enumerate() {
+                out[i] = m.map(|mut m| { m = base * m; m.w_axis.y -= low; m });
+            }
+            self.captain_anchors.insert(k as u32, out);
+        }
         let first_vertex = self.positions.len() as u32;
         let first_color = self.colors.len() as u32;
         for (bi, b) in m.batches.iter().enumerate() {
@@ -1367,6 +1403,16 @@ impl View {
             let (mut p, mut n) = (Vec::new(), Vec::new());
             let low = body.skin_into(joints, root, &mut p, &mut n);
             let low = if low.is_finite() { low } else { 0.0 };
+            if kind == kinds::CAPTAIN
+                && let Some(raw) = self.pending_anchors.take()
+            {
+                let base = root * Mat4::from_scale(Vec3::splat(body.scale));
+                let mut out = [None; 15];
+                for (i, m) in raw.iter().enumerate() {
+                    out[i] = m.map(|mut m| { m = base * m; m.w_axis.y -= low; m });
+                }
+                self.captain_anchors.insert(k as u32, out);
+            }
             self.positions.extend(p.into_iter().map(|v| Vec3::new(v.x, v.y - low, v.z)));
             self.normals.extend(n);
             for &(src, _) in &body.shown {
@@ -2397,18 +2443,85 @@ impl View {
                 self.pikachu.as_ref().map(|p| p.captain_world(motion, phase, time, &rest.joints))
             } else { None };
             let louie_joints = if louie_body { self.louie.as_ref().map(|l| l.joints(c, motion, phase)) } else { None };
+            // The host's attachment points on whichever body this captain wears. The Pianta and
+            // Louie rigs name their joints, so the mapping survives their different joint counts;
+            // Olimar's 12-joint rig and Pikachu's retarget are indexed (pikachu.rs::PARTS).
+            let mut anchors: [Option<Mat4>; 15] = [None; 15];
+            if let Some(joints) = pianta_joints.as_ref() {
+                if let Some(skin) = self.pianta.as_ref() {
+                    let at = |name: &str| named(&skin.body.rig, joints, name);
+                    anchors[0] = at("kubi");
+                    anchors[1] = at("koshi_null");
+                    anchors[2] = at("body_jnt");
+                    anchors[3] = at("armLT_jnt");
+                    anchors[4] = at("armRT_jnt");
+                    anchors[5] = at("armLB_jnt");
+                    anchors[6] = at("armRB_jnt");
+                    anchors[7] = at("handL_jnt");
+                    anchors[8] = at("handR_jnt");
+                    anchors[9] = at("legLT_jnt");
+                    anchors[10] = at("legRT_jnt");
+                    anchors[11] = at("legLB_jnt");
+                    anchors[12] = at("legRB_jnt");
+                    anchors[13] = at("footL_jnt");
+                    anchors[14] = at("footR_jnt");
+                }
+            } else if let Some(joints) = louie_joints.as_ref() {
+                if let Some(skin) = self.louie.as_ref() {
+                    let at = |name: &str| named(&skin.body.rig, joints, name);
+                    anchors[0] = at("kubi");
+                    anchors[1] = at("koshi_null");
+                    anchors[2] = at("body_jnt");
+                    anchors[3] = at("armLT_jnt");
+                    anchors[4] = at("armRT_jnt");
+                    anchors[5] = at("armLB_jnt");
+                    anchors[6] = at("armRB_jnt");
+                    anchors[7] = at("handL_jnt");
+                    anchors[8] = at("handR_jnt");
+                    anchors[9] = at("legLT_jnt");
+                    anchors[10] = at("legRT_jnt");
+                    anchors[11] = at("legLB_jnt");
+                    anchors[12] = at("legRB_jnt");
+                    anchors[13] = at("footL_jnt");
+                    anchors[14] = at("footR_jnt");
+                }
+            } else if let Some(world) = pikachu_world.as_ref() {
+                if let Some(skin) = self.pikachu.as_ref() {
+                    let at = |olimar: usize| skin.captain.pair_joint(olimar).and_then(|j| world.get(j)).copied();
+                    anchors[0] = at(2);
+                    anchors[1] = at(1);
+                    anchors[2] = at(0);
+                    anchors[7] = at(8);
+                    anchors[8] = at(7);
+                    anchors[9] = at(11);
+                    anchors[10] = at(10);
+                }
+            } else {
+                let at = |j: usize| pose.joints.get(j).copied();
+                anchors[0] = at(2);
+                anchors[1] = at(1);
+                anchors[2] = at(0);
+                anchors[7] = at(8);
+                anchors[8] = at(7);
+                anchors[9] = at(11);
+                anchors[10] = at(10);
+            }
+            self.captain_anchors.insert(c.id.0, anchors);
+            self.captain_anchors.insert(c.id.0, anchors);
             if let Some(joints) = pianta_joints {
-                self.push_pianta(k, pos, rot, root, &joints, 1.0, f);
+                self.push_pianta(k, pos, rot, root, &joints, &anchors, 1.0, f);
             } else if let Some(joints) = louie_joints {
-                self.push_louie(k, pos, rot, root, &joints, 1.0, f);
+                self.push_louie(k, pos, rot, root, &joints, &anchors, 1.0, f);
                 if let Some(l) = &self.louie {
                     self.light_spots.push((pos, l.scale * l.body.height()));
                 }
             } else if let Some(world) = pikachu_world {
                 if let Some(sk) = self.pikachu.clone() {
+                    self.pending_anchors = Some(anchors);
                     self.push_hsd(&sk.captain, kinds::CAPTAIN, k, pos, rot, root, &world, 1.0, f, false);
                 }
             } else {
+                self.captain_anchors.insert(c.id.0, anchors);
                 self.push(k, kinds::CAPTAIN, models::OLIMAR, pos, rot, pose, &no_inputs, 1.0, f);
             }
             if !self.show_cursors {

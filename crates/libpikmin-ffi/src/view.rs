@@ -933,6 +933,26 @@ fn listener_view(eye: Vec3, forward: Vec3, up: Vec3) -> Mat4 {
     rot * Mat4::from_translation(-eye)
 }
 
+/// A body attachment point on `captain` as the last [`pik_view_update`] posed him: 16 floats,
+/// column-major, in that body's model space (the space the draws' vertices are in). 0 when the
+/// skin has no such part. Ids match `sms_view_anchor`: 0 head, 1 chest, 2 pelvis, 3/4
+/// shoulders, 5/6 elbows, 7/8 hands, 9/10 legs, 11/12 knees, 13/14 feet.
+///
+/// # Safety
+/// `view` from [`pik_view_new`]; `out` 16 writable floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_anchor(view: *const PikView, captain: u32, id: u32, out: *mut f32) -> u32 {
+    if view.is_null() || out.is_null() {
+        return 0;
+    }
+    // SAFETY: as documented.
+    let Some(m) = (unsafe { &*view }).view.captain_anchor(captain, id as usize) else {
+        return 0;
+    };
+    unsafe { std::ptr::copy_nonoverlapping(m.to_cols_array().as_ptr(), out, 16) };
+    1
+}
+
 /// Poses `sim` for this frame and plays the sounds for its events since the last update.
 ///
 /// # Safety

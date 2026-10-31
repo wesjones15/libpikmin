@@ -54,6 +54,12 @@ fn local_rot(j: &hsd::Joint) -> Mat3 {
 }
 
 impl HsdBody {
+    /// The model joint Olimar's joint `olimar` was retargeted onto, for the host's
+    /// attachment points (pikachu.rs::PARTS).
+    pub fn pair_joint(&self, olimar: usize) -> Option<usize> {
+        self.pairs.iter().find(|(joint, _)| *joint == olimar).map(|&(_, target)| target)
+    }
+
     /// Loads `costume` of the fighter in `data` (`PlPp.dat`...), mapping Olimar's joints through kind
     /// `kind`'s row of the common parts table. `src_bind` is Olimar's bind world rotation per joint.
     pub fn load(dir: &Path, costume: &str, data: Archive<'_>, kind: usize, src_bind: &[Mat3]) -> Result<Self, String> {
