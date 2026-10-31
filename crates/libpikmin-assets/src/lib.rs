@@ -22,6 +22,7 @@ pub mod sound;
 pub mod teki;
 mod reader;
 pub mod texture;
+pub mod title_font;
 
 use std::fmt;
 

@@ -42,7 +42,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 52;
+pub const PIK_ABI_VERSION: u32 = 53;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
@@ -693,6 +693,40 @@ pub unsafe extern "C" fn pik_font_glyph_texture(
             if !rgba.is_null() {
                 if (len as usize) < pixels.len() { return 0; }
                 std::ptr::copy_nonoverlapping(pixels.as_ptr(), rgba, pixels.len());
+            }
+        }
+        1
+    }).unwrap_or(0)
+}
+
+/// One letter of the Ship Repair location names, in the lettering Pikmin 2's area-name screens use
+/// (`libpikmin_assets::title_font`, built from the Pikmin 2 cache under `dir`). Every glyph is as tall as
+/// `info.height` says (the same for all) and as wide as its letter; RGBA8, rows top first, white ink with
+/// alpha. 0 when the Pikmin 2 files are not extracted or the character has no glyph (the host falls back to
+/// bigFont). Null `rgba` queries the size.
+/// # Safety
+/// Same writable-buffer contract as [`pik_number_texture`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_title_glyph_texture(
+    dir: *const c_char, character: u32, info: *mut PikTexture, rgba: *mut u8, len: u32,
+) -> u8 {
+    let Some(root) = (unsafe { path_arg(dir) }) else { return 0 };
+    let Some(c) = char::from_u32(character).filter(char::is_ascii_alphabetic) else { return 0 };
+    catch_unwind(|| {
+        static FONTS: OnceLock<Mutex<HashMap<PathBuf, Option<libpikmin_assets::title_font::TitleFont>>>> = OnceLock::new();
+        let Ok(mut fonts) = FONTS.get_or_init(|| Mutex::new(HashMap::new())).lock() else { return 0 };
+        let font = fonts.entry(root.clone()).or_insert_with(|| {
+            libpikmin_assets::title_font::TitleFont::load(&root.join(libpikmin_assets::title_font::DIR))
+        });
+        let Some(image) = font.as_ref().and_then(|f| f.glyph(c)) else { return 0 };
+        // SAFETY: caller promises writable outputs of the documented lengths.
+        unsafe {
+            if let Some(info) = info.as_mut() {
+                *info = PikTexture { width: image.width, height: image.height, wrap_s: 1, wrap_t: 1, _pad: [0; 2] };
+            }
+            if !rgba.is_null() {
+                if (len as usize) < image.rgba.len() { return 0; }
+                std::ptr::copy_nonoverlapping(image.rgba.as_ptr(), rgba, image.rgba.len());
             }
         }
         1
