@@ -231,6 +231,53 @@ impl Sim {
         k
     }
 
+    /// Host extension (Onion Ride's sneeze): lets up to `n` Pikmin of `color` out of the Onion at once, in
+    /// the same step, `n / 3` down each of its three legs (`GoalItem` dispenses one at a time; this is
+    /// not that). They slide out as `ActExit` does and join `captain`. Highest leaf stage first, limited
+    /// by the stock and the field limit. Returns how many came out.
+    pub fn onion_burst_out(&mut self, captain: CaptainId, onion: OnionId, color: PikiColor, n: u32) -> u32 {
+        let oi = onion.0 as usize;
+        if !self.onions[oi].accepts(color) || !self.onions[oi].takes_deliveries() { return 0; }
+        let mut out = 0;
+        for k in 0..n {
+            let o = &mut self.onions[oi];
+            let Some(happa) = [Happa::Flower, Happa::Bud, Happa::Leaf]
+                .into_iter()
+                .find(|&h| o.stored[color.index()][h as usize] > 0)
+            else { break };
+            let (id_on, opos) = (o.id, o.pos);
+            // Legs in turn, so each takes a third.
+            let leg = (k % 3) as u8;
+            let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0)) else { break };
+            self.onions[oi].stored[color.index()][happa as usize] -= 1;
+            let p = &mut self.pikis[id.0 as usize];
+            p.happa = happa;
+            p.captain = Some(captain);
+            p.on_ground = false;
+            p.state = PikiState::Exit { onion: id_on, leg, ratio: 1.0 };
+            self.events.push(Event::PikiLeftOnion { piki: id, onion: id_on });
+            out += 1;
+        }
+        out
+    }
+
+    /// Host extension (Onion Ride ends): Pikmin of `captain` still on their way into `onion` give up and rejoin his
+    /// squad where they are, instead of finishing the climb. Returns how many.
+    pub fn onion_cancel_entries(&mut self, captain: CaptainId, onion: OnionId) -> u32 {
+        let ids: Vec<_> = self.pikis.iter()
+            .filter(|p| p.captain == Some(captain) && matches!(p.state, PikiState::Enter { onion: on, .. } if on == onion))
+            .map(|p| p.id).collect();
+        for &id in &ids {
+            self.leave_current(id);
+            let p = &mut self.pikis[id.0 as usize];
+            p.jump = None;
+            p.jump_queue.clear();
+            p.on_ground = false;
+            self.join_squad(id, captain);
+        }
+        ids.len() as u32
+    }
+
     /// Puts Pikmin straight into an Onion's stock (for hosts restoring a save, for example).
     pub fn store_in_onion(&mut self, onion: OnionId, color: PikiColor, happa: Happa, n: u32) {
         if let Some(o) = self.onions.get_mut(onion.0 as usize) {

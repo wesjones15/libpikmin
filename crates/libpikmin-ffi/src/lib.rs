@@ -42,7 +42,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 55;
+pub const PIK_ABI_VERSION: u32 = 56;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
@@ -2321,6 +2321,44 @@ pub unsafe extern "C" fn pik_sim_onion_put_away(sim: *mut PikSim, captain: u32, 
                 return 0;
             }
             s.sim.onion_put_away(CaptainId(captain), OnionId(onion), color, n)
+        })
+    }
+}
+
+/// Onion Ride ends: `captain`'s Pikmin still climbing into `onion` rejoin his squad. Returns how many.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_onion_cancel_entries(sim: *mut PikSim, captain: u32, onion: u32) -> u32 {
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, 0, |s| {
+            if !onion_ok(&s.sim, onion) || captain as usize >= s.sim.captains().len() {
+                return 0;
+            }
+            s.sim.onion_cancel_entries(CaptainId(captain), OnionId(onion))
+        })
+    }
+}
+
+/// Onion Ride's sneeze: lets up to `n` Pikmin of `color` out of `onion` at once, a third down each leg, to join
+/// `captain`. Returns how many came out.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_onion_burst_out(sim: *mut PikSim, captain: u32, onion: u32, color: u32, n: u32) -> u32 {
+    let Some(color) = color_arg(color) else {
+        return 0;
+    };
+    // SAFETY: as documented.
+    unsafe {
+        with(sim, 0, |s| {
+            if !onion_ok(&s.sim, onion) || captain as usize >= s.sim.captains().len() {
+                return 0;
+            }
+            s.sim.onion_burst_out(CaptainId(captain), OnionId(onion), color, n)
         })
     }
 }
