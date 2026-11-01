@@ -1891,7 +1891,7 @@ impl View {
                                 // the landing cloud is a takeoff-key effect (ROCKET_FKM1/JET_G/
                                 // BOOST_GROUND), not ROCKET_LAND alone. Keep the cloud on the
                                 // Dolphin's landing only, and let it clear within a second.
-                                if flight.progress.is_some() && ship_smoke(fx) {
+                                if flight.animator.landing() && ship_smoke(fx) {
                                     g.alpha_scale = 0.3;
                                     g.max_age = Some(30.0);
                                 }
