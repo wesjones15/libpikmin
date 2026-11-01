@@ -310,6 +310,12 @@ impl Sim {
         let gravity = (gravity > 0.0).then_some(gravity);
         let mut cue = None;
         if let Some(c) = self.captains.get_mut(captain.0 as usize) {
+            // A host pad's throw owns the captain until he lands: the volume reports it on
+            // every tick he is still inside, and no other launch (a stale motor velocity, a
+            // knock-back) may replace the arc. He cannot dive out of it either.
+            if c.launched && !c.on_ground && c.jump.is_some_and(|j| j.gravity.is_some()) {
+                return;
+            }
             // A pad's volume reports its throw on every tick he is still inside it. Those are
             // the same takeoff: the followers repeat it once, not once per report (the extra
             // cues would walk them back to the pad after they land with him).
@@ -364,6 +370,12 @@ impl Sim {
     /// withered, gone or full.
     pub fn set_lock_bulb(&mut self, captain: CaptainId, bulb: Option<crate::bulb::BulbId>) {
         if let Some(c) = self.captains.get_mut(captain.0 as usize) { c.lock_bulb = bulb; }
+    }
+
+    /// Whether a host jump pad's throw owns him: from the launch until he lands.
+    fn pad_flight(&self, ci: usize) -> bool {
+        let c = &self.captains[ci];
+        c.launched && !c.on_ground && c.jump.is_some_and(|j| j.gravity.is_some())
     }
 
     /// Whether he is locked onto an enemy, onto something to carry or onto a bud.
@@ -427,6 +439,7 @@ impl Sim {
         }
 
         if pressed.jump && !input.jump_blocked && !self.captains[ci].movement_held && input.pose.is_none()
+            && !self.pad_flight(ci)
             && self.captains[ci].damage_frames <= 0.0
             && self.captains[ci].punch.is_none()
         {
@@ -535,13 +548,14 @@ impl Sim {
             }
         }
 
+        let pad_flight = c.launched && !c.on_ground && c.jump.is_some_and(|j| j.gravity.is_some());
         if locked && !c.launched {
             c.target_vel = Vec3::ZERO;
             if let Some(g) = host.ground_height(c.pos + Vec3::new(0.0, 20.0, 0.0)) {
                 c.pos.y = g;
                 c.on_ground = true;
             }
-        } else if let Some(pose) = input.pose {
+        } else if !pad_flight && let Some(pose) = input.pose {
             c.pos = pose.pos;
             c.vel = pose.vel;
             c.face = pose.face;
