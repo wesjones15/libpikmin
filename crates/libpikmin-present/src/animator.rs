@@ -66,6 +66,15 @@ pub fn advance<'a>(
     advance_index(players, key, set, motion.anim_index()?, clock, dt)
 }
 
+/// The frames a looping clip repeats: the disc's loop keys when they span a real range,
+/// otherwise the whole clip. Some clips mark a one-frame loop (a held pose).
+fn loop_bounds(info: &libpikmin_assets::AnimInfo, start: f32, end: f32) -> (f32, f32) {
+    match info.loop_range() {
+        Some((lo, hi)) if hi > lo => (lo, hi),
+        _ => (start, end),
+    }
+}
+
 /// Like [`advance`] for sets without a motion table (items, tekis): `index` is the AnimMgr
 /// entry itself.
 pub fn advance_index<'a>(
@@ -98,8 +107,12 @@ pub fn advance_index<'a>(
         Clock::Sim(f) => p.frame = f,
         Clock::Loop(fps) => {
             p.frame += fps * dt;
-            if end > start && p.frame >= end {
-                p.frame = start + (p.frame - start) % (end - start);
+            // The disc marks the loop inside a longer clip (intro/outro frames included).
+            // Looping first..last replayed the intro every time, which for the run/flee clip
+            // snapped Olimar and the Pikmin back to its turn-to-the-side pose.
+            let (lo, hi) = loop_bounds(info, start, end);
+            if hi > lo && p.frame >= hi {
+                p.frame = lo + (p.frame - lo) % (hi - lo);
             }
         }
         Clock::Once(fps) => p.frame = (p.frame + fps * dt).min(end),
@@ -166,11 +179,13 @@ fn is_gait(motion: Motion) -> bool {
 fn carry_gait_phase(players: &mut HashMap<u64, Player>, key: u64, set: &AnimSet, next: usize) {
     let Some((old_info, _)) = set.get(players.get(&key).map(|p| p.anim).unwrap_or(next)) else { return };
     let Some((new_info, _)) = set.get(next) else { return };
-    let (old_start, old_end) = (
+    let (old_start, old_end) = loop_bounds(
+        old_info,
         *old_info.keys.first().unwrap_or(&0) as f32,
         (*old_info.keys.last().unwrap_or(&0) as f32).max(*old_info.keys.first().unwrap_or(&0) as f32),
     );
-    let (new_start, new_end) = (
+    let (new_start, new_end) = loop_bounds(
+        new_info,
         *new_info.keys.first().unwrap_or(&0) as f32,
         (*new_info.keys.last().unwrap_or(&0) as f32).max(*new_info.keys.first().unwrap_or(&0) as f32),
     );
@@ -653,6 +668,21 @@ mod render_tests {
 
     fn frame(clock: Clock) -> f32 {
         match clock { Clock::Sim(f) | Clock::Progress(f) => f, _ => panic!("not a sampled clock") }
+    }
+
+    #[test]
+    fn a_clip_loops_only_inside_its_disc_loop_keys() {
+        let info = libpikmin_assets::AnimInfo {
+            name: "nigeru.dca".into(),
+            flags: 0,
+            speed: 30.0,
+            keys: vec![0, 10, 30, 39],
+            info_keys: vec![(1, 0), (2, 1)],
+            event_keys: vec![],
+        };
+        assert_eq!(loop_bounds(&info, 0.0, 39.0), (10.0, 30.0));
+        let held = libpikmin_assets::AnimInfo { keys: vec![0, 19, 19, 19], info_keys: vec![(1, 0), (2, 1)], ..info };
+        assert_eq!(loop_bounds(&held, 0.0, 19.0), (0.0, 19.0));
     }
 
     #[test]
