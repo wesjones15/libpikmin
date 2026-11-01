@@ -379,6 +379,11 @@ impl Sim {
         let cooldown = self.captains[ci].strike_cooldown;
         self.captains[ci].strike_cooldown = (cooldown - dt).max(0.0);
         self.captains[ci].charge = self.captains[ci].charge.and_then(|(d, t)| (t > dt).then_some((d, t - dt)));
+        // A strike's forward swarm belongs to the strike: once he walks off, the squad follows
+        // him instead of carrying on in the old direction.
+        if self.captains[ci].input.stick.length() > 0.2 {
+            self.captains[ci].charge = None;
+        }
         if self.captains[ci].down {
             let c = &mut self.captains[ci];
             c.strike = None;
@@ -807,6 +812,10 @@ impl Sim {
             }
             let stolen_from = p.captain.filter(|&c| c != me && p.state.in_squad());
             let id = p.id;
+            // Host extension: these Pikmin have no pathfinding, so one that fell to a lower level
+            // can never walk back to him however often it is whistled. A whistle puts a grounded
+            // one that is a level or more away back at the cursor.
+            let stranded = p.on_ground && (p.pos.y - centre.y).abs() > 150.0;
             // Whistled off a pellet it was carrying (too few to lift it): the squad must not take it
             // straight back to that pellet.
             if let PikiState::Carry(c) = p.state {
@@ -817,6 +826,12 @@ impl Sim {
             }
             self.leave_current(id);
             self.join_squad(id, me);
+            if stranded {
+                let p = &mut self.pikis[id.0 as usize];
+                p.pos = centre;
+                p.vel = Vec3::ZERO;
+                p.on_ground = true;
+            }
             self.events.push(Event::Recruited {
                 piki: id,
                 captain: me,
@@ -1189,4 +1204,23 @@ fn lock_marker(parts: &[crate::CreaturePart], eye: Vec3) -> Vec3 {
     }
     let t = if hit { enter - LOCK_MARGIN } else { dist };
     eye + dir * t.max(LOCK_MIN_DISTANCE.min(dist))
+}
+
+#[cfg(test)]
+mod whistle_rescue_tests {
+    use crate::{Params, PikiColor, Sim, Vec3};
+
+    #[test]
+    fn a_whistle_brings_a_stranded_pikmin_down_to_the_cursor() {
+        let mut sim = Sim::new(Params::default(), 31);
+        let captain = sim.add_captain(Vec3::ZERO);
+        let low = sim.spawn_piki(PikiColor::Red, Vec3::Y * 500.0).unwrap();
+        let near = sim.spawn_piki(PikiColor::Red, Vec3::new(20.0, 0.0, 0.0)).unwrap();
+        sim.piki_mut(low).on_ground = true;
+        sim.piki_mut(near).on_ground = true;
+        sim.call_pikis(0, Vec3::ZERO, 90.0);
+        assert_eq!(sim.piki(low).captain, Some(captain));
+        assert!(sim.piki(low).pos.y < 1.0, "the stranded one is put at the cursor");
+        assert!(sim.piki(near).pos.distance(Vec3::new(20.0, 0.0, 0.0)) < 1.0, "one on his level walks as usual");
+    }
 }

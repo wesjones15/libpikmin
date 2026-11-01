@@ -24,7 +24,8 @@ pub struct StrikeSpec {
     pub reach: f32,
     /// Seconds before the next strike.
     pub cooldown: f32,
-    /// Seconds of forward swarm when there is no target; also enables jump targeting. 0 disables both.
+    /// Seconds of forward swarm when there is no target; also enables jump targeting. 0 disables
+    /// the forward swarm only: targets are still chosen.
     pub charge: f32,
 }
 
@@ -76,9 +77,8 @@ impl Sim {
         c.strike = Some(Strike { frame: 0.0, hit: false });
         c.strike_cooldown = spec.cooldown;
         c.charge = (spec.charge > 0.0).then(|| (crate::Vec2::new(dir.x, dir.z), spec.charge));
-        if spec.charge > 0.0 {
-            self.strike_targets(ci, cpos, dir, locked, spec.charge);
-        }
+        // Targets are chosen whether or not the squad swarms forward afterwards.
+        self.strike_targets(ci, cpos, dir, locked, spec.charge.max(1.0));
         self.events.push(Event::StrikeStarted { captain });
     }
 
@@ -94,8 +94,12 @@ impl Sim {
             let (centre, radius) = self.creatures.bounds(c);
             let offset = crate::Vec3::new(centre.x - origin.x, 0.0, centre.z - origin.z);
             let distance = offset.length();
+            // A short vertical band for grounded prey, so a strike does not send the squad off a
+            // ledge after something on another level (it cannot climb back). Airborne prey keep the
+            // wider band: the squad jumps at it.
+            let vertical = if c.flying { radius + 300.0 } else { radius + 100.0 };
             (distance <= reach + radius && (distance <= radius || offset.dot(forward) >= distance * 0.5)
-                && (centre.y - origin.y).abs() <= radius + 300.0).then_some((c.id, centre))
+                && (centre.y - origin.y).abs() <= vertical).then_some((c.id, centre))
         }).collect();
         if candidates.is_empty() { return; }
 
