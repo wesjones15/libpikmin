@@ -1053,13 +1053,13 @@ impl Sim {
             }
             CarryPhase::Move => {
                 let p = &mut self.pikis[pi];
-                let face = yaw_of(slot_pos - p.pos);
+                // Face the carried object's centre, not the movement/slot direction: the
+                // carriers surround it, so their pose should read as holding it inwards.
+                let face = yaw_of(centre - p.pos);
                 p.vel = (slot_pos - p.pos) / dt;
                 p.pos = slot_pos;
                 p.on_ground = true;
-                if p.vel.x.hypot(p.vel.z) > 1.0 {
-                    p.face = round_ang(p.face + 0.3 * ang_dist(face, p.face));
-                }
+                p.face = round_ang(p.face + 0.3 * ang_dist(face, p.face));
             }
         }
     }
