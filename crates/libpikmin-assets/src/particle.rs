@@ -623,6 +623,10 @@ pub struct Generator {
     /// Host extension: multiplies every particle's drawn alpha (a landing cloud toned down
     /// without changing the shared effect table).
     pub alpha_scale: f32,
+    /// Host extension: stop emitting and let the particles fade out `max_age` frames (30 = 1 s)
+    /// after the spawn, so a landing cloud clears instead of shrouding the scene.
+    pub max_age: Option<f32>,
+    age: f32,
     /// Host-controlled density for attached emitters (for example, ground dust as an Onion rises).
     pub emission_scale: f32,
     /// Added to every new particle's velocity (`mEmitVelocity`).
@@ -657,6 +661,8 @@ impl Generator {
         Generator {
             emit_dir: pcr.emit_dir,
             pcr,
+            max_age: None,
+            age: 0.0,
             emit_pos: pos,
             alpha_scale: 1.0,
             emission_scale: 1.0,
@@ -709,6 +715,15 @@ impl Generator {
     /// every new and updated particle (the game's per-particle callback). Returns false once
     /// it has finished and every particle is gone.
     pub fn update(&mut self, step: f32, each: &mut dyn FnMut(&mut Particle)) -> bool {
+        if let Some(max) = self.max_age {
+            self.age += step;
+            if self.age >= max {
+                self.finished = true;
+                // Rather than a hard pop, give what is on screen a short fade.
+                for p in &mut self.particles { p.life = p.life.min(p.age + 5); }
+                self.children.clear();
+            }
+        }
         if !self.finished {
             self.emit(each);
         } else if self.particles.is_empty() && self.children.is_empty() {

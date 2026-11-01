@@ -1874,9 +1874,15 @@ impl View {
                             if let Some(e) = self.effects.as_mut()
                                 && let Some(g) = e.spawn(fx, o.pos + Vec3::Y * lift)
                             {
-                                // The landing reuses the takeoff clip's dust; at full alpha it
-                                // shrouds Olimar, the squad and the Onion. Keep it, toned down.
-                                if fx == fx_defs::ROCKET_LAND { g.alpha_scale = 0.3; }
+                                // The landing reuses the takeoff clip's dust; at full alpha and
+                                // lifetime it shrouds Olimar, the squad and the Onion. Keep it,
+                                // but let it clear within a second.
+                                if fx == fx_defs::ROCKET_LAND || fx == fx_defs::CLOUD_OF_DUST_1
+                                    || fx_defs::ROCKET_NKE.contains(&fx)
+                                {
+                                    g.alpha_scale = 0.3;
+                                    g.max_age = Some(30.0);
+                                }
                                 if let Some(n) = normal { g.oriented_normal = rot * n; }
                             }
                         }
@@ -2015,10 +2021,12 @@ impl View {
                     for value in keys {
                         match value {
                             0 => { for def in fx_defs::ONYON_BOOT_FLOW { fx.spawn(def, flower); } }
-                            1 => { for def in if colour == 0 { &fx_defs::ONYON_BOOT_WATER[..] } else { &fx_defs::ONYON_BOOT_DUST[..] } { fx.spawn(*def, o.pos); } }
+                            1 => { for def in if colour == 0 { &fx_defs::ONYON_BOOT_WATER[..] } else { &fx_defs::ONYON_BOOT_DUST[..] } { if let Some(g) = fx.spawn(*def, o.pos) { g.max_age = Some(30.0); } } }
                             2 | 3 => {
                                 for at in bases.into_iter().take(if value == 2 { 1 } else { 3 }) {
-                                    fx.spawn(if colour == 0 { fx_defs::ONYON_BOOT_BUBBLES } else { fx_defs::SMOKE_RING_M }, at);
+                                    if let Some(g) = fx.spawn(if colour == 0 { fx_defs::ONYON_BOOT_BUBBLES } else { fx_defs::SMOKE_RING_M }, at) {
+                                        g.max_age = Some(30.0);
+                                    }
                                 }
                             }
                             _ => {}
@@ -2060,7 +2068,7 @@ impl View {
                             // to the flower's 'piki' collision sphere, not ground smoke.
                             (6..=8, 0) => { fx.attach(flow_key, fx_defs::KAFUN_NG, flower); }
                             (6..=8, 2) => { /* Attached ground smoke above handles the takeoff key. */ }
-                            (9..=11, 0) => { fx.spawn(fx_defs::ROCKET_LAND_S, o.pos); }
+                            (9..=11, 0) => { if let Some(g) = fx.spawn(fx_defs::ROCKET_LAND_S, o.pos) { g.max_age = Some(30.0); } }
                             (9..=11, 1) => { fx.spawn(fx_defs::ROCKET_SMOKE_D, bases[0]); }
                             (9..=11, 2) => { for at in bases { fx.spawn(fx_defs::ROCKET_SMOKE_D, at); } }
                             (9..=11, 3) => { fx.detach(flow_key); }
