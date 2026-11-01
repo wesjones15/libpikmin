@@ -122,17 +122,49 @@ pub fn advance_index<'a>(
 /// `updateWalkAnimation`: WAIT, ASIBUMI, WALK, RUN or NIGERU by speed, with the walk/run
 /// rate scaled between its min and max.
 pub fn locomotion(speed: f32, th: [f32; 4], rate: [f32; 5]) -> (Motion, Clock) {
-    let ramp = |lo: f32, hi: f32, a: f32, b: f32| a + (b - a) * ((speed - lo) / (hi - lo)).clamp(0.0, 1.0);
-    if speed < th[0] {
-        (Motion::Wait, Clock::Loop(30.0))
-    } else if speed < th[1] {
-        (Motion::Asibumi, Clock::Loop(30.0))
-    } else if speed < th[2] {
-        (Motion::Walk, Clock::Loop(ramp(th[1], th[2], rate[0], rate[1])))
-    } else if speed < th[3] {
-        (Motion::Run, Clock::Loop(ramp(th[2], th[3], rate[2], rate[3])))
+    locomotion_band(speed, th, rate, gait_band(speed, th))
+}
+
+/// Which `locomotion` band a speed falls in.
+fn gait_band(speed: f32, th: [f32; 4]) -> u8 {
+    if speed < th[0] { 0 } else if speed < th[1] { 1 } else if speed < th[2] { 2 } else if speed < th[3] { 3 } else { 4 }
+}
+
+/// A gait band with a small amount of stick noise kept from changing it back and forth. The
+/// sim's speed comes from an analogue stick; sitting on a threshold (Olimar's full tilt is
+/// near the run/flee one) made the walk cycle restart every tick. Once in a band, it takes a
+/// few units past the edge to leave it.
+fn gait_band_held(speed: f32, th: [f32; 4], prev: Option<Motion>) -> u8 {
+    // Wider at the fast end, where a stick's noise is worth more speed units; still small
+    // enough that deliberately slowing down leaves the band.
+    let edge = |t: f32| (t * 0.08).clamp(1.5, 8.0);
+    let band = gait_band(speed, th);
+    let Some(prev) = prev else { return band };
+    let prev = match prev {
+        Motion::Wait => 0,
+        Motion::Asibumi => 1,
+        Motion::Walk => 2,
+        Motion::Run => 3,
+        Motion::Nigeru => 4,
+        _ => return band,
+    };
+    if band == prev + 1 && speed < th[prev as usize] + edge(th[prev as usize]) {
+        prev
+    } else if prev == band + 1 && speed > th[band as usize] - edge(th[band as usize]) {
+        prev
     } else {
-        (Motion::Nigeru, Clock::Loop(rate[4]))
+        band
+    }
+}
+
+fn locomotion_band(speed: f32, th: [f32; 4], rate: [f32; 5], band: u8) -> (Motion, Clock) {
+    let ramp = |lo: f32, hi: f32, a: f32, b: f32| a + (b - a) * ((speed - lo) / (hi - lo)).clamp(0.0, 1.0);
+    match band {
+        0 => (Motion::Wait, Clock::Loop(30.0)),
+        1 => (Motion::Asibumi, Clock::Loop(30.0)),
+        2 => (Motion::Walk, Clock::Loop(ramp(th[1], th[2], rate[0], rate[1]))),
+        3 => (Motion::Run, Clock::Loop(ramp(th[2], th[3], rate[2], rate[3]))),
+        _ => (Motion::Nigeru, Clock::Loop(rate[4])),
     }
 }
 
@@ -273,6 +305,17 @@ pub fn piki_look(params: &Params, p: &Piki) -> Option<PikiLook> {
 
 /// A captain's motion (naviState.cpp). `throwing`: the throw motion is still playing.
 pub fn captain_motion(params: &Params, c: &Captain, throwing: bool) -> (Motion, Clock) {
+    captain_motion_held(params, c, throwing, None)
+}
+
+/// As [`captain_motion`], but a gait already being played is kept through a little speed
+/// noise instead of restarting the walk/run cycle on a threshold.
+fn captain_motion_held(
+    params: &Params,
+    c: &Captain,
+    throwing: bool,
+    prev: Option<Motion>,
+) -> (Motion, Clock) {
     let nv = &params.navi;
     let th = [
         nv.asibumi_start_speed,
@@ -316,7 +359,7 @@ pub fn captain_motion(params: &Params, c: &Captain, throwing: bool) -> (Motion, 
     } else if !matches!(c.whistle, WhistleState::Off) && speed < nv.walk_start_speed {
         (Motion::Fue, Clock::Loop(30.0))
     } else {
-        locomotion(speed, th, rate)
+        locomotion_band(speed, th, rate, gait_band_held(speed, th, prev))
     }
 }
 
@@ -407,6 +450,7 @@ pub struct Animator {
     pub players: HashMap<u64, Player>,
     sprouts: HashMap<SproutId, SproutTrack>,
     throw_timer: HashMap<CaptainId, f32>,
+    captain_gait: HashMap<CaptainId, Motion>,
     render: Option<(u64, f32)>,
     frames: HashMap<u64, FrameTrack>,
     /// Sprout animation sound keys hit this frame: (parent Onion, value, position). Drained by
@@ -471,7 +515,13 @@ impl Animator {
     }
 
     pub fn captain<'a>(&mut self, set: &'a AnimSet, params: &Params, c: &Captain, dt: f32) -> Option<(&'a Anim, f32)> {
-        let (motion, clock) = captain_motion(params, c, self.throwing(c.id));
+        let prev = self.captain_gait.get(&c.id).copied();
+        let (motion, clock) = captain_motion_held(params, c, self.throwing(c.id), prev);
+        if matches!(motion, Motion::Wait | Motion::Asibumi | Motion::Walk | Motion::Run | Motion::Nigeru) {
+            self.captain_gait.insert(c.id, motion);
+        } else {
+            self.captain_gait.remove(&c.id);
+        }
         let clock = self.clock(captain_key(c.id), motion.anim_index()?, clock);
         advance(&mut self.players, captain_key(c.id), set, motion, clock, dt)
     }
@@ -575,6 +625,20 @@ mod render_tests {
 
     fn frame(clock: Clock) -> f32 {
         match clock { Clock::Sim(f) | Clock::Progress(f) => f, _ => panic!("not a sampled clock") }
+    }
+
+    #[test]
+    fn gait_bands_hold_through_small_speed_noise() {
+        let th = [5.0, 8.0, 20.0, 95.0];
+        let rate = [60.0, 90.0, 40.0, 60.0, 60.0];
+        // A speed sitting on the run/flee edge does not flip the clip back and forth.
+        assert_eq!(locomotion_band(96.0, th, rate, gait_band_held(96.0, th, Some(Motion::Run))).0, Motion::Run);
+        assert_eq!(locomotion_band(94.0, th, rate, gait_band_held(94.0, th, Some(Motion::Nigeru))).0, Motion::Nigeru);
+        // Away from the edge it really changes.
+        assert_eq!(locomotion_band(103.0, th, rate, gait_band_held(103.0, th, Some(Motion::Run))).0, Motion::Nigeru);
+        assert_eq!(locomotion_band(86.0, th, rate, gait_band_held(86.0, th, Some(Motion::Nigeru))).0, Motion::Run);
+        // Walk/run too.
+        assert_eq!(locomotion_band(21.0, th, rate, gait_band_held(21.0, th, Some(Motion::Walk))).0, Motion::Walk);
     }
 
     #[test]
