@@ -1893,12 +1893,11 @@ impl View {
                                 // Dolphin's landing only, and let it clear within a second.
                                 // ROCKET_LAND is the Dolphin's touchdown cloud itself, so cap it
                                 // unconditionally: by the time its cue is processed the animator's
-                                // landing flag can already be cleared. The takeoff-key smoke that
-                                // is replayed during the descent is gated on the landing state.
+                                // landing flag can already be cleared. Keep its authored alpha (the
+                                // frame-10 look is fine); just stop it growing and let it fade.
                                 if fx == fx_defs::ROCKET_LAND
                                     || (flight.animator.landing() && ship_smoke(fx))
                                 {
-                                    g.alpha_scale = 0.3;
                                     g.max_age = Some(30.0);
                                 }
                                 if let Some(n) = normal { g.oriented_normal = rot * n; }
