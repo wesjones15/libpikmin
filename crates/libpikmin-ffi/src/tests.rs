@@ -3,6 +3,34 @@
 use super::*;
 
 #[test]
+fn individual_host_hits_do_not_damage_overlapping_pikmin_twice() {
+    unsafe {
+        let sim = pik_sim_new(std::ptr::null(), 1);
+        assert!(!sim.is_null());
+        let at = PikVec3::default();
+        let captain = pik_sim_add_captain(sim, &at);
+        let first = pik_sim_spawn_piki(sim, 0, &at, captain);
+        let second = pik_sim_spawn_piki(sim, 0, &at, captain);
+        assert!(first >= 0 && second >= 0);
+        assert_eq!(pik_sim_attack_piki(sim, first as u32, 40.0), 1);
+        let mut pikis = [PikPiki::default(); 2];
+        assert_eq!(pik_sim_pikis(sim, pikis.as_mut_ptr(), 2), 2);
+        assert_eq!((pikis[0].health, pikis[1].health), (60.0, 100.0));
+        for bad in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert_eq!(pik_sim_attack_piki(sim, first as u32, bad), 0);
+        }
+        assert_eq!(pik_sim_attack_piki(sim, u32::MAX, 1.0), 0);
+        assert_eq!(pik_sim_attack_piki(sim, first as u32, 60.0), 1);
+        assert_eq!(pik_sim_attack_piki(sim, first as u32, 60.0), 0);
+        pik_sim_pikis(sim, pikis.as_mut_ptr(), 2);
+        assert_eq!(pikis[0].state, piki_state::DYING);
+        assert_eq!(pikis[1].health, 100.0);
+        pik_sim_free(sim);
+        assert_eq!(pik_sim_attack_piki(std::ptr::null_mut(), 0, 1.0), 0);
+    }
+}
+
+#[test]
 fn posy_palette_crosses_the_enemy_state_abi_in_each_colour() {
     use crate::teki_ai::*;
     let Some(assets) = libpikmin_assets::Assets::discover(None) else { eprintln!("SKIP: Pellet Posy assets absent"); return };

@@ -42,7 +42,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 57;
+pub const PIK_ABI_VERSION: u32 = 58;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
@@ -2145,6 +2145,20 @@ pub unsafe extern "C" fn pik_sim_tick(sim: *mut PikSim) -> u64 {
 pub unsafe extern "C" fn pik_sim_shake_off(sim: *mut PikSim, creature: u64) {
     // SAFETY: as documented.
     unsafe { with(sim, (), |s| s.sim.shake_off(creature)) }
+}
+
+/// An attack hits one Pikmin. Hosts can apply an explosion's falloff separately to each
+/// member without overlapping damage spheres hitting the same Pikmin more than once.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`]. Invalid ids and nonpositive/nonfinite damage are ignored.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_attack_piki(sim: *mut PikSim, id: u32, damage: f32) -> u8 {
+    if !damage.is_finite() || damage <= 0.0 { return 0; }
+    unsafe { with(sim, 0, |s| {
+        if id as usize >= s.sim.pikis().len() { return 0; }
+        u8::from(s.sim.attack_piki(PikiId(id), damage))
+    }) }
 }
 
 /// An attack hits every Pikmin inside the sphere for `damage`. Returns how many it hit.
