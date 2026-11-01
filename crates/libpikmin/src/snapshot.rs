@@ -31,7 +31,7 @@ use crate::strike::Strike;
 use crate::{CaptainId, PikiId};
 
 /// Bumped when the encoding changes.
-pub const SNAPSHOT_VERSION: u8 = 12;
+pub const SNAPSHOT_VERSION: u8 = 13;
 
 // Far more than any real sim has; a corrupt length can't make decoding allocate wildly.
 const MAX_ENTITIES: usize = 4096;
@@ -1341,6 +1341,7 @@ fn w_onion(w: &mut Writer, o: &Onion) {
         w.bool(*a);
         w.f32(*b);
     });
+    w.f32(o.hover_frame);
     w.len(o.queue.len());
     for c in &o.queue {
         w_color(w, *c);
@@ -1375,6 +1376,7 @@ fn r_onion(r: &mut Reader) -> Option<Onion> {
     let exit_timer = r.f32()?;
     let anim = r_onion_anim(r)?;
     let flight_motion = r.opt(|r| Some((r.bool()?, r.f32()?)))?;
+    let hover_frame = r.f32()?;
     let n = r.len()?;
     let queue = (0..n).map(|_| r_color(r)).collect::<Option<VecDeque<_>>>()?;
     let fireworks = r.u32()?;
@@ -1394,6 +1396,7 @@ fn r_onion(r: &mut Reader) -> Option<Onion> {
         exit_timer,
         anim,
         flight_motion,
+        hover_frame,
         queue,
         fireworks,
         ship,

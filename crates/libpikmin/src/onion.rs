@@ -65,6 +65,10 @@ pub struct Onion {
     /// Optional host-timed transition (landing, normalized progress). The host moves the
     /// object; presentation removes the disc clip's large cinematic travel.
     pub flight_motion: Option<(bool, f32)>,
+    /// Frame in the airborne loop's take-off clip (`onion_menu::HOVER_FROM..HOVER_TO`). The
+    /// Pikmin's leg points are measured from this pose, so the view draws it from the same
+    /// frame and climbers/exiting Pikmin stay on the visible leg as it swings.
+    pub hover_frame: f32,
     /// Seeds waiting to be launched (`mSAICtx.mCurrAnimId`).
     pub queue: VecDeque<PikiColor>,
     /// Pending fireworks from negative seed counts (`mSAICtx.mCounter`).
@@ -240,6 +244,7 @@ impl Sim {
             exit_timer: 0.0,
             anim: OnionAnim::Idle,
             flight_motion: None,
+            hover_frame: crate::onion_menu::HOVER_FROM,
             queue: VecDeque::new(),
             fireworks: 0,
             ship: None,
@@ -263,6 +268,7 @@ impl Sim {
             exit_timer: 0.0,
             anim: OnionAnim::Idle,
             flight_motion: None,
+            hover_frame: crate::onion_menu::HOVER_FROM,
             queue: VecDeque::new(),
             fireworks: 0,
             ship: Some(Ship { goal, suck, parts: Vec::new() }),
@@ -528,8 +534,28 @@ impl Sim {
                 continue;
             }
             let colour = o.colors.first().map_or(0, |c| c.index());
+            // The airborne loop's frame only matters while hovering; any other motion starts
+            // the next hover at its first frame.
+            if !matches!(o.anim, OnionAnim::Hover) {
+                o.hover_frame = crate::onion_menu::HOVER_FROM;
+            }
             match o.anim {
-                OnionAnim::Idle | OnionAnim::Away | OnionAnim::Hover => {}
+                OnionAnim::Hover => {
+                    // A flight transition draws its own clip (landed legs); when the airborne
+                    // loop takes over, restart it at its first frame. Otherwise advance the
+                    // loop so the rope ends used for entry/exit match the leg the view draws.
+                    if o.flight_motion.is_some() {
+                        o.hover_frame = crate::onion_menu::HOVER_FROM;
+                    } else {
+                        let span = crate::onion_menu::HOVER_TO - crate::onion_menu::HOVER_FROM;
+                        o.hover_frame += anim.fps * dt;
+                        if o.hover_frame >= crate::onion_menu::HOVER_TO {
+                            o.hover_frame = crate::onion_menu::HOVER_FROM
+                                + (o.hover_frame - crate::onion_menu::HOVER_FROM).rem_euclid(span);
+                        }
+                    }
+                }
+                OnionAnim::Idle | OnionAnim::Away => {}
                 OnionAnim::TakeOff { frame } => {
                     let f = frame + anim.fps * dt;
                     let end = if o.ship.is_some() { anim.ship_takeoff } else { anim.goal_takeoff[colour] };

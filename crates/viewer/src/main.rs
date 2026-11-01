@@ -205,6 +205,23 @@ fn new_game(assets: &Result<libpikmin_assets::Assets, String>) -> Game {
                 let onion = sim.add_onion(Vec3::new(0.0, 87.5, 0.0), &[PikiColor::Red]);
                 sim.set_onion_pose(onion, Vec3::new(0.0, 87.5, 0.0), true);
             }
+            // A flying Onion's leg ropes in use: `ride-exit` slides three out, `ride-board`
+            // jumps three to a leg and climbs.
+            "ride-exit" | "ride-board" => {
+                let at = Vec3::new(0.0, 110.0, 0.0);
+                let onion = sim.add_onion(at, &[PikiColor::Red]);
+                sim.set_onion_pose(onion, at, true);
+                if portrait == "ride-exit" {
+                    sim.store_in_onion(onion, PikiColor::Red, Happa::Flower, 3);
+                    sim.onion_call_out(olimar, onion, PikiColor::Red, 3);
+                } else {
+                    for leg in [0usize, 1, 2] {
+                        let ground = libpikmin::onion_menu::LEG_FEET[leg].with_y(0.0);
+                        sim.spawn_piki_in_squad(PikiColor::Red, ground, olimar);
+                    }
+                    sim.onion_put_away(olimar, onion, PikiColor::Red, 3);
+                }
+            }
             "strike" => {
                 sim.set_dismiss_strike(1.0, 150.0, 0.0, 1.0);
                 for i in 0..12 {

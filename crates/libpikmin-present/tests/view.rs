@@ -368,6 +368,8 @@ fn host_flight_uses_articulated_disc_clips_without_cinematic_position_drift() {
         view.update(&sim, 1.0, TICK_DT);
         let first = vertices(&view, kinds::ONION);
         for _ in 0..140 { // crosses the flight-loop seam twice
+            // The sim owns the airborne loop's frame now (the Pikmin's leg ropes use it).
+            sim.step(&mut FlatHost);
             view.update(&sim, 1.0, TICK_DT);
             assert!(view.positions.iter().all(|v| v.is_finite()));
         }

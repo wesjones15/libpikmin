@@ -1,6 +1,6 @@
 use libpikmin::{Happa, Params, PikiColor, PikiState, Sim, Snapshot, Vec3};
 use libpikmin::host::FlatHost;
-use libpikmin::onion_menu::{LEG_FEET_HOVER, LEG_TOPS_HOVER};
+use libpikmin::onion_menu::hover_leg_point;
 
 #[test]
 fn hovering_call_out_slides_half_a_leg_then_falls_independently() {
@@ -16,6 +16,9 @@ fn hovering_call_out_slides_half_a_leg_then_falls_independently() {
         let mut leg = None;
         let mut detached = None;
         for _ in 0..150 {
+            // The travel code measures the ropes with the frame the step starts on; the
+            // Onion's own clock advances at the end of the step.
+            let phase = sim.onions()[0].hover_frame;
             sim.step(&mut FlatHost);
             let Some(p) = sim.pikis().first() else { continue };
             match p.state {
@@ -25,9 +28,9 @@ fn hovering_call_out_slides_half_a_leg_then_falls_independently() {
                     leg = Some(l);
                 }
                 PikiState::Flying { .. } => {
-                    let l = leg.expect("played the leg slide first") as usize;
-                    let midpoint = air + LEG_FEET_HOVER[l].lerp(LEG_TOPS_HOVER[l], 0.5);
-                    assert!(p.pos.distance(midpoint) < 0.001, "detached at the exact leg midpoint");
+                    let l = leg.expect("played the leg slide first");
+                    let midpoint = air + hover_leg_point(l, 0.5, phase);
+                    assert!(p.pos.distance(midpoint) < 0.01, "detached at the exact leg midpoint");
                     assert!(p.vel.y < 0.0 && !p.on_ground);
                     assert_eq!(p.happa, Happa::Flower);
                     assert_eq!(p.captain, Some(captain));
@@ -100,14 +103,12 @@ fn entering_pikmin_climb_the_flying_onions_legs() {
     assert_eq!(sim.onion_put_away(captain, onion, PikiColor::Red, 1), 1);
     let mut climbed = false;
     for _ in 0..240 {
+        let phase = sim.onions()[0].hover_frame;
         sim.step(&mut FlatHost);
         let p = sim.piki(piki);
         if let PikiState::Enter { leg, ratio, climbing: true, .. } = p.state {
-            let foot = air + LEG_FEET_HOVER[leg as usize % 3];
-            let top = air + LEG_TOPS_HOVER[leg as usize % 3];
-            let seg = top - foot;
-            let t = ((p.pos - foot).dot(seg) / seg.length_squared()).clamp(0.0, 1.0);
-            assert!(p.pos.distance(foot + seg * t) < 0.01, "climbs the flying leg, not the landed one");
+            let on_leg = air + hover_leg_point(leg, ratio, phase);
+            assert!(p.pos.distance(on_leg) < 0.01, "climbs the flying leg, not the landed one");
             assert!((0.5..=1.0).contains(&ratio));
             climbed = true;
             break;

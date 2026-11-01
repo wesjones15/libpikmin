@@ -15,7 +15,9 @@
 //!   ground it joins the captain's squad (`TopAction::exec` with `mActionState` 0).
 //! - Host-controlled hovering Onions can also call Pikmin out: they slide to the midpoint
 //!   of a leg, then let go into the normal ballistic/falling state. Returning Pikmin
-//!   jump to the midpoint and climb the upper half. These are host extensions.
+//!   jump to the midpoint and climb the upper half. The airborne loop's legs change through
+//!   the loop, so these follow the drawn hip-knee-foot polyline at `Onion::hover_frame`.
+//!   These are host extensions.
 
 use glam::Vec3;
 
@@ -39,21 +41,84 @@ pub const LEG_TOPS: [Vec3; 3] = [
     Vec3::new(17.6, 88.3, 10.7),
 ];
 
-/// The legs while the Onion is in its airborne loop (the view's `Hover` motion: the take-off
-/// clip's frames 200-260, rebased like the view rebases it). They curl up under the pod, so their
-/// feet are about 28 units above the Onion's position instead of on the floor; a Pikmin climbing
-/// a flying Onion must follow these, not the landed leg. Measured from the disc model by
-/// `libpikmin-assets --example onion_hover_legs` (average over frames 200-260 of `c_red_t`).
-pub const LEG_FEET_HOVER: [Vec3; 3] = [
-    Vec3::new(-17.9, 28.1, -33.6),
-    Vec3::new(-15.5, 28.7, 34.7),
-    Vec3::new(42.5, 31.9, -1.6),
+/// The airborne loop's frame range in the take-off clip (`animator::onion_motion`).
+pub const HOVER_FROM: f32 = 200.0;
+pub const HOVER_TO: f32 = 260.0;
+const HOVER_STEP: f32 = 5.0;
+
+/// The drawn leg while the Onion is in its airborne loop (the take-off clip's frames 200-260):
+/// hip, knee and foot joints, relative to the Onion. The loop's legs bend at the knee and swing
+/// through the loop, so a straight rope from the hip to the foot cuts through the bend and lets
+/// Pikmin out beside the visible leg. `ActExit`/`ActEnter` follow the leg's rope; for this host
+/// hover pose the rope is this two-segment polyline so they stay on the drawn leg.
+///
+/// Measured from the disc model by `libpikmin-assets --example onion_hover_legs` and
+/// interpolated with `Onion::hover_frame`.
+pub const HOVER_LEG_JOINTS: [[[Vec3; 3]; 3]; 13] = [
+    // frame 200
+    [[Vec3::new(-14.46, 86.50, -18.52), Vec3::new(-35.11, 69.18, -44.85), Vec3::new(-27.44, 32.24, -35.36)], [Vec3::new(-9.41, 85.42, 21.17), Vec3::new(-21.99, 65.79, 50.77), Vec3::new(-17.71, 29.83, 36.55)], [Vec3::new(22.94, 85.59, -4.30), Vec3::new(54.80, 66.21, -9.68), Vec3::new(40.22, 30.14, -9.05)]],
+    // frame 205
+    [[Vec3::new(-15.40, 87.20, -18.63), Vec3::new(-37.29, 70.88, -44.60), Vec3::new(-29.45, 33.61, -36.68)], [Vec3::new(-8.63, 84.76, 20.74), Vec3::new(-20.03, 64.22, 50.20), Vec3::new(-16.61, 28.74, 34.62)], [Vec3::new(22.58, 85.63, -6.11), Vec3::new(54.05, 66.30, -13.53), Vec3::new(39.29, 30.30, -13.47)]],
+    // frame 210
+    [[Vec3::new(-15.81, 87.68, -18.87), Vec3::new(-38.33, 72.03, -44.71), Vec3::new(-30.08, 34.58, -38.14)], [Vec3::new(-7.94, 84.11, 20.21), Vec3::new(-18.41, 62.64, 49.34), Vec3::new(-15.27, 27.65, 32.63)], [Vec3::new(22.52, 85.95, -7.45), Vec3::new(53.87, 67.03, -16.32), Vec3::new(39.29, 30.97, -16.93)]],
+    // frame 215
+    [[Vec3::new(-15.22, 87.57, -19.21), Vec3::new(-37.41, 71.71, -45.22), Vec3::new(-27.92, 34.43, -39.45)], [Vec3::new(-6.97, 83.47, 19.74), Vec3::new(-16.56, 61.10, 48.50), Vec3::new(-12.41, 26.57, 31.06)], [Vec3::new(23.21, 86.84, -8.07), Vec3::new(55.09, 69.12, -17.51), Vec3::new(41.67, 32.62, -18.76)]],
+    // frame 220
+    [[Vec3::new(-13.84, 87.02, -19.61), Vec3::new(-34.87, 70.33, -46.05), Vec3::new(-23.63, 33.51, -40.48)], [Vec3::new(-5.92, 82.97, 19.41), Vec3::new(-14.77, 59.89, 47.85), Vec3::new(-8.69, 25.77, 30.17)], [Vec3::new(24.43, 88.09, -7.95), Vec3::new(57.27, 72.05, -17.10), Vec3::new(45.69, 34.95, -18.85)]],
+    // frame 225
+    [[Vec3::new(-12.41, 86.50, -19.96), Vec3::new(-32.02, 69.02, -46.96), Vec3::new(-19.59, 32.64, -41.00)], [Vec3::new(-5.48, 82.79, 19.29), Vec3::new(-14.29, 59.42, 47.50), Vec3::new(-6.43, 25.54, 30.08)], [Vec3::new(25.44, 89.01, -7.19), Vec3::new(59.10, 74.19, -15.36), Vec3::new(48.97, 36.69, -17.37)]],
+    // frame 230
+    [[Vec3::new(-11.69, 86.29, -20.15), Vec3::new(-30.23, 68.54, -47.73), Vec3::new(-18.30, 32.18, -40.72)], [Vec3::new(-6.48, 83.10, 19.41), Vec3::new(-16.64, 60.19, 47.54), Vec3::new(-8.26, 26.01, 30.95)], [Vec3::new(25.59, 88.76, -5.79), Vec3::new(59.48, 73.64, -12.29), Vec3::new(49.20, 36.17, -14.21)]],
+    // frame 235
+    [[Vec3::new(-11.68, 85.91, -19.70), Vec3::new(-29.46, 67.72, -47.49), Vec3::new(-19.85, 31.22, -38.06)], [Vec3::new(-8.98, 84.45, 20.21), Vec3::new(-21.95, 63.51, 48.72), Vec3::new(-14.38, 28.17, 34.30)], [Vec3::new(24.77, 87.28, -3.22), Vec3::new(58.16, 70.21, -6.90), Vec3::new(46.09, 33.24, -7.68)]],
+    // frame 240
+    [[Vec3::new(-10.97, 83.72, -17.17), Vec3::new(-27.27, 62.32, -43.54), Vec3::new(-19.46, 27.23, -28.67)], [Vec3::new(-11.14, 87.59, 22.67), Vec3::new(-26.72, 70.93, 52.66), Vec3::new(-19.21, 33.84, 43.66)], [Vec3::new(24.25, 86.55, 1.64), Vec3::new(57.29, 68.47, 2.73), Vec3::new(44.20, 31.98, 5.97)]],
+    // frame 245
+    [[Vec3::new(-10.39, 82.04, -14.73), Vec3::new(-25.31, 57.91, -39.52), Vec3::new(-19.51, 24.74, -20.05)], [Vec3::new(-13.32, 90.67, 24.25), Vec3::new(-31.44, 78.01, 54.76), Vec3::new(-24.28, 39.98, 50.80)], [Vec3::new(23.45, 86.50, 6.18), Vec3::new(55.84, 68.11, 11.87), Vec3::new(41.60, 32.50, 18.43)]],
+    // frame 250
+    [[Vec3::new(-9.27, 83.34, -17.59), Vec3::new(-22.08, 61.30, -45.33), Vec3::new(-18.48, 26.73, -27.86)], [Vec3::new(-15.73, 89.24, 21.47), Vec3::new(-36.76, 74.76, 49.18), Vec3::new(-29.68, 36.99, 43.16)], [Vec3::new(22.51, 85.71, 6.62), Vec3::new(54.03, 66.39, 13.93), Vec3::new(38.85, 30.67, 16.56)]],
+    // frame 255
+    [[Vec3::new(-5.84, 86.50, -22.77), Vec3::new(-14.69, 69.19, -55.04), Vec3::new(-9.97, 32.28, -43.70)], [Vec3::new(-15.85, 84.78, 15.94), Vec3::new(-37.93, 64.29, 38.59), Vec3::new(-27.61, 28.73, 26.67)], [Vec3::new(23.62, 86.26, 4.32), Vec3::new(55.78, 67.80, 10.99), Vec3::new(43.13, 31.37, 5.84)]],
+    // frame 260
+    [[Vec3::new(-1.68, 84.12, -20.80), Vec3::new(-5.84, 63.25, -51.90), Vec3::new(0.51, 28.06, -36.56)], [Vec3::new(-15.44, 85.06, 16.77), Vec3::new(-38.08, 64.90, 39.14), Vec3::new(-23.90, 29.41, 31.83)], [Vec3::new(24.79, 88.87, 8.84), Vec3::new(57.42, 73.92, 20.32), Vec3::new(48.18, 36.23, 17.62)]],
 ];
-pub const LEG_TOPS_HOVER: [Vec3; 3] = [
-    Vec3::new(-9.3, 87.7, -16.8),
-    Vec3::new(-10.1, 87.1, 18.1),
-    Vec3::new(22.6, 88.5, -1.1),
-];
+
+/// The airborne loop's hip, knee and foot at `frame` (clamped to
+/// [`HOVER_FROM`]..[`HOVER_TO`]), relative to the Onion.
+pub fn hover_leg_joints(leg: u8, frame: f32) -> [Vec3; 3] {
+    let l = leg as usize % 3;
+    let last = HOVER_LEG_JOINTS.len() - 1;
+    let t = ((frame - HOVER_FROM) / HOVER_STEP).clamp(0.0, last as f32);
+    let i = t.floor() as usize;
+    let j = (i + 1).min(last);
+    let u = t - i as f32;
+    [0, 1, 2].map(|k| HOVER_LEG_JOINTS[i][l][k].lerp(HOVER_LEG_JOINTS[j][l][k], u))
+}
+
+/// A point `ratio` of the way down the drawn airborne leg: 1 at the shoulder, 0 at the foot,
+/// along the hip-knee-foot polyline.
+pub fn hover_leg_point(leg: u8, ratio: f32, frame: f32) -> Vec3 {
+    let [hip, knee, foot] = hover_leg_joints(leg, frame);
+    let (a, b) = (hip.distance(knee), knee.distance(foot));
+    let len = a + b;
+    if len <= 1e-6 {
+        return hip;
+    }
+    let d = (1.0 - ratio.clamp(0.0, 1.0)) * len;
+    if d <= a && a > 1e-6 {
+        hip.lerp(knee, d / a)
+    } else if b > 1e-6 {
+        knee.lerp(foot, ((d - a) / b).clamp(0.0, 1.0))
+    } else {
+        knee
+    }
+}
+
+/// Arc length of the drawn airborne leg.
+pub fn hover_leg_length(leg: u8, frame: f32) -> f32 {
+    let [hip, knee, foot] = hover_leg_joints(leg, frame);
+    hip.distance(knee) + knee.distance(foot)
+}
 
 /// Whether the Onion is drawn in its airborne loop rather than a flight transition or a landed
 /// pose. `Hover` alone is not enough: while a host holds it low to fill, `flight_motion` picks a
@@ -94,26 +159,27 @@ impl OnionCounts {
     }
 }
 
-pub(crate) fn leg_point(onion: Vec3, leg: u8, ratio: f32, flying: bool) -> Vec3 {
-    let l = leg as usize % 3;
-    let (feet, tops) = if flying {
-        (&LEG_FEET_HOVER, &LEG_TOPS_HOVER)
-    } else {
-        (&LEG_FEET, &LEG_TOPS)
-    };
-    onion + feet[l].lerp(tops[l], ratio.clamp(0.0, 1.0))
+/// Where a Pikmin on `leg`'s rope sits: 0 at the foot, 1 at the shoulder. `hover` is the
+/// airborne loop's frame (`Onion::hover_frame`) when the Onion is drawn in that pose; `None`
+/// follows the landed, bind-pose leg.
+pub(crate) fn leg_point(onion: Vec3, leg: u8, ratio: f32, hover: Option<f32>) -> Vec3 {
+    onion + match hover {
+        Some(frame) => hover_leg_point(leg, ratio, frame),
+        None => LEG_FEET[leg as usize % 3].lerp(LEG_TOPS[leg as usize % 3], ratio.clamp(0.0, 1.0)),
+    }
 }
 
-pub(crate) fn leg_top(onion: Vec3, leg: u8, flying: bool) -> Vec3 {
-    onion + (if flying { LEG_TOPS_HOVER } else { LEG_TOPS })[leg as usize % 3]
+pub(crate) fn leg_top(onion: Vec3, leg: u8, hover: Option<f32>) -> Vec3 {
+    onion + match hover {
+        Some(frame) => hover_leg_joints(leg, frame)[0],
+        None => LEG_TOPS[leg as usize % 3],
+    }
 }
 
-pub(crate) fn leg_length(leg: u8, flying: bool) -> f32 {
-    let l = leg as usize % 3;
-    if flying {
-        (LEG_TOPS_HOVER[l] - LEG_FEET_HOVER[l]).length()
-    } else {
-        (LEG_TOPS[l] - LEG_FEET[l]).length()
+pub(crate) fn leg_length(leg: u8, hover: Option<f32>) -> f32 {
+    match hover {
+        Some(frame) => hover_leg_length(leg, frame),
+        None => (LEG_TOPS[leg as usize % 3] - LEG_FEET[leg as usize % 3]).length(),
     }
 }
 
@@ -281,10 +347,10 @@ impl Sim {
                 .into_iter()
                 .find(|&h| o.stored[color.index()][h as usize] > 0)
             else { break };
-            let (id_on, opos, flight) = (o.id, o.pos, flying_pose(o));
+            let (id_on, opos, hover) = (o.id, o.pos, flying_pose(o).then_some(o.hover_frame));
             // Legs in turn, so each takes a third.
             let leg = (k % 3) as u8;
-            let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, flight)) else { break };
+            let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, hover)) else { break };
             self.onions[oi].stored[color.index()][happa as usize] -= 1;
             let p = &mut self.pikis[id.0 as usize];
             p.happa = happa;
@@ -377,9 +443,9 @@ impl Sim {
                 continue;
             };
             o.stored[color.index()][happa as usize] -= 1;
-            let (onion, opos, flight) = (o.id, o.pos, flying_pose(o));
+            let (onion, opos, hover) = (o.id, o.pos, flying_pose(o).then_some(o.hover_frame));
             let leg = (self.rng.f32() * 3.0) as u8 % 3;
-            let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, flight)) else {
+            let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, hover)) else {
                 // Field full after all: keep it inside.
                 self.onions[oi].stored[color.index()][happa as usize] += 1;
                 continue;
@@ -408,9 +474,9 @@ impl Sim {
             } => {
                 let o = &self.onions[onion.0 as usize];
                 let opos = o.pos;
-                let hovering = o.anim == crate::onion::OnionAnim::Hover;
-                // The airborne loop curls the legs up under the pod; the landed/fill pose keeps them out.
-                let flight = flying_pose(o);
+                // The airborne loop's legs swing out and fold through the loop; `hover` carries
+                // its frame so entry and exit follow the same rope the view draws.
+                let hover = flying_pose(o).then_some(o.hover_frame);
                 if !o.takes_deliveries() {
                     self.pikis[pi].state = PikiState::Idle;
                     return;
@@ -419,7 +485,7 @@ impl Sim {
                     // Host extension: JUMP (21) to the middle of a flying leg,
                     // then ActEnter::gotoLeg/climb's HNoboru (62) up its top half.
                     // Negative ratio is the remaining jump time; snapshots already carry it.
-                    let foot = leg_point(opos, leg, if hovering { 0.5 } else { 0.0 }, flight);
+                    let foot = leg_point(opos, leg, if hover.is_some() { 0.5 } else { 0.0 }, hover);
                     if ratio < 0.0 {
                         let p = &mut self.pikis[pi];
                         let remaining = -ratio;
@@ -428,7 +494,7 @@ impl Sim {
                         p.vel = Vec3::ZERO;
                         p.on_ground = false;
                         p.state = if remaining <= dt {
-                            PikiState::Enter { onion, leg, climbing: true, ratio: if hovering { 0.5 } else { 0.0 } }
+                            PikiState::Enter { onion, leg, climbing: true, ratio: if hover.is_some() { 0.5 } else { 0.0 } }
                         } else {
                             PikiState::Enter { onion, leg, climbing: false, ratio: ratio + step }
                         };
@@ -442,8 +508,8 @@ impl Sim {
                         p.state = PikiState::Enter {
                             onion,
                             leg,
-                            climbing: !hovering,
-                            ratio: if hovering { -0.65 } else { 0.0 },
+                            climbing: hover.is_none(),
+                            ratio: if hover.is_some() { -0.65 } else { 0.0 },
                         };
                         return;
                     }
@@ -452,12 +518,12 @@ impl Sim {
                     self.physics(pi, host, dt);
                     return;
                 }
-                let r = ratio + CLIMB_SPEED * dt / leg_length(leg, flight);
+                let r = ratio + CLIMB_SPEED * dt / leg_length(leg, hover);
                 let p = &mut self.pikis[pi];
-                p.pos = leg_point(opos, leg, r, flight);
+                p.pos = leg_point(opos, leg, r, hover);
                 p.vel = Vec3::ZERO;
                 p.on_ground = false;
-                let d = leg_top(opos, leg, flight) - p.pos;
+                let d = leg_top(opos, leg, hover) - p.pos;
                 p.face = d.x.atan2(d.z);
                 if r > ENTER_AT {
                     // `GoalItem::enterGoal`
@@ -477,23 +543,22 @@ impl Sim {
             PikiState::Exit { onion, leg, ratio } => {
                 let o = &self.onions[onion.0 as usize];
                 let opos = o.pos;
-                let hovering = o.anim == crate::onion::OnionAnim::Hover;
-                let flight = flying_pose(o);
-                let r = ratio - SLIDE_SPEED * dt / leg_length(leg, flight);
+                let hover = flying_pose(o).then_some(o.hover_frame);
+                let r = ratio - SLIDE_SPEED * dt / leg_length(leg, hover);
                 let p = &mut self.pikis[pi];
-                if hovering && r <= 0.5 {
+                if hover.is_some() && r <= 0.5 {
                     // Host flight: play the first half of ActExit, then fall from that
                     // exact point rather than following the moving leg to its foot.
-                    p.pos = leg_point(opos, leg, 0.5, flight);
+                    p.pos = leg_point(opos, leg, 0.5, hover);
                     p.vel = Vec3::NEG_Y * SLIDE_SPEED;
                     p.target_vel = p.vel;
                     p.on_ground = false;
                     p.state = PikiState::Flying { ground_frames: 0 };
                     return;
                 }
-                p.pos = leg_point(opos, leg, r, flight);
+                p.pos = leg_point(opos, leg, r, hover);
                 p.vel = Vec3::ZERO;
-                let d = p.pos - leg_top(opos, leg, flight);
+                let d = p.pos - leg_top(opos, leg, hover);
                 p.face = d.x.atan2(d.z);
                 if r > 0.0 {
                     p.state = PikiState::Exit {

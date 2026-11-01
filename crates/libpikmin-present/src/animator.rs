@@ -32,8 +32,6 @@ pub enum Clock {
     /// Start at this frame, then loop over the motion's loop keys (`Pick` while carrying:
     /// `ActTransport` starts it at 11).
     LoopFrom(f32, f32),
-    /// Repeat only an airborne section of a cinematic clip.
-    LoopRange(f32, f32, f32),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -82,7 +80,7 @@ pub fn advance_index<'a>(
     let start = *info.keys.first().unwrap_or(&0) as f32;
     let end = (*info.keys.last().unwrap_or(&0) as f32).max(start);
     let first = match clock {
-        Clock::LoopFrom(_, from) | Clock::LoopRange(_, from, _) => from,
+        Clock::LoopFrom(_, from) => from,
         _ => start,
     };
     let p = players.entry(key).or_insert(Player {
@@ -97,7 +95,6 @@ pub fn advance_index<'a>(
     }
     match clock {
         Clock::Progress(t) => p.frame = start + (end - start) * t.clamp(0.0, 1.0),
-        Clock::LoopRange(fps, lo, hi) => p.frame = lo + (p.frame - lo + fps * dt).rem_euclid(hi - lo),
         Clock::Sim(f) => p.frame = f,
         Clock::Loop(fps) => {
             p.frame += fps * dt;
@@ -367,7 +364,9 @@ pub fn onion_motion(o: &Onion) -> Option<(usize, Clock)> {
     Some(match o.anim {
         // GoalAI::WaitInit uses motion 12 for an Onion with Pikmin in storage.
         OnionAnim::Idle => (if o.stored.iter().flatten().any(|&n| n > 0) { 12 } else { 1 }, Clock::Loop(30.0)),
-        OnionAnim::Hover => (libpikmin::anim::ANIM_GOAL_TAKEOFF + colour, Clock::LoopRange(30.0, 200.0, 260.0)),
+        // The sim owns the airborne loop's frame: the Pikmin's leg ropes are measured from it,
+        // so drawing the same frame keeps climbers and exiting Pikmin on the visible leg.
+        OnionAnim::Hover => (libpikmin::anim::ANIM_GOAL_TAKEOFF + colour, Clock::Sim(o.hover_frame)),
         OnionAnim::Suction { frame } => (2, Clock::Sim(frame)),
         OnionAnim::Emitting { frame } => (0, Clock::Sim(frame)),
         OnionAnim::TakeOff { frame } => (libpikmin::anim::ANIM_GOAL_TAKEOFF + colour, Clock::Sim(frame)),

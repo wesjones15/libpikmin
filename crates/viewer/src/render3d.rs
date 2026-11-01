@@ -635,7 +635,7 @@ impl Scene3d {
         // `PIKMIN_FOCUS=x,y,z` pins the camera target (for screenshots).
         let target = if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("strike") {
             sim.captain(focus).pos - GVec3::Y * 3.0
-        } else if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("ride") {
+        } else if matches!(std::env::var("PIKMIN_PORTRAIT").as_deref(), Ok("ride" | "ride-exit" | "ride-board")) {
             sim.onions().first().map_or(GVec3::ZERO, |o| o.pos)
         } else if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("throw") {
             sim.pikis().iter().find(|p| matches!(p.state, PikiState::Flying { .. }))
@@ -900,6 +900,21 @@ impl Scene3d {
                 },
                 &mut ctx,
             );
+            // `PIKMIN_LEGS=1`: draw the leg rope the sim uses, in the drawn pose, so a capture
+            // can show whether entering/exiting Pikmin are on it.
+            if std::env::var_os("PIKMIN_LEGS").is_some() {
+                for leg in 0..3u8 {
+                    let mut prev = None;
+                    for step in 0..=8 {
+                        let ratio = 1.0 - step as f32 / 8.0;
+                        let at = o.pos + libpikmin::onion_menu::hover_leg_point(leg, ratio, o.hover_frame);
+                        if let Some(prev) = prev {
+                            draw_line_3d(mq(prev), mq(at), Color::new(0.1, 1.0, 0.2, 0.8));
+                        }
+                        prev = Some(at);
+                    }
+                }
+            }
             let flying = matches!(o.anim, OnionAnim::TakeOff { .. } | OnionAnim::Landing { .. }) || o.flight_motion.is_some();
             if let (true, Some(e), Some((info, _))) = (flying, self.effects.as_mut(), self.onion_anims.get(motion_idx)) {
                 let coll = &self.onion.model.coll;
