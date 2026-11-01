@@ -661,20 +661,26 @@ pub struct FlatQuad {
 }
 pub const QUAD_UVS: [[f32; 2]; 4] = [[0.,0.],[1.,0.],[1.,1.],[0.,1.]];
 
-/// How a derived texture is made from an effect's: `rgb * a`, `(1 - rgb) * a`, `a`, or as is.
+/// How a derived texture is made from an effect's: `rgb * a`, `(1 - rgb) * a`, `a`, as is, or a
+/// colour mode baked against fixed primary/environment colours.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Derive {
     RgbA,
     InvA,
     A,
     Same,
+    /// An alpha-blended effect whose `setBlendMode` colour mode mixes the texture with `prim` and
+    /// `env` (take_s and land_s are mode 2): bake that mix into the texture's RGB and keep its
+    /// alpha, so a host shader of one texture times one colour draws the authored colour.
+    Combine { mode: u8, prim: [u8; 3], env: [u8; 3] },
 }
 
 /// [`Effects`] for hosts without GX's TEV and blending. Every effect Pikmin 1 uses here blends
 /// `SRCALPHA, ONE` (additive), which is linear, so each of `setBlendMode`'s colour modes splits
 /// exactly into at most two additive layers of `colour * texture`, each over a texture derived
-/// from the effect's (`rgb * a`, `(1 - rgb) * a` or `a`). Other blends draw as alpha-blended
-/// `prim * texture`.
+/// from the effect's (`rgb * a`, `(1 - rgb) * a` or `a`). Other blends are alpha-blended
+/// `prim * texture`, except a mode that mixes in `prim`/`env`, whose mix is baked into the
+/// texture (see [`Derive::Combine`]).
 #[derive(Default)]
 pub struct Flat {
     pub textures: Vec<Texture>,
@@ -696,7 +702,20 @@ impl Flat {
         let d = &fx.defs[def].1;
         let src = if child { d.child_tex.as_ref().unwrap_or(&d.tex) } else { &d.tex };
         let mut rgba = src.image.rgba.clone();
-        if how != Derive::Same {
+        if let Derive::Combine { mode, prim, env } = how {
+            let p = prim.map(|c| c as f32 / 255.0);
+            let e = env.map(|c| c as f32 / 255.0);
+            for px in rgba.as_chunks_mut::<4>().0 {
+                let t = [px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0];
+                let c = match mode {
+                    0 => [p[0] + t[0] * (1.0 - p[0]), p[1] + t[1] * (1.0 - p[1]), p[2] + t[2] * (1.0 - p[2])],
+                    2 => [e[0] + t[0] * (p[0] - e[0]), e[1] + t[1] * (p[1] - e[1]), e[2] + t[2] * (p[2] - e[2])],
+                    3 => [e[0] + t[0] * p[0], e[1] + t[1] * p[1], e[2] + t[2] * p[2]],
+                    _ => p,
+                };
+                for k in 0..3 { px[k] = (c[k] * 255.0).round().clamp(0.0, 255.0) as u8; }
+            }
+        } else if how != Derive::Same {
             for px in rgba.as_chunks_mut::<4>().0 {
                 let a = px[3] as u32;
                 for c in &mut px[..3] {
@@ -730,8 +749,19 @@ impl Flat {
                 let (prim, env) = (rgb(q.prim), rgb(q.env));
                 let pa = q.prim[3] as f32 / 255.0;
                 if !additive {
-                    let texture = self.texture(fx, b.def, b.child, Derive::Same);
-                    let color = [prim[0], prim[1], prim[2], pa];
+                    // Mode 1 is `prim * texture`, what the host shader does anyway. The others
+                    // mix in `prim`/`env` (or ignore the texture), so bake that into the texture
+                    // and keep the particle's alpha in the colour.
+                    let (texture, color) = if b.mode == 1 {
+                        (self.texture(fx, b.def, b.child, Derive::Same), [prim[0], prim[1], prim[2], pa])
+                    } else {
+                        let mix = Derive::Combine {
+                            mode: b.mode,
+                            prim: [q.prim[0], q.prim[1], q.prim[2]],
+                            env: [q.env[0], q.env[1], q.env[2]],
+                        };
+                        (self.texture(fx, b.def, b.child, mix), [1.0, 1.0, 1.0, pa])
+                    };
                     self.quads.push(FlatQuad { corners: q.corners, color, texture, additive, uvs: QUAD_UVS, refraction: false });
                     continue;
                 }
