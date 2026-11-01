@@ -489,7 +489,12 @@ impl Effects {
         let mut out = Vec::new();
         for g in gens {
             let Some(def) = pcrs.iter().position(|p| Arc::ptr_eq(p, &g.pcr)) else { continue };
-            let quads = g.quads(right, up);
+            let mut quads = g.quads(right, up);
+            if g.alpha_scale != 1.0 {
+                for q in &mut quads {
+                    q.prim[3] = (q.prim[3] as f32 * g.alpha_scale).round().clamp(0.0, 255.0) as u8;
+                }
+            }
             let pcr = &pcrs[def];
             for child in [true, false] {
                 let qs: Vec<Quad> = quads.iter().filter(|q| q.child == child).cloned().collect();

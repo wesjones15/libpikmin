@@ -620,6 +620,9 @@ pub struct Generator {
     pub pcr: Arc<Pcr>,
     /// Where particles are born (`getGPos`); hosts move it to follow something.
     pub emit_pos: Vec3,
+    /// Host extension: multiplies every particle's drawn alpha (a landing cloud toned down
+    /// without changing the shared effect table).
+    pub alpha_scale: f32,
     /// Host-controlled density for attached emitters (for example, ground dust as an Onion rises).
     pub emission_scale: f32,
     /// Added to every new particle's velocity (`mEmitVelocity`).
@@ -655,6 +658,7 @@ impl Generator {
             emit_dir: pcr.emit_dir,
             pcr,
             emit_pos: pos,
+            alpha_scale: 1.0,
             emission_scale: 1.0,
             emit_vel: Vec3::ZERO,
             oriented_normal: Vec3::Y,

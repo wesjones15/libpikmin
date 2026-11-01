@@ -1873,7 +1873,12 @@ impl View {
                         ShipCue::Effect { fx, lift, normal } => {
                             if let Some(e) = self.effects.as_mut()
                                 && let Some(g) = e.spawn(fx, o.pos + Vec3::Y * lift)
-                                && let Some(n) = normal { g.oriented_normal = rot * n; }
+                            {
+                                // The landing reuses the takeoff clip's dust; at full alpha it
+                                // shrouds Olimar, the squad and the Onion. Keep it, toned down.
+                                if fx == fx_defs::ROCKET_LAND { g.alpha_scale = 0.3; }
+                                if let Some(n) = normal { g.oriented_normal = rot * n; }
+                            }
                         }
                         ShipCue::JointEffect { fx, joint, offset, dir, normal } => {
                             if let (Some(m), Some(e)) = (pose.joints.get(joint), self.effects.as_mut())
@@ -2335,7 +2340,21 @@ impl View {
             };
             live.insert(crate::animator::piki_key(p));
             let k = key(kinds::PIKI, crate::animator::piki_key(p));
-            let (pos, rot) = self.place_rot(k, p.pos, Quat::from_rotation_y(p.face), tick, alpha);
+            // A Pikmin on a flying Onion's leg is placed by the sim in the Onion's un-leaned
+            // frame; draw it on the leg the Onion is actually drawn with, so the host's lean
+            // does not slide the climbers off.
+            let (world, rot) = match p.state {
+                PikiState::Enter { onion, .. } | PikiState::Exit { onion, .. } => {
+                    if let Some(o) = sim.onions().iter().find(|o| o.id == onion) {
+                        let lean = self.onion_lean.get(&onion.0).map(|s| s.2.quat).unwrap_or(Quat::IDENTITY);
+                        (o.pos + lean * (p.pos - o.pos), lean * Quat::from_rotation_y(p.face))
+                    } else {
+                        (p.pos, Quat::from_rotation_y(p.face))
+                    }
+                }
+                _ => (p.pos, Quat::from_rotation_y(p.face)),
+            };
+            let (pos, rot) = self.place_rot(k, world, rot, tick, alpha);
             // Frozen: the pose held where it was, the body paled toward ice.
             let frozen = p.frozen > 0.0;
             let anim = if self.celebrating {
