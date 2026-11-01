@@ -488,7 +488,9 @@ pub struct Animator {
     pub players: HashMap<u64, Player>,
     sprouts: HashMap<SproutId, SproutTrack>,
     throw_timer: HashMap<CaptainId, f32>,
-    captain_gait: HashMap<CaptainId, Motion>,
+    captain_gait: HashMap<CaptainId, (Motion, Clock)>,
+    piki_gait: HashMap<u64, (Motion, Clock)>,
+    gait_hold: HashMap<u64, (Option<Motion>, u8)>,
     render: Option<(u64, f32)>,
     frames: HashMap<u64, FrameTrack>,
     /// Sprout animation sound keys hit this frame: (parent Onion, value, position). Drained by
@@ -524,6 +526,37 @@ impl Animator {
         Clock::Sim(frame)
     }
 
+    /// The four-tick gait cooldown in `Navi::updateWalkAnimation` / `Piki::updateWalkAnimation`:
+    /// a new Walk/Run/Nigeru band has to be wanted for four updates before it replaces the
+    /// current one, so speed noise at a threshold cannot restart the cycle.
+    fn hold_gait(
+        &mut self,
+        key: u64,
+        prev: Option<(Motion, Clock)>,
+        motion: Motion,
+        clock: Clock,
+    ) -> (Motion, Clock) {
+        let Some((prev_motion, prev_clock)) = prev else {
+            self.gait_hold.remove(&key);
+            return (motion, clock);
+        };
+        if !is_gait(prev_motion) || !is_gait(motion) || prev_motion == motion {
+            self.gait_hold.remove(&key);
+            return (motion, clock);
+        }
+        let hold = self.gait_hold.entry(key).or_insert((None, 0));
+        if hold.0 == Some(motion) {
+            hold.1 = hold.1.saturating_add(1);
+        } else {
+            *hold = (Some(motion), 0);
+        }
+        if hold.1 < 4 {
+            return (prev_motion, prev_clock);
+        }
+        self.gait_hold.remove(&key);
+        (motion, clock)
+    }
+
     pub fn on_event(&mut self, e: &Event) {
         if let Event::Thrown { captain, .. } = e {
             // The throw motion's length (`NaviThrowState`).
@@ -548,21 +581,34 @@ impl Animator {
     }
 
     pub fn piki<'a>(&mut self, set: &'a AnimSet, p: &Piki, look: &PikiLook, dt: f32) -> Option<(&'a Anim, f32)> {
-        let clock = self.clock(piki_key(p), look.motion.anim_index()?, look.clock);
-        advance(&mut self.players, piki_key(p), set, look.motion, clock, dt)
+        let key = piki_key(p);
+        let prev = self.piki_gait.get(&key).copied();
+        let (motion, clock) = self.hold_gait(key, prev, look.motion, look.clock);
+        if is_gait(motion) {
+            self.piki_gait.insert(key, (motion, clock));
+        } else {
+            self.piki_gait.remove(&key);
+        }
+        let index = motion.anim_index()?;
+        if prev.is_some_and(|(m, _)| is_gait(m) && m != motion) && is_gait(motion) {
+            carry_gait_phase(&mut self.players, key, set, index);
+        }
+        let clock = self.clock(key, index, clock);
+        advance(&mut self.players, key, set, motion, clock, dt)
     }
 
     pub fn captain<'a>(&mut self, set: &'a AnimSet, params: &Params, c: &Captain, dt: f32) -> Option<(&'a Anim, f32)> {
         let prev = self.captain_gait.get(&c.id).copied();
-        let (motion, clock) = captain_motion_held(params, c, self.throwing(c.id), prev);
+        let (wanted, wanted_clock) = captain_motion_held(params, c, self.throwing(c.id), prev.map(|(m, _)| m));
+        let key = captain_key(c.id);
+        let (motion, clock) = self.hold_gait(key, prev, wanted, wanted_clock);
         if is_gait(motion) {
-            self.captain_gait.insert(c.id, motion);
+            self.captain_gait.insert(c.id, (motion, clock));
         } else {
             self.captain_gait.remove(&c.id);
         }
-        let key = captain_key(c.id);
         let index = motion.anim_index()?;
-        if prev.is_some_and(is_gait) && is_gait(motion) && prev != Some(motion) {
+        if prev.is_some_and(|(m, _)| is_gait(m) && m != motion) && is_gait(motion) {
             carry_gait_phase(&mut self.players, key, set, index);
         }
         let clock = self.clock(key, index, clock);
