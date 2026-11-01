@@ -549,6 +549,10 @@ pub struct View {
     /// knee and foot of each leg in its drawn pose. Entry/exit Pikmin are placed from these, so
     /// they follow the Onion's turn as well as its lean.
     onion_legs: HashMap<u32, (Vec3, Quat, [[Vec3; 3]; 3])>,
+    /// Whether host model instances mirror X (Unity is left-handed; the disc models are
+    /// right-handed). The Onion's leg points are in model space, so they need the same mirror
+    /// as the drawn mesh. On by default for the Unity host.
+    model_mirror_x: bool,
     pub ship_sounds: Vec<(libpikmin::onion::OnionId, &'static str, bool)>,
     pub demo_sounds: Vec<Option<(u16, u16)>>,
     pikihead_anims: AnimSet,
@@ -840,6 +844,7 @@ impl View {
             onion_lift_smoke: HashSet::new(),
             onion_lean: HashMap::new(),
             onion_legs: HashMap::new(),
+            model_mirror_x: true,
             ship_sounds: Vec::new(),
             demo_sounds: Vec::new(),
             pikihead_anims: AnimSet::load(assets, paths::PIKIHEAD_ANIM_MGR, paths::PIKIHEAD_BUNDLE)?,
@@ -1240,12 +1245,23 @@ impl View {
         self.interp.entry(k).or_insert_with(|| Interp::new(at, rot, tick)).sample(at, rot, tick, alpha)
     }
 
+    /// Whether host model instances mirror X (Unity's left-handedness). Default true; a
+    /// right-handed host turns it off so Onion-leg climbers follow its drawn mesh.
+    pub fn set_model_mirror_x(&mut self, mirror: bool) {
+        self.model_mirror_x = mirror;
+    }
+
+    /// A model-space point in the host's drawn frame: Unity mirrors each model's local X.
+    fn drawn_local(&self, v: Vec3) -> Vec3 {
+        if self.model_mirror_x { Vec3::new(-v.x, v.y, v.z) } else { v }
+    }
+
     /// Where the drawn `onion`'s `leg` is at `ratio` this frame (1 shoulder, 0 foot), in the
     /// Onion's placed position and lean. `None` if it wasn't drawn (a ship, away or dormant).
     /// This is the pose the Pikmin's entry and exit are drawn against, rotation included.
     pub fn onion_leg_point(&self, onion: libpikmin::onion::OnionId, leg: u8, ratio: f32) -> Option<Vec3> {
         let (pos, lean, legs) = self.onion_legs.get(&onion.0)?;
-        let local = libpikmin::onion_menu::leg_polyline_point(legs[leg as usize % 3], ratio);
+        let local = self.drawn_local(libpikmin::onion_menu::leg_polyline_point(legs[leg as usize % 3], ratio));
         Some(*pos + *lean * local)
     }
 
@@ -2393,8 +2409,9 @@ impl View {
                     match self.onion_legs.get(&onion.0) {
                         Some((opos, lean, legs)) => {
                             let joints = legs[leg as usize % 3];
-                            let local = libpikmin::onion_menu::leg_polyline_point(joints, ratio);
-                            let dir = joints[0] - local;
+                            let local = self.drawn_local(libpikmin::onion_menu::leg_polyline_point(joints, ratio));
+                            let top = self.drawn_local(joints[0]);
+                            let dir = top - local;
                             (*opos + *lean * local, *lean * Quat::from_rotation_y(dir.x.atan2(dir.z)))
                         }
                         None => (p.pos, Quat::from_rotation_y(p.face)),
@@ -2404,8 +2421,9 @@ impl View {
                     match self.onion_legs.get(&onion.0) {
                         Some((opos, lean, legs)) => {
                             let joints = legs[leg as usize % 3];
-                            let local = libpikmin::onion_menu::leg_polyline_point(joints, ratio);
-                            let dir = local - joints[0];
+                            let local = self.drawn_local(libpikmin::onion_menu::leg_polyline_point(joints, ratio));
+                            let top = self.drawn_local(joints[0]);
+                            let dir = local - top;
                             (*opos + *lean * local, *lean * Quat::from_rotation_y(dir.x.atan2(dir.z)))
                         }
                         None => (p.pos, Quat::from_rotation_y(p.face)),
@@ -2419,7 +2437,8 @@ impl View {
                             // far the jump has got, so it lands there without a snap.
                             let u = (1.0 + ratio / libpikmin::onion_menu::ENTER_JUMP_SECONDS).clamp(0.0, 1.0);
                             let table = libpikmin::onion_menu::hover_leg_point(leg, 0.5, o.hover_frame);
-                            let exact = libpikmin::onion_menu::leg_polyline_point(legs[leg as usize % 3], 0.5);
+                            let exact = self.drawn_local(
+                                libpikmin::onion_menu::leg_polyline_point(legs[leg as usize % 3], 0.5));
                             let target = *opos + *lean * exact - (o.pos + table);
                             (p.pos + target * u, *lean * Quat::from_rotation_y(p.face))
                         }
