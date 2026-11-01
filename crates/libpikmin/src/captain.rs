@@ -22,7 +22,9 @@ const LOCK_MIN_DISTANCE: f32 = 20.0;
 /// Clear space between a locked-on target's surface and its cursor.
 const LOCK_MARGIN: f32 = 4.0;
 /// A Pikmin called to his hand runs at least this many times his top speed (host extension).
-pub(crate) const GO_HANG_CATCH_UP: f32 = 1.5;
+/// Enough that a locked-on rapid throw keeps feeding his hand while he sprints away from the
+/// squad; at 1.5 the call could trail him until he walked back towards the crowd.
+pub(crate) const GO_HANG_CATCH_UP: f32 = 2.5;
 
 /// Per-frame controls for one captain. Buttons are levels (held = true); the sim detects edges.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]

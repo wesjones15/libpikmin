@@ -2439,8 +2439,12 @@ impl View {
                             let table = libpikmin::onion_menu::hover_leg_point(leg, 0.5, o.hover_frame);
                             let exact = self.drawn_local(
                                 libpikmin::onion_menu::leg_polyline_point(legs[leg as usize % 3], 0.5));
-                            let target = *opos + *lean * exact - (o.pos + table);
-                            (p.pos + target * u, *lean * Quat::from_rotation_y(p.face))
+                            // The jump start is in the Onion's frame too: mirror it with the leg,
+                            // or every climber starts on the un-mirrored side and crosses the
+                            // middle to reach the drawn leg.
+                            let start = *opos + *lean * self.drawn_local(p.pos - o.pos);
+                            let target = *opos + *lean * exact - (*opos + *lean * table);
+                            (start + target * u, *lean * Quat::from_rotation_y(p.face))
                         }
                         _ => (p.pos, Quat::from_rotation_y(p.face)),
                     }

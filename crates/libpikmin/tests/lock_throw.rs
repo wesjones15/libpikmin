@@ -119,6 +119,31 @@ fn with_any_picked_the_nearest_is_thrown() {
 }
 
 #[test]
+fn locked_rapid_taps_throw_while_he_runs() {
+    let mut sim = Sim::new(Params::default(), 5);
+    let c = sim.add_captain(Vec3::ZERO);
+    for i in 0..8 {
+        sim.spawn_piki_in_squad(PikiColor::Red, Vec3::new(-40.0 - i as f32 * 8.0, 0.0, 0.0), c).unwrap();
+    }
+    sim.set_lock_target(c, Some(7));
+    let mut thrown = 0;
+    for tap in 0..12 {
+        let pose = libpikmin::captain::CaptainPose {
+            pos: Vec3::X * (tap as f32 * 4.0),
+            vel: Vec3::X * 300.0,
+            face: std::f32::consts::FRAC_PI_2,
+        };
+        sim.set_input(c, CaptainInput { pose: Some(pose), throw: true, ..Default::default() });
+        sim.step(&mut Enemy);
+        thrown += sim.drain_events().filter(|e| matches!(e, libpikmin::Event::Thrown { .. })).count();
+        sim.set_input(c, CaptainInput { pose: Some(pose), throw: false, ..Default::default() });
+        sim.step(&mut Enemy);
+        thrown += sim.drain_events().filter(|e| matches!(e, libpikmin::Event::Thrown { .. })).count();
+    }
+    assert!(thrown >= 6, "only {thrown} throws from 8 squad Pikmin over 12 taps");
+}
+
+#[test]
 fn lock_on_calls_any_squad_pikmin_however_far() {
     for (locked, distance, expected) in [(true, 300.0, true), (false, 300.0, false), (true, 349.0, true), (true, 350.0, true), (true, 900.0, true)] {
         let mut sim = Sim::new(Params::default(), 5);
