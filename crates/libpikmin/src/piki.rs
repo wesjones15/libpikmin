@@ -58,6 +58,11 @@ impl PikiColor {
 /// How many [`PikiColor`]s there are.
 pub const COLOUR_COUNT: usize = 5;
 
+/// Host extension: how far above a Pikmin its squad slot must be before it counts as stranded on
+/// a lower level (sim units, about 6 m), and how long it must fail to move before being put there.
+const STRANDED_GAP: f32 = 150.0;
+const STRANDED_TIME: f32 = 2.0;
+
 /// Leaf / bud / flower stage (`mHappa`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Happa {
@@ -575,7 +580,23 @@ impl Sim {
 
         // Slip / break range (`mFormationSlipRange`, `mFormationBreakRange`, `mMaxLostChildTime`).
         let mut leave = false;
-        if dist < pp.formation_slip_range {
+        // Host extension: no pathfinding. A squad Pikmin on the ground whose slot is a level or
+        // more above it, and that cannot move because it is pressed against the cliff, can never
+        // get there. After a couple of seconds, put it at its slot.
+        let stalled = {
+            let p = &self.pikis[pi];
+            p.on_ground && dist > 7.0 && slot_pos.y - p.pos.y > STRANDED_GAP && p.vel.length() < 15.0
+        };
+        if stalled {
+            lost_timer += dt;
+            if lost_timer > STRANDED_TIME {
+                let p = &mut self.pikis[pi];
+                p.pos = slot_pos;
+                p.vel = Vec3::ZERO;
+                p.on_ground = true;
+                lost_timer = 0.0;
+            }
+        } else if dist < pp.formation_slip_range {
             lost_timer = 0.0;
             reslotted = false;
         } else if dist < pp.formation_break_range {
