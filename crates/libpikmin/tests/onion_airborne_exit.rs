@@ -1,6 +1,6 @@
 use libpikmin::{Happa, Params, PikiColor, PikiState, Sim, Snapshot, Vec3};
 use libpikmin::host::FlatHost;
-use libpikmin::onion_menu::{LEG_FEET, LEG_TOPS};
+use libpikmin::onion_menu::{LEG_FEET_HOVER, LEG_TOPS_HOVER};
 
 #[test]
 fn hovering_call_out_slides_half_a_leg_then_falls_independently() {
@@ -26,7 +26,7 @@ fn hovering_call_out_slides_half_a_leg_then_falls_independently() {
                 }
                 PikiState::Flying { .. } => {
                     let l = leg.expect("played the leg slide first") as usize;
-                    let midpoint = air + LEG_FEET[l].lerp(LEG_TOPS[l], 0.5);
+                    let midpoint = air + LEG_FEET_HOVER[l].lerp(LEG_TOPS_HOVER[l], 0.5);
                     assert!(p.pos.distance(midpoint) < 0.001, "detached at the exact leg midpoint");
                     assert!(p.vel.y < 0.0 && !p.on_ground);
                     assert_eq!(p.happa, Happa::Flower);
@@ -87,4 +87,31 @@ fn returning_the_squad_also_returns_held_and_approaching_pikmin() {
         assert!(matches!(sim.captain(captain).throw, libpikmin::captain::ThrowState::Idle));
         assert!(sim.captain(captain).plate.members.is_empty());
     }
+}
+
+#[test]
+fn entering_pikmin_climb_the_flying_onions_legs() {
+    let mut sim = Sim::new(Params::default(), 24);
+    let captain = sim.add_captain(Vec3::ZERO);
+    let onion = sim.add_onion(Vec3::ZERO, &[PikiColor::Red]);
+    let piki = sim.spawn_piki_in_squad(PikiColor::Red, Vec3::Z * 40.0, captain).unwrap();
+    let air = Vec3::Y * 200.0;
+    sim.set_onion_pose(onion, air, true);
+    assert_eq!(sim.onion_put_away(captain, onion, PikiColor::Red, 1), 1);
+    let mut climbed = false;
+    for _ in 0..240 {
+        sim.step(&mut FlatHost);
+        let p = sim.piki(piki);
+        if let PikiState::Enter { leg, ratio, climbing: true, .. } = p.state {
+            let foot = air + LEG_FEET_HOVER[leg as usize % 3];
+            let top = air + LEG_TOPS_HOVER[leg as usize % 3];
+            let seg = top - foot;
+            let t = ((p.pos - foot).dot(seg) / seg.length_squared()).clamp(0.0, 1.0);
+            assert!(p.pos.distance(foot + seg * t) < 0.01, "climbs the flying leg, not the landed one");
+            assert!((0.5..=1.0).contains(&ratio));
+            climbed = true;
+            break;
+        }
+    }
+    assert!(climbed, "the Pikmin boarded the flying Onion");
 }

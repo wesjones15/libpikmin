@@ -38,6 +38,29 @@ pub const LEG_TOPS: [Vec3; 3] = [
     Vec3::new(-18.4, 88.4, 9.3),
     Vec3::new(17.6, 88.3, 10.7),
 ];
+
+/// The legs while the Onion is in its airborne loop (the view's `Hover` motion: the take-off
+/// clip's frames 200-260, rebased like the view rebases it). They curl up under the pod, so their
+/// feet are about 28 units above the Onion's position instead of on the floor; a Pikmin climbing
+/// a flying Onion must follow these, not the landed leg. Measured from the disc model by
+/// `libpikmin-assets --example onion_hover_legs` (average over frames 200-260 of `c_red_t`).
+pub const LEG_FEET_HOVER: [Vec3; 3] = [
+    Vec3::new(-17.9, 28.1, -33.6),
+    Vec3::new(-15.5, 28.7, 34.7),
+    Vec3::new(42.5, 31.9, -1.6),
+];
+pub const LEG_TOPS_HOVER: [Vec3; 3] = [
+    Vec3::new(-9.3, 87.7, -16.8),
+    Vec3::new(-10.1, 87.1, 18.1),
+    Vec3::new(22.6, 88.5, -1.1),
+];
+
+/// Whether the Onion is drawn in its airborne loop rather than a flight transition or a landed
+/// pose. `Hover` alone is not enough: while a host holds it low to fill, `flight_motion` picks a
+/// take-off/landing frame, whose legs are still the landed ones.
+pub(crate) fn flying_pose(o: &crate::onion::Onion) -> bool {
+    o.anim == crate::onion::OnionAnim::Hover && o.flight_motion.is_none()
+}
 /// Horizontal reach of the `cont` sphere plus the captain, from the Onion's centre. The
 /// sphere lives in the Onion's collision data, which libpikmin doesn't load; this is a fit
 /// to "standing under the Onion".
@@ -71,14 +94,27 @@ impl OnionCounts {
     }
 }
 
-pub(crate) fn leg_point(onion: Vec3, leg: u8, ratio: f32) -> Vec3 {
+pub(crate) fn leg_point(onion: Vec3, leg: u8, ratio: f32, flying: bool) -> Vec3 {
     let l = leg as usize % 3;
-    onion + LEG_FEET[l].lerp(LEG_TOPS[l], ratio.clamp(0.0, 1.0))
+    let (feet, tops) = if flying {
+        (&LEG_FEET_HOVER, &LEG_TOPS_HOVER)
+    } else {
+        (&LEG_FEET, &LEG_TOPS)
+    };
+    onion + feet[l].lerp(tops[l], ratio.clamp(0.0, 1.0))
 }
 
-pub(crate) fn leg_length(leg: u8) -> f32 {
+pub(crate) fn leg_top(onion: Vec3, leg: u8, flying: bool) -> Vec3 {
+    onion + (if flying { LEG_TOPS_HOVER } else { LEG_TOPS })[leg as usize % 3]
+}
+
+pub(crate) fn leg_length(leg: u8, flying: bool) -> f32 {
     let l = leg as usize % 3;
-    (LEG_TOPS[l] - LEG_FEET[l]).length()
+    if flying {
+        (LEG_TOPS_HOVER[l] - LEG_FEET_HOVER[l]).length()
+    } else {
+        (LEG_TOPS[l] - LEG_FEET[l]).length()
+    }
 }
 
 impl Sim {
@@ -245,10 +281,10 @@ impl Sim {
                 .into_iter()
                 .find(|&h| o.stored[color.index()][h as usize] > 0)
             else { break };
-            let (id_on, opos) = (o.id, o.pos);
+            let (id_on, opos, flight) = (o.id, o.pos, flying_pose(o));
             // Legs in turn, so each takes a third.
             let leg = (k % 3) as u8;
-            let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0)) else { break };
+            let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, flight)) else { break };
             self.onions[oi].stored[color.index()][happa as usize] -= 1;
             let p = &mut self.pikis[id.0 as usize];
             p.happa = happa;
@@ -341,9 +377,9 @@ impl Sim {
                 continue;
             };
             o.stored[color.index()][happa as usize] -= 1;
-            let (onion, opos) = (o.id, o.pos);
+            let (onion, opos, flight) = (o.id, o.pos, flying_pose(o));
             let leg = (self.rng.f32() * 3.0) as u8 % 3;
-            let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0)) else {
+            let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, flight)) else {
                 // Field full after all: keep it inside.
                 self.onions[oi].stored[color.index()][happa as usize] += 1;
                 continue;
@@ -373,6 +409,8 @@ impl Sim {
                 let o = &self.onions[onion.0 as usize];
                 let opos = o.pos;
                 let hovering = o.anim == crate::onion::OnionAnim::Hover;
+                // The airborne loop curls the legs up under the pod; the landed/fill pose keeps them out.
+                let flight = flying_pose(o);
                 if !o.takes_deliveries() {
                     self.pikis[pi].state = PikiState::Idle;
                     return;
@@ -381,7 +419,7 @@ impl Sim {
                     // Host extension: JUMP (21) to the middle of a flying leg,
                     // then ActEnter::gotoLeg/climb's HNoboru (62) up its top half.
                     // Negative ratio is the remaining jump time; snapshots already carry it.
-                    let foot = leg_point(opos, leg, if hovering { 0.5 } else { 0.0 });
+                    let foot = leg_point(opos, leg, if hovering { 0.5 } else { 0.0 }, flight);
                     if ratio < 0.0 {
                         let p = &mut self.pikis[pi];
                         let remaining = -ratio;
@@ -414,12 +452,12 @@ impl Sim {
                     self.physics(pi, host, dt);
                     return;
                 }
-                let r = ratio + CLIMB_SPEED * dt / leg_length(leg);
+                let r = ratio + CLIMB_SPEED * dt / leg_length(leg, flight);
                 let p = &mut self.pikis[pi];
-                p.pos = leg_point(opos, leg, r);
+                p.pos = leg_point(opos, leg, r, flight);
                 p.vel = Vec3::ZERO;
                 p.on_ground = false;
-                let d = opos + LEG_TOPS[leg as usize % 3] - p.pos;
+                let d = leg_top(opos, leg, flight) - p.pos;
                 p.face = d.x.atan2(d.z);
                 if r > ENTER_AT {
                     // `GoalItem::enterGoal`
@@ -440,21 +478,22 @@ impl Sim {
                 let o = &self.onions[onion.0 as usize];
                 let opos = o.pos;
                 let hovering = o.anim == crate::onion::OnionAnim::Hover;
-                let r = ratio - SLIDE_SPEED * dt / leg_length(leg);
+                let flight = flying_pose(o);
+                let r = ratio - SLIDE_SPEED * dt / leg_length(leg, flight);
                 let p = &mut self.pikis[pi];
                 if hovering && r <= 0.5 {
                     // Host flight: play the first half of ActExit, then fall from that
                     // exact point rather than following the moving leg to its foot.
-                    p.pos = leg_point(opos, leg, 0.5);
+                    p.pos = leg_point(opos, leg, 0.5, flight);
                     p.vel = Vec3::NEG_Y * SLIDE_SPEED;
                     p.target_vel = p.vel;
                     p.on_ground = false;
                     p.state = PikiState::Flying { ground_frames: 0 };
                     return;
                 }
-                p.pos = leg_point(opos, leg, r);
+                p.pos = leg_point(opos, leg, r, flight);
                 p.vel = Vec3::ZERO;
-                let d = p.pos - (opos + LEG_TOPS[leg as usize % 3]);
+                let d = p.pos - leg_top(opos, leg, flight);
                 p.face = d.x.atan2(d.z);
                 if r > 0.0 {
                     p.state = PikiState::Exit {

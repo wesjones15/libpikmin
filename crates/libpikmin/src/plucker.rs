@@ -113,7 +113,7 @@ impl Sim {
         };
         let (onion, opos, owner) = (o.id, o.pos, o.owner);
         let leg = (self.rng.f32() * 3.0) as u8 % 3;
-        let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0)) else {
+        let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, false)) else {
             return;
         };
         self.onions[oi].stored[color.index()][happa as usize] -= 1;
@@ -160,7 +160,7 @@ impl Sim {
         if o.grounded() {
             let leg = (0..3u8)
                 .min_by(|&a, &b| {
-                    dist_xz(leg_point(o.pos, a, 0.0), p.pos).total_cmp(&dist_xz(leg_point(o.pos, b, 0.0), p.pos))
+                    dist_xz(leg_point(o.pos, a, 0.0, false), p.pos).total_cmp(&dist_xz(leg_point(o.pos, b, 0.0, false), p.pos))
                 })
                 .unwrap_or(0);
             p.state = PikiState::Enter { onion, leg, climbing: false, ratio: 0.0 };
@@ -181,11 +181,11 @@ impl Sim {
         match pl.job {
             PluckerJob::Descend { leg, ratio } => {
                 let opos = self.onions[pl.onion.0 as usize].pos;
-                let r = ratio - SLIDE_SPEED * dt / leg_length(leg);
+                let r = ratio - SLIDE_SPEED * dt / leg_length(leg, false);
                 let p = &mut self.pikis[pi];
-                p.pos = leg_point(opos, leg, r);
+                p.pos = leg_point(opos, leg, r, false);
                 p.vel = Vec3::ZERO;
-                let d = p.pos - leg_point(opos, leg, 1.0);
+                let d = p.pos - leg_point(opos, leg, 1.0, false);
                 p.face = d.x.atan2(d.z);
                 if r > 0.0 {
                     p.state = PikiState::Plucker(Plucker { job: PluckerJob::Descend { leg, ratio: r }, ..pl });
@@ -417,3 +417,4 @@ mod tests {
         assert!(sim.pikis().is_empty());
     }
 }
+
