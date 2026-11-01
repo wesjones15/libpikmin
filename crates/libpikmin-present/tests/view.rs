@@ -1,7 +1,7 @@
 //! The view against the user's extracted assets (skipped when `assets/` isn't there).
 
 use libpikmin::host::FlatHost;
-use libpikmin::{Params, PelletDesc, PikiColor, Sim, TICK_DT, Vec3};
+use libpikmin::{Params, PelletDesc, PikiColor, PikiState, Sim, TICK_DT, Vec3};
 use libpikmin_assets::Assets;
 use libpikmin_present::View;
 use libpikmin_present::view::{kinds, models};
@@ -347,6 +347,40 @@ fn dolphin_and_unified_onion_draw_in_flight_and_after_landing_without_parts() {
             let bounds = vertices.iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
             assert!((bounds.1 - bounds.0).max_element() > 50.0, "Dolphin must have visible geometry");
         }
+    }
+}
+
+#[test]
+fn entry_pikmin_follow_the_onions_posed_leg_not_its_sampled_frame() {
+    let Some(assets) = assets() else { return };
+    for color in [PikiColor::Blue, PikiColor::Red, PikiColor::Yellow] {
+        // A fresh view per colour: ids repeat between sims and the view's interpolation
+        // state is keyed by id.
+        let mut view = View::load(&assets).unwrap();
+        let mut sim = Sim::new(Params::default(), 31);
+        let captain = sim.add_captain(Vec3::ZERO);
+        let at = Vec3::new(20.0, 120.0, -30.0);
+        let onion = sim.add_onion(at, &[color]);
+        sim.set_onion_pose(onion, at, true);
+        let piki = sim.spawn_piki_in_squad(color, Vec3::new(at.x, 0.0, at.z), captain).unwrap();
+        assert_eq!(sim.onion_put_away(captain, onion, color, 1), 1);
+        let mut checked = false;
+        for _ in 0..600 {
+            sim.step(&mut FlatHost);
+            let p = sim.piki(piki);
+            if let PikiState::Enter { onion, leg, climbing: true, ratio } = p.state {
+                view.update(&sim, 1.0, TICK_DT);
+                let draw = view.draws.iter().find(|d| d.kind == kinds::PIKI).expect("the climber is drawn");
+                // The sim's loop is sampled; the drawn leg is the actual pose, which turns
+                // through the loop and differs by colour. The Pikmin must be on the drawn leg.
+                let on_leg = view.onion_leg_point(onion, leg, ratio).expect("the Onion's legs were drawn");
+                assert!(draw.pos.distance(on_leg) < 0.01,
+                    "{color:?} climber at {:?}, drawn leg at {:?}", draw.pos, on_leg);
+                checked = true;
+                break;
+            }
+        }
+        assert!(checked, "{color:?} Pikmin climbed onto the Onion");
     }
 }
 

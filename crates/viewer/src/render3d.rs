@@ -469,6 +469,8 @@ pub struct Scene3d {
     arrive_fx: bool,
     /// Each flying Onion's lean into its travel: where it was last frame and the tilt.
     onion_lean: Vec<(GVec3, OnionLean)>,
+    /// Each Onion's drawn hip/knee/foot joints this frame, by id.
+    onion_legs: HashMap<u32, [[GVec3; 3]; 3]>,
     /// Onions whose lift ground cloud is running (the flat viewer's ground is y = 0).
     onion_cloud: Vec<bool>,
 }
@@ -545,6 +547,7 @@ impl Scene3d {
             arrive: None,
             arrive_fx: false,
             onion_lean: Vec::new(),
+            onion_legs: HashMap::new(),
             onion_cloud: Vec::new(),
         })
     }
@@ -632,6 +635,7 @@ impl Scene3d {
         dt: f32,
     ) -> Vec<Overlay> {
         let params: Params = sim.params().clone();
+        self.onion_legs.clear();
         // `PIKMIN_FOCUS=x,y,z` pins the camera target (for screenshots).
         let target = if std::env::var("PIKMIN_PORTRAIT").as_deref() == Ok("strike") {
             sim.captain(focus).pos - GVec3::Y * 3.0
@@ -915,6 +919,10 @@ impl Scene3d {
                     }
                 }
             }
+            // The exact posed leg joints this frame; climbers are drawn from these so the
+            // Onion's turn through the loop (not just its lean) stays under them.
+            self.onion_legs.insert(o.id.0, [[3usize, 4, 5], [6, 7, 8], [9, 10, 11]]
+                .map(|js| js.map(|j| joints[j].w_axis.truncate())));
             let flying = matches!(o.anim, OnionAnim::TakeOff { .. } | OnionAnim::Landing { .. }) || o.flight_motion.is_some();
             if let (true, Some(e), Some((info, _))) = (flying, self.effects.as_mut(), self.onion_anims.get(motion_idx)) {
                 let coll = &self.onion.model.coll;
@@ -1149,7 +1157,46 @@ impl Scene3d {
             };
             let (scale, fade) = (look.scale, look.fade);
             let anim = self.animator.piki(&self.piki_anims, p, &look, dt);
-            let root = srt_matrix(scale, GVec3::new(0.0, p.face, 0.0), p.pos);
+            // Entry and exit climb the Onion's actually posed leg, including the loop's turn
+            // and the host's lean; the sim's sampled leg can lag that rotation.
+            let (at, face) = match p.state {
+                PikiState::Enter { onion, leg, climbing: true, ratio } => {
+                    match self.onion_legs.get(&onion.0) {
+                        Some(legs) => {
+                            let joints = legs[leg as usize % 3];
+                            let local = libpikmin::onion_menu::leg_polyline_point(joints, ratio);
+                            let dir = joints[0] - local;
+                            (local, dir.x.atan2(dir.z))
+                        }
+                        None => (p.pos, p.face),
+                    }
+                }
+                PikiState::Exit { onion, leg, ratio } => {
+                    match self.onion_legs.get(&onion.0) {
+                        Some(legs) => {
+                            let joints = legs[leg as usize % 3];
+                            let local = libpikmin::onion_menu::leg_polyline_point(joints, ratio);
+                            let dir = local - joints[0];
+                            (local, dir.x.atan2(dir.z))
+                        }
+                        None => (p.pos, p.face),
+                    }
+                }
+                PikiState::Enter { onion, leg, ratio, .. } if ratio < 0.0 => {
+                    match (self.onion_legs.get(&onion.0), sim.onions().iter().find(|o| o.id == onion)) {
+                        (Some(legs), Some(o)) => {
+                            // Land the jump on the leg as drawn, not the sim's sampled midpoint.
+                            let u = (1.0 + ratio / libpikmin::onion_menu::ENTER_JUMP_SECONDS).clamp(0.0, 1.0);
+                            let table = libpikmin::onion_menu::hover_leg_point(leg, 0.5, o.hover_frame);
+                            let exact = libpikmin::onion_menu::leg_polyline_point(legs[leg as usize % 3], 0.5);
+                            (p.pos + (exact - (o.pos + table)) * u, p.face)
+                        }
+                        _ => (p.pos, p.face),
+                    }
+                }
+                _ => (p.pos, p.face),
+            };
+            let root = srt_matrix(scale, GVec3::new(0.0, face, 0.0), at);
             let joints = draw_model(
                 &self.pikmin[p.color.index()],
                 root,

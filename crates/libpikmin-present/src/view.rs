@@ -545,6 +545,10 @@ pub struct View {
     onion_lift_smoke: HashSet<u32>,
     /// Per flying Onion: the tick and position its lean was last measured from, and the lean.
     onion_lean: HashMap<u32, (u64, Vec3, OnionLean)>,
+    /// Per Onion drawn this frame: the placed position and lean it was drawn with, and the hip,
+    /// knee and foot of each leg in its drawn pose. Entry/exit Pikmin are placed from these, so
+    /// they follow the Onion's turn as well as its lean.
+    onion_legs: HashMap<u32, (Vec3, Quat, [[Vec3; 3]; 3])>,
     pub ship_sounds: Vec<(libpikmin::onion::OnionId, &'static str, bool)>,
     pub demo_sounds: Vec<Option<(u16, u16)>>,
     pikihead_anims: AnimSet,
@@ -835,6 +839,7 @@ impl View {
             onion_menu_beams: HashSet::new(),
             onion_lift_smoke: HashSet::new(),
             onion_lean: HashMap::new(),
+            onion_legs: HashMap::new(),
             ship_sounds: Vec::new(),
             demo_sounds: Vec::new(),
             pikihead_anims: AnimSet::load(assets, paths::PIKIHEAD_ANIM_MGR, paths::PIKIHEAD_BUNDLE)?,
@@ -1235,6 +1240,15 @@ impl View {
         self.interp.entry(k).or_insert_with(|| Interp::new(at, rot, tick)).sample(at, rot, tick, alpha)
     }
 
+    /// Where the drawn `onion`'s `leg` is at `ratio` this frame (1 shoulder, 0 foot), in the
+    /// Onion's placed position and lean. `None` if it wasn't drawn (a ship, away or dormant).
+    /// This is the pose the Pikmin's entry and exit are drawn against, rotation included.
+    pub fn onion_leg_point(&self, onion: libpikmin::onion::OnionId, leg: u8, ratio: f32) -> Option<Vec3> {
+        let (pos, lean, legs) = self.onion_legs.get(&onion.0)?;
+        let local = libpikmin::onion_menu::leg_polyline_point(legs[leg as usize % 3], ratio);
+        Some(*pos + *lean * local)
+    }
+
     /// Skins `model` posed by `pose_root`/`anim`, appends a draw, and returns the joints.
     #[allow(clippy::too_many_arguments)]
     fn push(
@@ -1628,6 +1642,7 @@ impl View {
     pub fn update(&mut self, sim: &Sim, alpha: f32, dt: f32) {
         self.render_frame = self.render_frame.wrapping_add(1);
         self.draws.clear();
+        self.onion_legs.clear();
         self.light_spots.clear();
         self.treasure_spots.clear();
         self.treasure_bursts.retain(|b| self.time - b.3 < crate::treasure::BURST_SECONDS);
@@ -2118,6 +2133,12 @@ impl View {
                 }
                 state.2.quat
             };
+            // The leg joints exactly as this Onion is posed and placed this frame. The sim's
+            // airborne loop is sampled, but the pose turns through the loop; climbers must use
+            // the drawn pose so its rotation is accounted for too.
+            let legs = [[3usize, 4, 5], [6, 7, 8], [9, 10, 11]]
+                .map(|js| js.map(|j| pose.joints[j].w_axis.truncate()));
+            self.onion_legs.insert(o.id.0, (pos, lean, legs));
             self.push(k, kinds::ONION, models::ONION, pos, lean, pose, &inputs, 1.0, 0);
         }
         self.arrivals.clear();
@@ -2363,16 +2384,46 @@ impl View {
             };
             live.insert(crate::animator::piki_key(p));
             let k = key(kinds::PIKI, crate::animator::piki_key(p));
-            // A Pikmin on a flying Onion's leg is placed by the sim in the Onion's un-leaned
-            // frame; draw it on the leg the Onion is actually drawn with, so the host's lean
-            // does not slide the climbers off.
+            // The sim places a Pikmin on the Onion's leg in the Onion's un-leaned, sampled
+            // frame. Draw it on the leg the Onion is actually posed and leaned with this frame,
+            // so the loop's turn (and the host's lean) stay under it. A walk to the leg is in
+            // world space and is not rotated; a jump still follows the Onion's lean.
             let (world, rot) = match p.state {
-                PikiState::Enter { onion, .. } | PikiState::Exit { onion, .. } => {
-                    if let Some(o) = sim.onions().iter().find(|o| o.id == onion) {
-                        let lean = self.onion_lean.get(&onion.0).map(|s| s.2.quat).unwrap_or(Quat::IDENTITY);
-                        (o.pos + lean * (p.pos - o.pos), lean * Quat::from_rotation_y(p.face))
-                    } else {
-                        (p.pos, Quat::from_rotation_y(p.face))
+                PikiState::Enter { onion, leg, climbing: true, ratio } => {
+                    match self.onion_legs.get(&onion.0) {
+                        Some((opos, lean, legs)) => {
+                            let joints = legs[leg as usize % 3];
+                            let local = libpikmin::onion_menu::leg_polyline_point(joints, ratio);
+                            let dir = joints[0] - local;
+                            (*opos + *lean * local, *lean * Quat::from_rotation_y(dir.x.atan2(dir.z)))
+                        }
+                        None => (p.pos, Quat::from_rotation_y(p.face)),
+                    }
+                }
+                PikiState::Exit { onion, leg, ratio } => {
+                    match self.onion_legs.get(&onion.0) {
+                        Some((opos, lean, legs)) => {
+                            let joints = legs[leg as usize % 3];
+                            let local = libpikmin::onion_menu::leg_polyline_point(joints, ratio);
+                            let dir = local - joints[0];
+                            (*opos + *lean * local, *lean * Quat::from_rotation_y(dir.x.atan2(dir.z)))
+                        }
+                        None => (p.pos, Quat::from_rotation_y(p.face)),
+                    }
+                }
+                PikiState::Enter { onion, leg, ratio, .. } if ratio < 0.0 => {
+                    match (self.onion_legs.get(&onion.0), sim.onions().iter().find(|o| o.id == onion)) {
+                        (Some((opos, lean, legs)), Some(o)) => {
+                            // The jump is aimed at the sim's sampled, single-colour midpoint.
+                            // Shift it towards the midpoint of the leg actually drawn, by how
+                            // far the jump has got, so it lands there without a snap.
+                            let u = (1.0 + ratio / libpikmin::onion_menu::ENTER_JUMP_SECONDS).clamp(0.0, 1.0);
+                            let table = libpikmin::onion_menu::hover_leg_point(leg, 0.5, o.hover_frame);
+                            let exact = libpikmin::onion_menu::leg_polyline_point(legs[leg as usize % 3], 0.5);
+                            let target = *opos + *lean * exact - (o.pos + table);
+                            (p.pos + target * u, *lean * Quat::from_rotation_y(p.face))
+                        }
+                        _ => (p.pos, Quat::from_rotation_y(p.face)),
                     }
                 }
                 _ => (p.pos, Quat::from_rotation_y(p.face)),

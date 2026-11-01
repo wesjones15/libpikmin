@@ -95,10 +95,11 @@ pub fn hover_leg_joints(leg: u8, frame: f32) -> [Vec3; 3] {
     [0, 1, 2].map(|k| HOVER_LEG_JOINTS[i][l][k].lerp(HOVER_LEG_JOINTS[j][l][k], u))
 }
 
-/// A point `ratio` of the way down the drawn airborne leg: 1 at the shoulder, 0 at the foot,
-/// along the hip-knee-foot polyline.
-pub fn hover_leg_point(leg: u8, ratio: f32, frame: f32) -> Vec3 {
-    let [hip, knee, foot] = hover_leg_joints(leg, frame);
+/// A point `ratio` of the way down a leg given as its hip, knee and foot: 1 at the shoulder,
+/// 0 at the foot, along the two segments. Shared by the sim's airborne loop and hosts that place
+/// climbers on the Onion's actually posed leg.
+pub fn leg_polyline_point(joints: [Vec3; 3], ratio: f32) -> Vec3 {
+    let [hip, knee, foot] = joints;
     let (a, b) = (hip.distance(knee), knee.distance(foot));
     let len = a + b;
     if len <= 1e-6 {
@@ -112,6 +113,12 @@ pub fn hover_leg_point(leg: u8, ratio: f32, frame: f32) -> Vec3 {
     } else {
         knee
     }
+}
+
+/// A point `ratio` of the way down the drawn airborne leg: 1 at the shoulder, 0 at the foot,
+/// along the hip-knee-foot polyline.
+pub fn hover_leg_point(leg: u8, ratio: f32, frame: f32) -> Vec3 {
+    leg_polyline_point(hover_leg_joints(leg, frame), ratio)
 }
 
 /// Arc length of the drawn airborne leg.
@@ -132,6 +139,9 @@ pub(crate) fn flying_pose(o: &crate::onion::Onion) -> bool {
 pub const CONTAINER_REACH: f32 = 70.0;
 /// `ActEnter::climb`
 pub const CLIMB_SPEED: f32 = 15.0;
+/// Host extension: the jump from the ground to a flying leg's midpoint before climbing. The
+/// negative `Enter` ratio counts it down.
+pub const ENTER_JUMP_SECONDS: f32 = 0.65;
 /// `ActExit::exec`
 pub const SLIDE_SPEED: f32 = 70.0;
 /// Rope ratio where Pikmin start shrinking into / growing out of the Onion.
@@ -509,7 +519,7 @@ impl Sim {
                             onion,
                             leg,
                             climbing: hover.is_none(),
-                            ratio: if hover.is_some() { -0.65 } else { 0.0 },
+                            ratio: if hover.is_some() { -ENTER_JUMP_SECONDS } else { 0.0 },
                         };
                         return;
                     }
