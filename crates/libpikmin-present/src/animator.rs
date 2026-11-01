@@ -157,6 +157,29 @@ fn gait_band_held(speed: f32, th: [f32; 4], prev: Option<Motion>) -> u8 {
     }
 }
 
+fn is_gait(motion: Motion) -> bool {
+    matches!(motion, Motion::Wait | Motion::Asibumi | Motion::Walk | Motion::Run | Motion::Nigeru)
+}
+
+/// A gait change keeps its place in the cycle instead of snapping back to the clip's first
+/// frame: the feet keep moving when a threshold swaps Walk for Run or Run for Nigeru.
+fn carry_gait_phase(players: &mut HashMap<u64, Player>, key: u64, set: &AnimSet, next: usize) {
+    let Some((old_info, _)) = set.get(players.get(&key).map(|p| p.anim).unwrap_or(next)) else { return };
+    let Some((new_info, _)) = set.get(next) else { return };
+    let (old_start, old_end) = (
+        *old_info.keys.first().unwrap_or(&0) as f32,
+        (*old_info.keys.last().unwrap_or(&0) as f32).max(*old_info.keys.first().unwrap_or(&0) as f32),
+    );
+    let (new_start, new_end) = (
+        *new_info.keys.first().unwrap_or(&0) as f32,
+        (*new_info.keys.last().unwrap_or(&0) as f32).max(*new_info.keys.first().unwrap_or(&0) as f32),
+    );
+    let Some(p) = players.get_mut(&key) else { return };
+    let phase = if old_end > old_start { ((p.frame - old_start) / (old_end - old_start)).rem_euclid(1.0) } else { 0.0 };
+    p.anim = next;
+    p.frame = new_start + phase * (new_end - new_start);
+}
+
 fn locomotion_band(speed: f32, th: [f32; 4], rate: [f32; 5], band: u8) -> (Motion, Clock) {
     let ramp = |lo: f32, hi: f32, a: f32, b: f32| a + (b - a) * ((speed - lo) / (hi - lo)).clamp(0.0, 1.0);
     match band {
@@ -517,13 +540,18 @@ impl Animator {
     pub fn captain<'a>(&mut self, set: &'a AnimSet, params: &Params, c: &Captain, dt: f32) -> Option<(&'a Anim, f32)> {
         let prev = self.captain_gait.get(&c.id).copied();
         let (motion, clock) = captain_motion_held(params, c, self.throwing(c.id), prev);
-        if matches!(motion, Motion::Wait | Motion::Asibumi | Motion::Walk | Motion::Run | Motion::Nigeru) {
+        if is_gait(motion) {
             self.captain_gait.insert(c.id, motion);
         } else {
             self.captain_gait.remove(&c.id);
         }
-        let clock = self.clock(captain_key(c.id), motion.anim_index()?, clock);
-        advance(&mut self.players, captain_key(c.id), set, motion, clock, dt)
+        let key = captain_key(c.id);
+        let index = motion.anim_index()?;
+        if prev.is_some_and(is_gait) && is_gait(motion) && prev != Some(motion) {
+            carry_gait_phase(&mut self.players, key, set, index);
+        }
+        let clock = self.clock(key, index, clock);
+        advance(&mut self.players, key, set, motion, clock, dt)
     }
 
     /// The Onion at `index`'s pose this frame, plus where its motion was last frame (for its
