@@ -18,6 +18,7 @@ use crate::effects::{Effects, Flat, WhistleFrame};
 use crate::tev::{self, Inputs};
 use libpikmin_assets::CollSphere;
 use libpikmin_assets::particle::effects as fx_defs;
+use libpikmin_assets::particle::EffectDef;
 
 /// How fast a locked-on cursor turns, radians per second.
 const LOCK_SPIN: f32 = 2.5;
@@ -669,6 +670,18 @@ const ONION_BEAM_HEIGHT: f32 = 60.0;
 const ONION_CLOUD_FADE: f32 = 180.0;
 /// `GoalEffect::invoke`: no more gravity from this frame of the suck effect.
 const SUCK_GRAVITY_FRAMES: f32 = 50.0;
+
+/// The Dolphin lands by playing its takeoff motion backwards, so the landing cloud is a
+/// takeoff-key effect (`ROCKET_FKM1`, `ROCKET_JET_G`, `ROCKET_BOOST_GROUND`), not only
+/// `ROCKET_LAND`. These are the ship's smoke/dust effects, as opposed to its flames.
+fn ship_smoke(fx: EffectDef) -> bool {
+    fx == fx_defs::ROCKET_LAND
+        || fx == fx_defs::ROCKET_FKM1
+        || fx == fx_defs::CLOUD_OF_DUST_1
+        || fx_defs::ROCKET_NKE.contains(&fx)
+        || fx_defs::ROCKET_JET_G.contains(&fx)
+        || fx_defs::ROCKET_BOOST_GROUND.contains(&fx)
+}
 
 impl View {
     pub fn pending_repairs(&self) -> usize {
@@ -1874,12 +1887,11 @@ impl View {
                             if let Some(e) = self.effects.as_mut()
                                 && let Some(g) = e.spawn(fx, o.pos + Vec3::Y * lift)
                             {
-                                // The landing reuses the takeoff clip's dust; at full alpha and
-                                // lifetime it shrouds Olimar, the squad and the Onion. Keep it,
-                                // but let it clear within a second.
-                                if fx == fx_defs::ROCKET_LAND || fx == fx_defs::CLOUD_OF_DUST_1
-                                    || fx_defs::ROCKET_NKE.contains(&fx)
-                                {
+                                // The Dolphin lands by playing its takeoff motion backwards, so
+                                // the landing cloud is a takeoff-key effect (ROCKET_FKM1/JET_G/
+                                // BOOST_GROUND), not ROCKET_LAND alone. Keep the cloud on the
+                                // Dolphin's landing only, and let it clear within a second.
+                                if flight.progress.is_some() && ship_smoke(fx) {
                                     g.alpha_scale = 0.3;
                                     g.max_age = Some(30.0);
                                 }
@@ -2021,12 +2033,10 @@ impl View {
                     for value in keys {
                         match value {
                             0 => { for def in fx_defs::ONYON_BOOT_FLOW { fx.spawn(def, flower); } }
-                            1 => { for def in if colour == 0 { &fx_defs::ONYON_BOOT_WATER[..] } else { &fx_defs::ONYON_BOOT_DUST[..] } { if let Some(g) = fx.spawn(*def, o.pos) { g.max_age = Some(30.0); } } }
+                            1 => { for def in if colour == 0 { &fx_defs::ONYON_BOOT_WATER[..] } else { &fx_defs::ONYON_BOOT_DUST[..] } { fx.spawn(*def, o.pos); } }
                             2 | 3 => {
                                 for at in bases.into_iter().take(if value == 2 { 1 } else { 3 }) {
-                                    if let Some(g) = fx.spawn(if colour == 0 { fx_defs::ONYON_BOOT_BUBBLES } else { fx_defs::SMOKE_RING_M }, at) {
-                                        g.max_age = Some(30.0);
-                                    }
+                                    fx.spawn(if colour == 0 { fx_defs::ONYON_BOOT_BUBBLES } else { fx_defs::SMOKE_RING_M }, at);
                                 }
                             }
                             _ => {}
@@ -2068,7 +2078,7 @@ impl View {
                             // to the flower's 'piki' collision sphere, not ground smoke.
                             (6..=8, 0) => { fx.attach(flow_key, fx_defs::KAFUN_NG, flower); }
                             (6..=8, 2) => { /* Attached ground smoke above handles the takeoff key. */ }
-                            (9..=11, 0) => { if let Some(g) = fx.spawn(fx_defs::ROCKET_LAND_S, o.pos) { g.max_age = Some(30.0); } }
+                            (9..=11, 0) => { fx.spawn(fx_defs::ROCKET_LAND_S, o.pos); }
                             (9..=11, 1) => { fx.spawn(fx_defs::ROCKET_SMOKE_D, bases[0]); }
                             (9..=11, 2) => { for at in bases { fx.spawn(fx_defs::ROCKET_SMOKE_D, at); } }
                             (9..=11, 3) => { fx.detach(flow_key); }
