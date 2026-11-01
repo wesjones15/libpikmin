@@ -367,7 +367,15 @@ impl Sim {
         let p = &mut self.pellets[pellet.0 as usize];
         let workers = std::mem::take(&mut p.carriers);
         p.slots.iter_mut().for_each(|s| *s = None);
-        p.state = crate::PelletState::Sucking { onion, color, wait: 1.5, start: p.pos, progress: 0.0, speed: 0.0 };
+        p.state = crate::PelletState::Sucking {
+            onion,
+            color,
+            wait: 1.5,
+            start: p.pos,
+            progress: 0.0,
+            speed: 0.0,
+            anchor: p.pos - o.pos,
+        };
         self.events.push(Event::PelletArrived { pellet, onion });
         for id in workers { self.pikis[id.0 as usize].state = PikiState::Idle; }
         true

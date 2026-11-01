@@ -159,9 +159,15 @@ pub enum PelletState {
         onion: OnionId,
         color: PikiColor,
         wait: f32,
+        /// The pellet's position when the beam took it (the last world position; kept for
+        /// recovery and snapshots).
         start: Vec3,
         progress: f32,
         speed: f32,
+        /// Where `start` sits relative to the Onion. The beam carries the pellet with the
+        /// Onion, so pulling the Onion away moves the whole suck path instead of leaving the
+        /// pellet behind to fly in diagonally at the end.
+        anchor: Vec3,
     },
     /// In a host character's hands (Mario's): the host drives its pose each tick with
     /// [`Sim::hold_pellet`]; no Pikmin take hold of it until [`Sim::release_pellet`].
@@ -401,12 +407,21 @@ impl Sim {
             return false;
         }
         let color = p.desc.color.unwrap_or(PikiColor::Red);
+        let onion_pos = o.pos;
         let carriers = self.pellets[pellet.0 as usize].carriers.clone();
         for id in carriers { self.leave_current(id); self.pikis[id.0 as usize].state = PikiState::Idle; }
         let p = &mut self.pellets[pellet.0 as usize];
         p.carriers.clear();
         p.slots.iter_mut().for_each(|s| *s = None);
-        p.state = PelletState::Sucking { onion: ship, color, wait: 1.5, start: p.pos, progress: 0.0, speed: 0.0 };
+        p.state = PelletState::Sucking {
+            onion: ship,
+            color,
+            wait: 1.5,
+            start: p.pos,
+            progress: 0.0,
+            speed: 0.0,
+            anchor: p.pos - onion_pos,
+        };
         true
     }
 
@@ -692,7 +707,8 @@ impl Sim {
                     start,
                     progress,
                     speed,
-                } => self.suck_step(i, dt, onion, color, wait, start, progress, speed),
+                    anchor,
+                } => self.suck_step(i, dt, onion, color, wait, start, progress, speed, anchor),
                 PelletState::Gone | PelletState::Held => {}
             }
             if trying_to_move && matches!(self.pellets[i].state, PelletState::Idle | PelletState::Carried { .. }) {
@@ -804,6 +820,7 @@ impl Sim {
             let p = &mut self.pellets[i];
             let carriers = std::mem::take(&mut p.carriers);
             p.slots.iter_mut().for_each(|s| *s = None);
+            let onion_pos = self.onions[onion.0 as usize].pos;
             p.state = PelletState::Sucking {
                 onion,
                 color,
@@ -811,6 +828,7 @@ impl Sim {
                 start: p.pos,
                 progress: 0.0,
                 speed: 0.0,
+                anchor: p.pos - onion_pos,
             };
             self.events.push(Event::PelletArrived {
                 pellet: p.id,
@@ -870,6 +888,7 @@ impl Sim {
         start: Vec3,
         progress: f32,
         speed: f32,
+        anchor: Vec3,
     ) {
         if self.ship_part_delivery != 0 && self.pellets[i].desc.ship_part.is_some()
             && (!self.onions[onion.0 as usize].grounded() || !self.onions[onion.0 as usize].takes_deliveries()
@@ -878,21 +897,28 @@ impl Sim {
             self.recover_pellet(self.pellets[i].id, start);
             return;
         }
-        let suck_pos = self.onions[onion.0 as usize].suck_pos();
+        // The suck path is carried by the Onion. Before this, `start` was pinned at the ground
+        // while only the top moved, so pulling the Onion away left the pellet hovering until
+        // it cut diagonally across to the new position.
+        let o = &self.onions[onion.0 as usize];
+        let suck_pos = o.suck_pos();
+        let base = o.pos + anchor;
         let p = &mut self.pellets[i];
         if wait > 0.0 {
             p.state = PelletState::Sucking {
                 onion,
                 color,
                 wait: wait - dt,
-                start: p.pos,
+                start: base,
                 progress,
                 speed,
+                anchor,
             };
+            p.pos = base + (suck_pos - base) * progress.min(1.0);
             return;
         }
-        let dist = (suck_pos - start).length().max(1e-3);
-        p.pos = start + (suck_pos - start) * progress.min(1.0);
+        let dist = (suck_pos - base).length().max(1e-3);
+        p.pos = base + (suck_pos - base) * progress.min(1.0);
         p.scale = 1.0 - progress.min(1.0) * 0.75;
         let progress = progress + speed * dt / dist;
         let speed = speed + dt * 720.0;
@@ -937,9 +963,10 @@ impl Sim {
                 onion,
                 color,
                 wait,
-                start,
+                start: base,
                 progress,
                 speed,
+                anchor,
             };
         }
     }

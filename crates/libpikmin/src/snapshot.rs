@@ -31,7 +31,7 @@ use crate::strike::Strike;
 use crate::{CaptainId, PikiId};
 
 /// Bumped when the encoding changes.
-pub const SNAPSHOT_VERSION: u8 = 13;
+pub const SNAPSHOT_VERSION: u8 = 14;
 
 // Far more than any real sim has; a corrupt length can't make decoding allocate wildly.
 const MAX_ENTITIES: usize = 4096;
@@ -1217,7 +1217,7 @@ fn w_pellet(w: &mut Writer, p: &Pellet) {
             }
             w.u16((*next).min(MAX_PATH) as u16);
         }
-        PelletState::Sucking { onion, color, wait, start, progress, speed } => {
+        PelletState::Sucking { onion, color, wait, start, progress, speed, anchor } => {
             w.u8(2);
             w.u32(onion.0);
             w_color(w, *color);
@@ -1225,6 +1225,7 @@ fn w_pellet(w: &mut Writer, p: &Pellet) {
             w.vec3(*start);
             w.f32(*progress);
             w.f32(*speed);
+            w.vec3(*anchor);
         }
         PelletState::Gone => w.u8(3),
         PelletState::Held => w.u8(4),
@@ -1277,6 +1278,7 @@ fn r_pellet(r: &mut Reader) -> Option<Pellet> {
             start: r.vec3()?,
             progress: r.f32()?,
             speed: r.f32()?,
+            anchor: r.vec3()?,
         },
         3 => PelletState::Gone,
         4 => PelletState::Held,

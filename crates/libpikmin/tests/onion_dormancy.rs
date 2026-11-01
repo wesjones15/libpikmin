@@ -88,6 +88,27 @@ fn interrupted_suction_preserves_the_pellet_and_has_no_seed_reward() {
 }
 
 #[test]
+fn a_moving_onion_carries_the_pellet_in_its_beam() {
+    let mut s = Sim::new(Params::default(), 3);
+    let o = s.add_onion(Vec3::ZERO, &[PikiColor::Red]);
+    let p = s.spawn_pellet(PelletDesc::numbered(s.params(), 1, PikiColor::Red, Vec3::ZERO, 0.0));
+    s.set_onion_pose(o, Vec3::Y * 40.0, true);
+    assert!(s.collect_ground_pellet(o, p));
+    s.step(&mut FlatHost);
+    // During the 1.5 s settle the pellet stays in the beam, so the Onion can pull it along.
+    let before = s.pellet(p).pos;
+    s.set_onion_pose(o, Vec3::new(100.0, 40.0, 0.0), true);
+    s.step(&mut FlatHost);
+    assert!((s.pellet(p).pos.x - before.x - 100.0).abs() < 1.0, "pellet stayed behind at {}", s.pellet(p).pos.x);
+    // And while rising, the whole path moves with it instead of cutting across diagonally.
+    for _ in 0..30 { s.step(&mut FlatHost); }
+    let before = s.pellet(p).pos;
+    s.set_onion_pose(o, Vec3::new(100.0, 40.0, 80.0), true);
+    s.step(&mut FlatHost);
+    assert!((s.pellet(p).pos.z - before.z - 80.0).abs() < 1.0, "rising pellet stayed behind at {}", s.pellet(p).pos.z);
+}
+
+#[test]
 fn queued_seeds_resume_after_revival() {
     let mut s = Sim::new(Params::default(), 8);
     let o = s.add_onion(Vec3::ZERO, &[PikiColor::Red]);
