@@ -1891,7 +1891,13 @@ impl View {
                                 // the landing cloud is a takeoff-key effect (ROCKET_FKM1/JET_G/
                                 // BOOST_GROUND), not ROCKET_LAND alone. Keep the cloud on the
                                 // Dolphin's landing only, and let it clear within a second.
-                                if flight.animator.landing() && ship_smoke(fx) {
+                                // ROCKET_LAND is the Dolphin's touchdown cloud itself, so cap it
+                                // unconditionally: by the time its cue is processed the animator's
+                                // landing flag can already be cleared. The takeoff-key smoke that
+                                // is replayed during the descent is gated on the landing state.
+                                if fx == fx_defs::ROCKET_LAND
+                                    || (flight.animator.landing() && ship_smoke(fx))
+                                {
                                     g.alpha_scale = 0.3;
                                     g.max_age = Some(30.0);
                                 }
