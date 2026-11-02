@@ -2444,7 +2444,10 @@ impl View {
                             let sampled = *opos + self.drawn_local(table);
                             let end = *opos + *lean * self.drawn_local(
                                 libpikmin::onion_menu::leg_polyline_point(legs[leg as usize % 3], 0.5));
-                            (p.pos + (end - sampled) * u, *lean * Quat::from_rotation_y(p.face))
+                            // Ease the Onion's lean in over the jump too: the walk was drawn
+                            // upright and the climb is drawn leaned.
+                            let rot = Quat::IDENTITY.slerp(*lean, u) * Quat::from_rotation_y(p.face);
+                            (p.pos + (end - sampled) * u, rot)
                         }
                         _ => (p.pos, Quat::from_rotation_y(p.face)),
                     }
