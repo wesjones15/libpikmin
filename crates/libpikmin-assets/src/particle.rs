@@ -577,6 +577,10 @@ pub struct Particle {
     pub size: f32,
     pub scale: f32,
     pub alpha: f32,
+    /// Host extension: the [`Generator::max_age`] fade, 1 at full and 0 gone. It multiplies
+    /// the drawn alpha only; `life` keeps driving the authored scale/colour curves, so a
+    /// clipping cloud fades in place instead of re-scoring `age / life` and inflating.
+    pub fade: f32,
     pub rot_speed: f32,
     /// 16-bit angle units.
     pub rot_angle: f32,
@@ -614,19 +618,25 @@ pub struct Quad {
     pub child: bool,
 }
 
+/// Frames (1/30 s each) the [`Generator::max_age`] fade takes.
+pub const FADE_FRAMES: f32 = 5.0;
+
 /// `particleGenerator`: emits and moves particles from one `.pcr`.
 #[derive(Debug, Clone)]
-pub struct Generator {
-    pub pcr: Arc<Pcr>,
+pub struct Generator {    pub pcr: Arc<Pcr>,
     /// Where particles are born (`getGPos`); hosts move it to follow something.
     pub emit_pos: Vec3,
     /// Host extension: multiplies every particle's drawn alpha (a landing cloud toned down
     /// without changing the shared effect table).
     pub alpha_scale: f32,
-    /// Host extension: stop emitting and let the particles fade out `max_age` frames (30 = 1 s)
-    /// after the spawn, so a landing cloud clears instead of shrouding the scene.
+    /// Host extension: stop emitting `max_age` frames (30 = 1 s) after the spawn and fade the
+    /// particles out over [`FADE_FRAMES`] in place, so a landing cloud clears instead of
+    /// shrouding the scene. The fade touches alpha only: shortening `life` here would re-score
+    /// the authored scale curve (`age / life`) and balloon the puffs for the last few frames.
     pub max_age: Option<f32>,
     age: f32,
+    /// `max_age` was reached; the remaining particles are fading out.
+    fading: bool,
     /// Host-controlled density for attached emitters (for example, ground dust as an Onion rises).
     pub emission_scale: f32,
     /// Added to every new particle's velocity (`mEmitVelocity`).
@@ -663,6 +673,7 @@ impl Generator {
             pcr,
             max_age: None,
             age: 0.0,
+            fading: false,
             emit_pos: pos,
             alpha_scale: 1.0,
             emission_scale: 1.0,
@@ -717,10 +728,9 @@ impl Generator {
     pub fn update(&mut self, step: f32, each: &mut dyn FnMut(&mut Particle)) -> bool {
         if let Some(max) = self.max_age {
             self.age += step;
-            if self.age >= max {
+            if self.age >= max && !self.fading {
                 self.finished = true;
-                // Rather than a hard pop, give what is on screen a short fade.
-                for p in &mut self.particles { p.life = p.life.min(p.age + 5); }
+                self.fading = true;
                 self.children.clear();
             }
         }
@@ -832,6 +842,7 @@ impl Generator {
             size,
             scale: 1.0,
             alpha: 1.0,
+            fade: 1.0,
             rot_speed,
             rot_angle,
             age: 0,
@@ -892,6 +903,10 @@ impl Generator {
         let rates = pcr.rates();
         let drag = pcr.drag - self.rand(pcr.drag_jitter);
         let mut list = std::mem::take(&mut self.particles);
+        if self.fading {
+            for p in &mut list { p.fade = (p.fade - step / FADE_FRAMES).max(0.0); }
+            list.retain(|p| p.fade > 0.0);
+        }
         list.retain(|p| p.age + 1 < p.life);
         for p in list.iter_mut() {
             let a = if p.age >= pcr.free_motion_time as i32 { self.accel(p) } else { Vec3::ZERO };
@@ -918,6 +933,7 @@ impl Generator {
                 (1.0 - t) * rates[3]
             };
             p.alpha *= 1.0 - self.rand(pcr.alpha_jitter);
+            p.alpha *= p.fade;
             p.rot_angle += p.rot_speed;
             p.age_timer += step;
             p.age = round_off(p.age_timer);
@@ -1169,6 +1185,36 @@ mod tests {
         while g.update(1.0, &mut |_| {}) {
             steps += 1;
             assert!(steps < 20);
+        }
+    }
+
+    /// The host's `max_age` used to shorten `life`; `age / life` then jumped and the authored
+    /// scale curve inflated every puff for the fade. The fade must dim alpha, not resize.
+    #[test]
+    fn the_max_age_fade_keeps_the_authored_scale_and_fades_alpha() {
+        let mut pcr = Pcr::parse(&sample()).unwrap();
+        pcr.scale_thresholds = [0.0, 0.0];
+        pcr.min_scales = [1.0, 2.4023438];
+        pcr.life = 100;
+        pcr.rate = Keyed::Const(1.0);
+        let mut g = Generator::new(Arc::new(pcr), Vec3::ZERO, 1);
+        g.max_age = Some(10.0);
+        for _ in 0..10 {
+            assert!(g.update(1.0, &mut |_| {}));
+        }
+        let scale_before = g.particles.iter().map(|p| p.scale).fold(0.0, f32::max);
+        let alpha_before = g.particles.iter().map(|p| p.alpha).fold(0.0, f32::max);
+        assert!(scale_before > 1.0, "the authored curve is growing: {scale_before}");
+        g.update(1.0, &mut |_| {});
+        let scale_after = g.particles.iter().map(|p| p.scale).fold(0.0, f32::max);
+        let alpha_after = g.particles.iter().map(|p| p.alpha).fold(0.0, f32::max);
+        assert!((scale_after - scale_before).abs() < 0.02,
+            "the fade must not inflate: {scale_before} -> {scale_after}");
+        assert!(alpha_after < alpha_before, "the fade must dim: {alpha_before} -> {alpha_after}");
+        let mut steps = 0;
+        while g.update(1.0, &mut |_| {}) {
+            steps += 1;
+            assert!(steps < 10, "the fade must finish");
         }
     }
 }
