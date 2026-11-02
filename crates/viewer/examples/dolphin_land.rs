@@ -91,6 +91,16 @@ async fn main() {
         if tick % 10 == 0 || (85..=115).contains(&tick) {
             println!("tick {tick:3} t {t:.3} pos.y {:6.1} smoke quads {quads}", at.y);
         }
+        let (mut big, mut extent, mut tex) = (0, 0.0f32, 0);
+        for q in &view.particles.quads {
+            let e = (q.corners[2] - q.corners[0]).length();
+            if e > 120.0 { big += 1; }
+            if e > extent { extent = e; tex = q.texture; }
+        }
+        let running = view.effects.as_ref().map_or(0, |e| e.running());
+        if (118..=136).contains(&tick) {
+            println!("tick {tick:3}: quads {quads} running {running} big {big} max extent {extent:.0} texture {tex}");
+        }
         clear_background(Color::from_rgba(20, 28, 30, 255));
         set_camera(&Camera3D { position: eye, target, up: Vec3::Y, fovy: 42.0_f32.to_radians(), ..Default::default() });
         draw_plane(Vec3::ZERO, vec2(2000.0, 2000.0), None, Color::from_rgba(65, 85, 48, 255));

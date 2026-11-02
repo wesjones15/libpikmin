@@ -23,7 +23,11 @@ fn main() {
             pcr.billboard, pcr.color_mode(), pcr.blend_factor, pcr.z_mode,
             pcr.max_passes, pcr.max_frame, pcr.life, pcr.size, pcr.rate
         );
+        println!("  anim duration {} flags {} thresholds {:?}", pcr.anim.duration, pcr.anim.flags, pcr.anim.thresholds);
+        println!("  scale thresholds {:?} min {:?} alpha thresholds {:?} size jitter {} life jitter {}",
+            pcr.scale_thresholds, pcr.min_scales, pcr.alpha_thresholds, pcr.size_jitter, pcr.life_jitter);
         println!("  prim {:?}", pcr.anim.prim);
         println!("  env  {:?}", pcr.anim.env);
+        println!("  children {:?}", pcr.children);
     }
 }
