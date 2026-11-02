@@ -42,7 +42,16 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 58;
+pub const PIK_ABI_VERSION: u32 = 59;
+
+/// The replica snapshot's wire version (`libpikmin::snapshot::SNAPSHOT_VERSION`). Hosts put it in
+/// their multiplayer envelope: a snapshot is nested bytes there, so without this a host and client
+/// that agree on the ABI and envelope protocol but not on the snapshot format silently drop every
+/// snapshot instead of refusing the build.
+#[unsafe(no_mangle)]
+pub extern "C" fn pik_snapshot_version() -> u32 {
+    libpikmin::snapshot::SNAPSHOT_VERSION as u32
+}
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
