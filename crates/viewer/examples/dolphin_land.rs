@@ -98,7 +98,7 @@ async fn main() {
             if e > extent { extent = e; tex = q.texture; }
         }
         let running = view.effects.as_ref().map_or(0, |e| e.running());
-        if (118..=136).contains(&tick) {
+        if (80..=145).contains(&tick) {
             println!("tick {tick:3}: quads {quads} running {running} big {big} max extent {extent:.0} texture {tex}");
         }
         clear_background(Color::from_rgba(20, 28, 30, 255));
