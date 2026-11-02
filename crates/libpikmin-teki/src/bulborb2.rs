@@ -556,7 +556,7 @@ pub fn burn_common(t: &mut Teki, w: &mut World) {
     }
     let reach = t.coll_radius + 10.0;
     let damage = t.f(fp::ATTACK_DAMAGE);
-    w.sim.attack_pikis_in_sphere(t.pos, reach, damage * w.dt);
+    w.sim.burn_pikis_in_sphere(t.pos, reach, damage * w.dt);
     for n in w.navis.iter().filter(|n| n.alive) {
         if dist_xz(t.pos, n.pos) - n.size <= reach && (n.pos.y - t.pos.y).abs() < reach {
             w.out.push(Out::HitNavi { teki: t.id, navi: n.id, damage, from: t.pos, knock: -1.0 });

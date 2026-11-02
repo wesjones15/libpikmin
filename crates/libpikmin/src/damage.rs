@@ -11,7 +11,7 @@ use crate::event::Event;
 use crate::host::CreatureId;
 use crate::math::rotate_y;
 use crate::onion::SproutState;
-use crate::piki::{Happa, PikiState};
+use crate::piki::{Happa, PikiColor, PikiState};
 use crate::sim::Sim;
 use crate::{CaptainId, PikiId};
 
@@ -76,6 +76,17 @@ impl Sim {
             .into_iter()
             .filter(|&id| self.attack_piki(id, damage))
             .count() as u32
+    }
+
+    /// `InteractFire`: fire in `radius` of `centre` hurts the Pikmin in it, but Red Pikmin are
+    /// immune. Returns how many were hit.
+    pub fn burn_pikis_in_sphere(&mut self, centre: Vec3, radius: f32, damage: f32) -> u32 {
+        let ids: Vec<PikiId> = self
+            .ids_in_sphere(centre, radius)
+            .into_iter()
+            .filter(|&id| self.pikis[id.0 as usize].color != PikiColor::Red)
+            .collect();
+        ids.into_iter().filter(|&id| self.attack_piki(id, damage)).count() as u32
     }
 
     /// `InteractPress::actPiki`: flattened. If that brings health to 0 the Pikmin dies at once;

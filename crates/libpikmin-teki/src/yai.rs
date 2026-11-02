@@ -476,7 +476,7 @@ pub fn burn(t: &mut Teki, w: &mut World) {
     let steps = 6;
     for i in 0..=steps {
         let p = f.from + f.dir * (f.length * i as f32 / steps as f32);
-        w.sim.attack_pikis_in_sphere(p, f.radius, f.damage * dt * 0.5);
+        w.sim.burn_pikis_in_sphere(p, f.radius, f.damage * dt * 0.5);
     }
     for n in w.navis.iter().filter(|n| n.alive) {
         let rel = n.pos - f.from;
