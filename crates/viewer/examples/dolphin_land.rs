@@ -43,8 +43,11 @@ async fn main() {
     sim.set_onion_pose(ship, start, true);
     sim.set_onion_flight_motion(ship, true, 0.0);
 
-    let eye = vec3(330.0, 210.0, 440.0);
-    let target = vec3(0.0, 65.0, 0.0);
+    // `--close` frames the Dolphin like the in-game third-person camera, for judging how much
+    // the landing dust covers the ship.
+    let close = args.iter().any(|a| a == "--close");
+    let eye = if close { vec3(150.0, 115.0, 200.0) } else { vec3(330.0, 210.0, 440.0) };
+    let target = if close { vec3(0.0, 60.0, 0.0) } else { vec3(0.0, 65.0, 0.0) };
     let forward = (target - eye).normalize();
     let right = forward.cross(Vec3::Y).normalize();
     let up = right.cross(forward).normalize();

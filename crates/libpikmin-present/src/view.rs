@@ -1750,7 +1750,12 @@ impl View {
                     flight.animator.land_progress(progress, &mut cues);
                 } else if flight.progress.is_some() {
                     flight.animator.land_progress(1.0, &mut cues);
-                    cues.push(ShipCue::Effect { fx: fx_defs::ROCKET_LAND, lift: 0.0, normal: None });
+                    // The animator's touchdown cue already made the cloud when the landing
+                    // reached it; this is only the fallback for a landing that never crossed
+                    // that frame (a crash-landed wreck, or a motion cleared early).
+                    if !flight.animator.landing_cloud_played() {
+                        cues.push(ShipCue::Effect { fx: fx_defs::ROCKET_LAND, lift: 0.0, normal: None });
+                    }
                     // Host extension: Ship Repair's first stage crash-lands the bare wreck. Pikmin 1's crash site
                     // (`kiso_t`'s effect keys 0 and 2, `UfoItem::animationKeyUpdated`) throws debris and a
                     // cloud of dust as the hull hits the ground.
@@ -1909,6 +1914,9 @@ impl View {
                             if let Some(e) = self.effects.as_mut() { e.detach_where(|k| k & !255 == fx_key); }
                         }
                         ShipCue::Attached { fx, sphere: id, normal, slot } => {
+                            if std::env::var_os("PIKMIN_TRACE_CUES").is_some() {
+                                eprintln!("attach {} at '{id}' slot {slot} landing {}", fx.pcr, flight.animator.landing());
+                            }
                             if let (Some(at), Some(e)) = (sphere(id), self.effects.as_mut()) {
                                 if let Some(g) = e.attach(fx_key | slot as u64, fx, at)
                                     && let Some(n) = normal { g.oriented_normal = rot * n; }
@@ -1917,6 +1925,9 @@ impl View {
                             }
                         }
                         ShipCue::Effect { fx, lift, normal } => {
+                            if std::env::var_os("PIKMIN_TRACE_CUES").is_some() {
+                                eprintln!("effect {} at {:.0} landing {}", fx.pcr, o.pos.y, flight.animator.landing());
+                            }
                             if let Some(e) = self.effects.as_mut()
                                 && let Some(g) = e.spawn(fx, o.pos + Vec3::Y * lift)
                             {
@@ -1931,7 +1942,11 @@ impl View {
                                 if fx == fx_defs::ROCKET_LAND
                                     || (flight.animator.landing() && ship_smoke(fx))
                                 {
-                                    g.max_age = Some(30.0);
+                                    g.max_age = Some(15.0);
+                                    // A landed cloud must not shroud the Dolphin (or the squad
+                                    // around it): keep the authored shape but draw it at 35%
+                                    // alpha, so it reads as dust rather than a white wall.
+                                    g.alpha_scale = 0.5;
                                 }
                                 if let Some(n) = normal { g.oriented_normal = rot * n; }
                             }

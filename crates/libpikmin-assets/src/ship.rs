@@ -257,6 +257,9 @@ pub struct ShipAnimator {
     takeoff_time: Option<f32>,
     /// Landing: frames left of the take off motion, played backwards.
     landing: Option<f32>,
+    /// The touchdown cloud was already spawned for the current landing, so a host's
+    /// end-of-landing fallback must not spawn it again.
+    landing_cloud: bool,
 }
 
 const SPEED: f32 = 30.0;
@@ -306,6 +309,7 @@ impl ShipAnimator {
             ionium: [false; 2],
             takeoff_time: None,
             landing: None,
+            landing_cloud: false,
         }
     }
 
@@ -340,6 +344,7 @@ impl ShipAnimator {
     fn set_up(&mut self, on_board: &[u32], level: u8) {
         self.takeoff_time = None;
         self.landing = None;
+        self.landing_cloud = false;
         self.repairing = None;
         self.parts.iter_mut().for_each(|p| *p = None);
         self.broken = on_board.is_empty();
@@ -519,6 +524,13 @@ impl ShipAnimator {
         self.landing.is_some()
     }
 
+    /// Whether this landing already spawned its touchdown cloud (`ROCKET_LAND`). A host that
+    /// also has a fallback at the end of the landing must skip it when this is true, or the
+    /// same puff plays twice.
+    pub fn landing_cloud_played(&self) -> bool {
+        self.landing_cloud
+    }
+
     /// Drive the reverse rocket motion from a host's normalized landing clock. Advancing
     /// by the difference retains touchdown/engine cues and the eight animation contexts.
     pub fn land_progress(&mut self, progress: f32, cues: &mut Vec<ShipCue>) {
@@ -577,6 +589,7 @@ impl ShipAnimator {
             if left > down && now <= down {
                 cues.push(ShipCue::StopAttached);
                 if !self.broken {
+                    self.landing_cloud = true;
                     cues.push(ShipCue::Effect { fx: effects::ROCKET_LAND, lift: 0.0, normal: None });
                 }
             }
