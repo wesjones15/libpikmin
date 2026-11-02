@@ -60,6 +60,8 @@ impl Sim {
             return false;
         }
         let p = &mut self.pikis[pi];
+        // Purple Pikmin are tougher: the same hit costs them 30% less health.
+        let damage = if p.color == PikiColor::Purple { damage * 0.7 } else { damage };
         p.health -= damage;
         p.target_vel = Vec3::ZERO;
         self.events.push(Event::PikiHurt { piki: id, damage });
