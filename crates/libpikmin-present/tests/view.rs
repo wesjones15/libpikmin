@@ -400,7 +400,7 @@ fn the_onion_jump_is_continuous_with_the_walk_and_the_climb() {
     // Offset from the Onion's axis, where mirroring the start would show up as a long pop.
     let piki = sim.spawn_piki_in_squad(PikiColor::Red, Vec3::new(at.x - 60.0, 0.0, at.z + 40.0), captain).unwrap();
     assert_eq!(sim.onion_put_away(captain, onion, PikiColor::Red, 1), 1);
-    let mut last: Option<Vec3> = None;
+    let mut last: Option<(Vec3, PikiState, Vec3)> = None;
     let mut climbed = false;
     for _ in 0..600 {
         sim.step(&mut FlatHost);
@@ -408,13 +408,13 @@ fn the_onion_jump_is_continuous_with_the_walk_and_the_climb() {
         let p = sim.piki(piki);
         let draw = view.draws.iter().find(|d| d.kind == kinds::PIKI)
             .expect("the returning Pikmin is drawn").pos;
-        if let Some(prev) = last {
+        if let Some((prev, prev_state, prev_sim)) = last {
             // The jump covers its whole arc in 0.65 s; one tick is at most a tenth of it.
             assert!(draw.distance(prev) < 25.0,
-                "tick {}: the drawn Pikmin jumped {:.1} units ({prev:?} -> {draw:?}) in {:?}",
-                sim.tick(), draw.distance(prev), p.state);
+                "tick {}: the drawn Pikmin jumped {:.1} units ({prev:?} -> {draw:?}); sim {prev_sim:?} -> {:?}; state {prev_state:?} -> {:?}",
+                sim.tick(), draw.distance(prev), p.pos, p.state);
         }
-        last = Some(draw);
+        last = Some((draw, p.state.clone(), p.pos));
         if let PikiState::Enter { climbing: true, .. } = p.state { climbed = true; break; }
     }
     assert!(climbed, "the Pikmin reached the climb");
