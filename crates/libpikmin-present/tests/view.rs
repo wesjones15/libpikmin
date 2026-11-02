@@ -384,6 +384,42 @@ fn entry_pikmin_follow_the_onions_posed_leg_not_its_sampled_frame() {
     }
 }
 
+/// The jump between the walk and the climb is drawn continuously with both. Mirroring the
+/// jump's world start (or subtracting the sampled midpoint and then adding the drawn one)
+/// pops the Pikmin across the Onion at takeoff and again when the climb begins.
+#[test]
+fn the_onion_jump_is_continuous_with_the_walk_and_the_climb() {
+    let Some(assets) = assets() else { return };
+    let mut view = View::load(&assets).unwrap();
+    let mut sim = Sim::new(Params::default(), 33);
+    sim.set_mirror_onion_legs(true); // the Unity host: models and leg points are mirrored
+    let captain = sim.add_captain(Vec3::ZERO);
+    let at = Vec3::new(20.0, 120.0, -30.0);
+    let onion = sim.add_onion(at, &[PikiColor::Red]);
+    sim.set_onion_pose(onion, at, true);
+    // Offset from the Onion's axis, where mirroring the start would show up as a long pop.
+    let piki = sim.spawn_piki_in_squad(PikiColor::Red, Vec3::new(at.x - 60.0, 0.0, at.z + 40.0), captain).unwrap();
+    assert_eq!(sim.onion_put_away(captain, onion, PikiColor::Red, 1), 1);
+    let mut last: Option<Vec3> = None;
+    let mut climbed = false;
+    for _ in 0..600 {
+        sim.step(&mut FlatHost);
+        view.update(&sim, 1.0, TICK_DT);
+        let p = sim.piki(piki);
+        let draw = view.draws.iter().find(|d| d.kind == kinds::PIKI)
+            .expect("the returning Pikmin is drawn").pos;
+        if let Some(prev) = last {
+            // The jump covers its whole arc in 0.65 s; one tick is at most a tenth of it.
+            assert!(draw.distance(prev) < 25.0,
+                "tick {}: the drawn Pikmin jumped {:.1} units ({prev:?} -> {draw:?}) in {:?}",
+                sim.tick(), draw.distance(prev), p.state);
+        }
+        last = Some(draw);
+        if let PikiState::Enter { climbing: true, .. } = p.state { climbed = true; break; }
+    }
+    assert!(climbed, "the Pikmin reached the climb");
+}
+
 #[test]
 fn host_flight_uses_articulated_disc_clips_without_cinematic_position_drift() {
     let Some(assets) = assets() else { return };

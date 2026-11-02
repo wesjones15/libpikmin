@@ -169,21 +169,33 @@ impl OnionCounts {
     }
 }
 
-/// Where a Pikmin on `leg`'s rope sits: 0 at the foot, 1 at the shoulder. `hover` is the
-/// airborne loop's frame (`Onion::hover_frame`) when the Onion is drawn in that pose; `None`
-/// follows the landed, bind-pose leg.
-pub(crate) fn leg_point(onion: Vec3, leg: u8, ratio: f32, hover: Option<f32>) -> Vec3 {
-    onion + match hover {
-        Some(frame) => hover_leg_point(leg, ratio, frame),
-        None => LEG_FEET[leg as usize % 3].lerp(LEG_TOPS[leg as usize % 3], ratio.clamp(0.0, 1.0)),
-    }
+/// A model-space point in the host's drawn frame: Unity mirrors each model's local X
+/// (`ModelView.MirrorX`), so an Onion's legs are drawn on the other side. Hosts that mirror
+/// their models set [`Sim::set_mirror_onion_legs`] and the sim walks, jumps and climbs the
+/// drawn legs instead. The Pikmin's own world position is never mirrored: the flip is inside
+/// the Onion's model, not a change of world coordinates.
+pub(crate) fn mirror_local(v: Vec3, mirror: bool) -> Vec3 {
+    if mirror { Vec3::new(-v.x, v.y, v.z) } else { v }
 }
 
-pub(crate) fn leg_top(onion: Vec3, leg: u8, hover: Option<f32>) -> Vec3 {
-    onion + match hover {
+/// Where a Pikmin on `leg`'s rope sits: 0 at the foot, 1 at the shoulder. `hover` is the
+/// airborne loop's frame (`Onion::hover_frame`) when the Onion is drawn in that pose; `None`
+/// follows the landed, bind-pose leg. `mirror` matches the host's drawn model (see
+/// [`mirror_local`]).
+pub(crate) fn leg_point(onion: Vec3, leg: u8, ratio: f32, hover: Option<f32>, mirror: bool) -> Vec3 {
+    let local = match hover {
+        Some(frame) => hover_leg_point(leg, ratio, frame),
+        None => LEG_FEET[leg as usize % 3].lerp(LEG_TOPS[leg as usize % 3], ratio.clamp(0.0, 1.0)),
+    };
+    onion + mirror_local(local, mirror)
+}
+
+pub(crate) fn leg_top(onion: Vec3, leg: u8, hover: Option<f32>, mirror: bool) -> Vec3 {
+    let local = match hover {
         Some(frame) => hover_leg_joints(leg, frame)[0],
         None => LEG_TOPS[leg as usize % 3],
-    }
+    };
+    onion + mirror_local(local, mirror)
 }
 
 pub(crate) fn leg_length(leg: u8, hover: Option<f32>) -> f32 {
@@ -350,6 +362,7 @@ impl Sim {
     pub fn onion_burst_out(&mut self, captain: CaptainId, onion: OnionId, color: PikiColor, n: u32) -> u32 {
         let oi = onion.0 as usize;
         if !self.onions[oi].accepts(color) || !self.onions[oi].takes_deliveries() { return 0; }
+        let mirror = self.mirror_onion_legs;
         let mut out = 0;
         for k in 0..n {
             let o = &mut self.onions[oi];
@@ -360,7 +373,7 @@ impl Sim {
             let (id_on, opos, hover) = (o.id, o.pos, flying_pose(o).then_some(o.hover_frame));
             // Legs in turn, so each takes a third.
             let leg = (k % 3) as u8;
-            let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, hover)) else { break };
+            let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, hover, mirror)) else { break };
             self.onions[oi].stored[color.index()][happa as usize] -= 1;
             let p = &mut self.pikis[id.0 as usize];
             p.happa = happa;
@@ -432,6 +445,7 @@ impl Sim {
 
     /// `GoalItem` dispensing: one Pikmin out every 0.04-0.06 s.
     pub(crate) fn update_onion_exits(&mut self, dt: f32) {
+        let mirror = self.mirror_onion_legs;
         for oi in 0..self.onions.len() {
             if self.onions[oi].exits.is_empty() || !self.onions[oi].takes_deliveries() {
                 continue;
@@ -455,7 +469,7 @@ impl Sim {
             o.stored[color.index()][happa as usize] -= 1;
             let (onion, opos, hover) = (o.id, o.pos, flying_pose(o).then_some(o.hover_frame));
             let leg = (self.rng.f32() * 3.0) as u8 % 3;
-            let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, hover)) else {
+            let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, hover, mirror)) else {
                 // Field full after all: keep it inside.
                 self.onions[oi].stored[color.index()][happa as usize] += 1;
                 continue;
@@ -475,6 +489,7 @@ impl Sim {
 
     /// `ActEnter` and `ActExit`.
     pub(crate) fn piki_onion_travel(&mut self, pi: usize, host: &mut dyn Host, dt: f32) {
+        let mirror = self.mirror_onion_legs;
         match self.pikis[pi].state {
             PikiState::Enter {
                 onion,
@@ -495,7 +510,7 @@ impl Sim {
                     // Host extension: JUMP (21) to the middle of a flying leg,
                     // then ActEnter::gotoLeg/climb's HNoboru (62) up its top half.
                     // Negative ratio is the remaining jump time; snapshots already carry it.
-                    let foot = leg_point(opos, leg, if hover.is_some() { 0.5 } else { 0.0 }, hover);
+                    let foot = leg_point(opos, leg, if hover.is_some() { 0.5 } else { 0.0 }, hover, mirror);
                     if ratio < 0.0 {
                         let p = &mut self.pikis[pi];
                         let remaining = -ratio;
@@ -530,10 +545,10 @@ impl Sim {
                 }
                 let r = ratio + CLIMB_SPEED * dt / leg_length(leg, hover);
                 let p = &mut self.pikis[pi];
-                p.pos = leg_point(opos, leg, r, hover);
+                p.pos = leg_point(opos, leg, r, hover, mirror);
                 p.vel = Vec3::ZERO;
                 p.on_ground = false;
-                let d = leg_top(opos, leg, hover) - p.pos;
+                let d = leg_top(opos, leg, hover, mirror) - p.pos;
                 p.face = d.x.atan2(d.z);
                 if r > ENTER_AT {
                     // `GoalItem::enterGoal`
@@ -559,16 +574,16 @@ impl Sim {
                 if hover.is_some() && r <= 0.5 {
                     // Host flight: play the first half of ActExit, then fall from that
                     // exact point rather than following the moving leg to its foot.
-                    p.pos = leg_point(opos, leg, 0.5, hover);
+                    p.pos = leg_point(opos, leg, 0.5, hover, mirror);
                     p.vel = Vec3::NEG_Y * SLIDE_SPEED;
                     p.target_vel = p.vel;
                     p.on_ground = false;
                     p.state = PikiState::Flying { ground_frames: 0 };
                     return;
                 }
-                p.pos = leg_point(opos, leg, r, hover);
+                p.pos = leg_point(opos, leg, r, hover, mirror);
                 p.vel = Vec3::ZERO;
-                let d = p.pos - leg_top(opos, leg, hover);
+                let d = p.pos - leg_top(opos, leg, hover, mirror);
                 p.face = d.x.atan2(d.z);
                 if r > 0.0 {
                     p.state = PikiState::Exit {

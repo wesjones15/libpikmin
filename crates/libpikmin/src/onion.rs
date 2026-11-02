@@ -300,7 +300,9 @@ impl Sim {
                 // Finish exits at the old feet before moving the airborne legs.
                 if let PikiState::Exit { onion: on, leg, .. } = p.state
                     && on == onion {
-                    p.pos = self.onions[onion.0 as usize].pos + crate::onion_menu::LEG_FEET[leg as usize % 3];
+                    let foot = crate::onion_menu::mirror_local(
+                        crate::onion_menu::LEG_FEET[leg as usize % 3], self.mirror_onion_legs);
+                    p.pos = self.onions[onion.0 as usize].pos + foot;
                     p.on_ground = true;
                     p.state = if p.captain.is_some() { PikiState::squad() } else { PikiState::Idle };
                 }

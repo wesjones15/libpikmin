@@ -116,3 +116,33 @@ fn entering_pikmin_climb_the_flying_onions_legs() {
     }
     assert!(climbed, "the Pikmin boarded the flying Onion");
 }
+
+/// A host that mirrors its models (`ModelView.MirrorX`, Unity) draws the Onion's legs on the
+/// other side. The sim must walk, jump and climb those drawn legs, not the disc's right-handed
+/// ones; otherwise the Pikmin walks to a leg nobody can see and the jump crosses the Onion.
+#[test]
+fn mirrored_onion_legs_climb_the_hosts_drawn_side() {
+    let mut sim = Sim::new(Params::default(), 25);
+    let captain = sim.add_captain(Vec3::ZERO);
+    let onion = sim.add_onion(Vec3::ZERO, &[PikiColor::Red]);
+    sim.set_mirror_onion_legs(true);
+    let piki = sim.spawn_piki_in_squad(PikiColor::Red, Vec3::Z * 40.0, captain).unwrap();
+    let air = Vec3::Y * 200.0;
+    sim.set_onion_pose(onion, air, true);
+    assert_eq!(sim.onion_put_away(captain, onion, PikiColor::Red, 1), 1);
+    let mut climbed = false;
+    for _ in 0..240 {
+        let phase = sim.onions()[0].hover_frame;
+        sim.step(&mut FlatHost);
+        let p = sim.piki(piki);
+        if let PikiState::Enter { leg, ratio, climbing: true, .. } = p.state {
+            let disc = hover_leg_point(leg, ratio, phase);
+            assert!(disc.x.abs() > 1.0, "this leg is not on the mirror axis");
+            assert!(p.pos.distance(air + Vec3::new(-disc.x, disc.y, disc.z)) < 0.01,
+                "climbs the mirrored leg at {:?}; the disc leg is at {:?}", p.pos, air + disc);
+            climbed = true;
+            break;
+        }
+    }
+    assert!(climbed, "the Pikmin boarded the Onion");
+}

@@ -97,6 +97,7 @@ impl Sim {
 
     fn send_plucker(&mut self, oi: usize) {
         let o = &self.onions[oi];
+        let mirror = self.mirror_onion_legs;
         // The colour it holds most of, its best leaf stage.
         let Some(color) = crate::PikiColor::ALL
             .into_iter()
@@ -113,7 +114,7 @@ impl Sim {
         };
         let (onion, opos, owner) = (o.id, o.pos, o.owner);
         let leg = (self.rng.f32() * 3.0) as u8 % 3;
-        let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, None)) else {
+        let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, None, mirror)) else {
             return;
         };
         self.onions[oi].stored[color.index()][happa as usize] -= 1;
@@ -158,9 +159,10 @@ impl Sim {
         let p = &mut self.pikis[pi];
         p.target_vel = Vec3::ZERO;
         if o.grounded() {
+            let mirror = self.mirror_onion_legs;
             let leg = (0..3u8)
                 .min_by(|&a, &b| {
-                    dist_xz(leg_point(o.pos, a, 0.0, None), p.pos).total_cmp(&dist_xz(leg_point(o.pos, b, 0.0, None), p.pos))
+                    dist_xz(leg_point(o.pos, a, 0.0, None, mirror), p.pos).total_cmp(&dist_xz(leg_point(o.pos, b, 0.0, None, mirror), p.pos))
                 })
                 .unwrap_or(0);
             p.state = PikiState::Enter { onion, leg, climbing: false, ratio: 0.0 };
@@ -174,6 +176,7 @@ impl Sim {
     }
 
     pub(crate) fn piki_plucker(&mut self, pi: usize, pl: Plucker, host: &mut dyn Host, dt: f32) {
+        let mirror = self.mirror_onion_legs;
         // The Onion took off under it: it gives up and goes to its captain.
         if !self.onions[pl.onion.0 as usize].grounded() && !matches!(pl.job, PluckerJob::Descend { .. }) {
             return self.plucker_home(pi, pl.onion);
@@ -183,9 +186,9 @@ impl Sim {
                 let opos = self.onions[pl.onion.0 as usize].pos;
                 let r = ratio - SLIDE_SPEED * dt / leg_length(leg, None);
                 let p = &mut self.pikis[pi];
-                p.pos = leg_point(opos, leg, r, None);
+                p.pos = leg_point(opos, leg, r, None, mirror);
                 p.vel = Vec3::ZERO;
-                let d = p.pos - leg_point(opos, leg, 1.0, None);
+                let d = p.pos - leg_point(opos, leg, 1.0, None, mirror);
                 p.face = d.x.atan2(d.z);
                 if r > 0.0 {
                     p.state = PikiState::Plucker(Plucker { job: PluckerJob::Descend { leg, ratio: r }, ..pl });

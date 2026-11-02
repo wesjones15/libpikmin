@@ -42,7 +42,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 59;
+pub const PIK_ABI_VERSION: u32 = 60;
 
 /// The replica snapshot's wire version (`libpikmin::snapshot::SNAPSHOT_VERSION`). Hosts put it in
 /// their multiplayer envelope: a snapshot is nested bytes there, so without this a host and client
@@ -1588,6 +1588,18 @@ pub unsafe extern "C" fn pik_sim_set_auto_rejoin(sim: *mut PikSim, on: u8) {
 pub unsafe extern "C" fn pik_sim_set_shake_protection(sim: *mut PikSim, seconds: f32) {
     // SAFETY: as documented.
     unsafe { with(sim, (), |s| s.sim.set_shake_protection(seconds)) }
+}
+
+/// `on` (non-zero): the host draws the Onion's model with its local X mirrored (Unity's
+/// `ModelView.MirrorX`), so mirror the leg points the sim walks, jumps and climbs (see
+/// `Sim::set_mirror_onion_legs`). Off by default.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_mirror_onion_legs(sim: *mut PikSim, on: u8) {
+    // SAFETY: as documented.
+    unsafe { with(sim, (), |s| s.sim.set_mirror_onion_legs(on != 0)) }
 }
 
 /// Scales how far `captain`'s cursor reaches, and so how far he throws, by `scale`.

@@ -3,9 +3,10 @@
 //! extension in `onion_menu::ENTER_JUMP_SECONDS`).
 //!
 //! The disc models are right-handed. Unity draws each model with its local X mirrored, and
-//! `View` compensates only the Onion's leg points. Passing `--unity` renders the way the host
-//! does (mirrored model vertices + mirrored leg points) so the two can be compared frame for
-//! frame; the default renders the right-handed viewer's own frame.
+//! `View` mirrors the Onion's leg points to match. Passing `--unity` renders the way the host
+//! does (mirrored model vertices + mirrored leg points + `sim.set_mirror_onion_legs`) so the
+//! two can be compared frame for frame; the default renders the right-handed viewer's own
+//! frame.
 //!
 //! cargo run --release -p viewer --example onion_enter -- <out-dir> [frames] [--unity]
 use ::glam::Vec3 as GVec3;
@@ -41,6 +42,8 @@ async fn main() {
     view.set_model_mirror_x(unity);
 
     let mut sim = Sim::new(params, 44);
+    // The same switch the plugin sets: the Onion's drawn model (and so its legs) is mirrored.
+    sim.set_mirror_onion_legs(unity);
     let onion = sim.add_onion(GVec3::new(0.0, 175.0, 0.0), &[PikiColor::Red, PikiColor::Yellow, PikiColor::Blue]);
     sim.set_onion_pose(onion, GVec3::new(0.0, 175.0, 0.0), true);
     let captain = sim.add_captain(GVec3::new(0.0, 0.0, 210.0));

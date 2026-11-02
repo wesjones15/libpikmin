@@ -1246,7 +1246,9 @@ impl View {
     }
 
     /// Whether host model instances mirror X (Unity's left-handedness). Default true; a
-    /// right-handed host turns it off so Onion-leg climbers follow its drawn mesh.
+    /// right-handed host turns it off so Onion-leg climbers follow its drawn mesh. Keep it in
+    /// step with [`libpikmin::Sim::set_mirror_onion_legs`]: both describe whether the host
+    /// draws the Onion's model mirrored.
     pub fn set_model_mirror_x(&mut self, mirror: bool) {
         self.model_mirror_x = mirror;
     }
@@ -2432,19 +2434,17 @@ impl View {
                 PikiState::Enter { onion, leg, ratio, .. } if ratio < 0.0 => {
                     match (self.onion_legs.get(&onion.0), sim.onions().iter().find(|o| o.id == onion)) {
                         (Some((opos, lean, legs)), Some(o)) => {
-                            // The jump is aimed at the sim's sampled, single-colour midpoint.
-                            // Shift it towards the midpoint of the leg actually drawn, by how
-                            // far the jump has got, so it lands there without a snap.
+                            // The sim's own jump already runs from where the walk left the
+                            // Pikmin to the sampled leg midpoint; draw that arc and add only the
+                            // difference to the leg actually drawn (and leaned) this frame. The
+                            // start is a world position: the host mirrors the Onion's model
+                            // geometry, not the Pikmin's position, so it is never mirrored.
                             let u = (1.0 + ratio / libpikmin::onion_menu::ENTER_JUMP_SECONDS).clamp(0.0, 1.0);
                             let table = libpikmin::onion_menu::hover_leg_point(leg, 0.5, o.hover_frame);
-                            let exact = self.drawn_local(
+                            let sampled = *opos + self.drawn_local(table);
+                            let end = *opos + *lean * self.drawn_local(
                                 libpikmin::onion_menu::leg_polyline_point(legs[leg as usize % 3], 0.5));
-                            // The jump start is in the Onion's frame too: mirror it with the leg,
-                            // or every climber starts on the un-mirrored side and crosses the
-                            // middle to reach the drawn leg.
-                            let start = *opos + *lean * self.drawn_local(p.pos - o.pos);
-                            let target = *opos + *lean * exact - (*opos + *lean * table);
-                            (start + target * u, *lean * Quat::from_rotation_y(p.face))
+                            (p.pos + (end - sampled) * u, *lean * Quat::from_rotation_y(p.face))
                         }
                         _ => (p.pos, Quat::from_rotation_y(p.face)),
                     }

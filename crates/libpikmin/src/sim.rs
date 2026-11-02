@@ -72,6 +72,8 @@ pub struct Sim {
     pub(crate) auto_pluck_after: Option<f32>,
     /// See [`Sim::set_emergency_recovery`]: (seconds, Pikmin).
     pub(crate) recovery: Option<(f32, u32)>,
+    /// See [`Sim::set_mirror_onion_legs`].
+    pub(crate) mirror_onion_legs: bool,
 }
 
 impl Default for Sim {
@@ -124,6 +126,7 @@ impl Sim {
             auto_carry_skip: Default::default(),
             auto_pluck_after: None,
             recovery: None,
+            mirror_onion_legs: false,
         }
     }
 
@@ -235,6 +238,19 @@ impl Sim {
     /// be whistled); dismissed ones still wait. Off by default.
     pub fn set_auto_rejoin(&mut self, on: bool) {
         self.auto_rejoin = on;
+    }
+
+    /// Host extension: the host draws the Onion's model with its local X mirrored (Unity's
+    /// `ModelView.MirrorX`), so the legs an audience sees are on the other side. Mirror every
+    /// leg point the sim walks, jumps and climbs along to match that drawn model. Only the
+    /// Onion's model-space leg geometry is flipped: the Pikmin's own world position is not,
+    /// because the host mirrors each model's local axes, not world coordinates. Off by default.
+    pub fn set_mirror_onion_legs(&mut self, mirror: bool) {
+        self.mirror_onion_legs = mirror;
+    }
+
+    pub fn mirror_onion_legs(&self) -> bool {
+        self.mirror_onion_legs
     }
 
     /// Scales how far `captain` can throw (see [`Captain::reach_scale`]); clamped to 0.1..10.
