@@ -581,6 +581,10 @@ pub struct Particle {
     /// the drawn alpha only; `life` keeps driving the authored scale/colour curves, so a
     /// clipping cloud fades in place instead of re-scoring `age / life` and inflating.
     pub fade: f32,
+    /// Host extension: frames left before this particle starts its `fade`. The cap gives each
+    /// particle a different delay, so a cloud dissolves puff by puff instead of dimming as
+    /// one sheet and vanishing on a single frame.
+    pub fade_delay: f32,
     pub rot_speed: f32,
     /// 16-bit angle units.
     pub rot_angle: f32,
@@ -620,6 +624,10 @@ pub struct Quad {
 
 /// Frames (1/30 s each) the [`Generator::max_age`] fade takes.
 pub const FADE_FRAMES: f32 = 20.0;
+
+/// Frames a particle may hold at full alpha after the cap before its own fade starts. Spread
+/// across the cloud, this makes the dust dissolve over a second instead of dimming and cutting.
+pub const STAGGER_FRAMES: f32 = 10.0;
 
 /// `particleGenerator`: emits and moves particles from one `.pcr`.
 #[derive(Debug, Clone)]
@@ -732,6 +740,10 @@ impl Generator {
                 self.finished = true;
                 self.fading = true;
                 self.children.clear();
+                // Stagger the fade so the cloud dissolves rather than dimming as one sheet and
+                // disappearing on a single frame.
+                let delays: Vec<f32> = (0..self.particles.len()).map(|_| self.rand(STAGGER_FRAMES)).collect();
+                for (p, delay) in self.particles.iter_mut().zip(delays) { p.fade_delay = delay; }
             }
         }
         if !self.finished {
@@ -843,6 +855,7 @@ impl Generator {
             scale: 1.0,
             alpha: 1.0,
             fade: 1.0,
+            fade_delay: 0.0,
             rot_speed,
             rot_angle,
             age: 0,
@@ -904,8 +917,14 @@ impl Generator {
         let drag = pcr.drag - self.rand(pcr.drag_jitter);
         let mut list = std::mem::take(&mut self.particles);
         if self.fading {
-            for p in &mut list { p.fade = (p.fade - step / FADE_FRAMES).max(0.0); }
-            list.retain(|p| p.fade > 0.0);
+            for p in &mut list {
+                if p.fade_delay > 0.0 {
+                    p.fade_delay -= step;
+                } else {
+                    p.fade = (p.fade - step / FADE_FRAMES).max(0.0);
+                }
+            }
+            list.retain(|p| p.fade_delay > 0.0 || p.fade > 0.0);
         }
         list.retain(|p| p.age + 1 < p.life);
         for p in list.iter_mut() {
@@ -1203,18 +1222,18 @@ mod tests {
             assert!(g.update(1.0, &mut |_| {}));
         }
         let scale_before = g.particles.iter().map(|p| p.scale).fold(0.0, f32::max);
-        let alpha_before = g.particles.iter().map(|p| p.alpha).fold(0.0, f32::max);
+        
         assert!(scale_before > 1.0, "the authored curve is growing: {scale_before}");
         g.update(1.0, &mut |_| {});
         let scale_after = g.particles.iter().map(|p| p.scale).fold(0.0, f32::max);
-        let alpha_after = g.particles.iter().map(|p| p.alpha).fold(0.0, f32::max);
+        
         assert!((scale_after - scale_before).abs() < 0.02,
             "the fade must not inflate: {scale_before} -> {scale_after}");
-        assert!(alpha_after < alpha_before, "the fade must dim: {alpha_before} -> {alpha_after}");
+        assert!(g.particles.iter().any(|p| p.fade < 1.0), "the stagger starts some fades");
         let mut steps = 0;
         while g.update(1.0, &mut |_| {}) {
             steps += 1;
-            assert!(steps < FADE_FRAMES as i32 + 2, "the fade must finish");
+            assert!(steps < (FADE_FRAMES + STAGGER_FRAMES) as i32 + 2, "the fade must finish");
         }
     }
 }

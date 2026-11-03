@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use glam::Vec3;
 use libpikmin_assets::Assets;
-use libpikmin_assets::particle::{FADE_FRAMES, Generator, Pcr};
+use libpikmin_assets::particle::{FADE_FRAMES, STAGGER_FRAMES, Generator, Pcr};
 
 #[test]
 fn the_max_age_fade_does_not_inflate_the_authored_scale() {
@@ -22,17 +22,19 @@ fn the_max_age_fade_does_not_inflate_the_authored_scale() {
         assert!(g.update(1.0, &mut |_| {}));
     }
     let scale_before = g.particles.iter().map(|p| p.scale).fold(0.0, f32::max);
-    let alpha_before = g.particles.iter().map(|p| p.alpha).fold(0.0, f32::max);
     assert!(scale_before > 1.0);
     g.update(1.0, &mut |_| {});
     let scale_after = g.particles.iter().map(|p| p.scale).fold(0.0, f32::max);
-    let alpha_after = g.particles.iter().map(|p| p.alpha).fold(0.0, f32::max);
     assert!((scale_after - scale_before).abs() < 0.02,
         "the fade must not inflate: {scale_before} -> {scale_after}");
-    assert!(alpha_after < alpha_before, "the fade must dim: {alpha_before} -> {alpha_after}");
+    assert!(g.particles.iter().any(|p| p.fade < 1.0), "the stagger starts some fades");
+    for _ in 0..15 {
+        assert!(g.update(1.0, &mut |_| {}));
+    }
+    assert!(g.particles.iter().all(|p| p.fade < 0.9), "every puff dims");
     let mut steps = 0;
     while g.update(1.0, &mut |_| {}) {
         steps += 1;
-        assert!(steps < FADE_FRAMES as i32 + 2, "the fade must finish");
+        assert!(steps < (FADE_FRAMES + STAGGER_FRAMES) as i32 + 2, "the fade must finish");
     }
 }
