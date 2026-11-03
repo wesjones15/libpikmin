@@ -26,6 +26,9 @@ fn main() {
         println!("  anim duration {} flags {} thresholds {:?}", pcr.anim.duration, pcr.anim.flags, pcr.anim.thresholds);
         println!("  scale thresholds {:?} min {:?} alpha thresholds {:?} size jitter {} life jitter {}",
             pcr.scale_thresholds, pcr.min_scales, pcr.alpha_thresholds, pcr.size_jitter, pcr.life_jitter);
+        println!("  radius {:?} scale {} offset {:?}", pcr.radius, pcr.radius_scale, pcr.emit_offset);
+        println!("  length {} pivot {} orient_by_position {} rot_axis {} flags {:#x}",
+            pcr.length_scale, pcr.pivot_y, pcr.orient_by_position, pcr.rot_axis, pcr.flags);
         println!("  prim {:?}", pcr.anim.prim);
         println!("  env  {:?}", pcr.anim.env);
         println!("  children {:?}", pcr.children);
