@@ -619,7 +619,7 @@ pub struct Quad {
 }
 
 /// Frames (1/30 s each) the [`Generator::max_age`] fade takes.
-pub const FADE_FRAMES: f32 = 5.0;
+pub const FADE_FRAMES: f32 = 20.0;
 
 /// `particleGenerator`: emits and moves particles from one `.pcr`.
 #[derive(Debug, Clone)]
@@ -1214,7 +1214,7 @@ mod tests {
         let mut steps = 0;
         while g.update(1.0, &mut |_| {}) {
             steps += 1;
-            assert!(steps < 10, "the fade must finish");
+            assert!(steps < FADE_FRAMES as i32 + 2, "the fade must finish");
         }
     }
 }

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use glam::Vec3;
 use libpikmin_assets::Assets;
-use libpikmin_assets::particle::{Generator, Pcr};
+use libpikmin_assets::particle::{FADE_FRAMES, Generator, Pcr};
 
 #[test]
 fn the_max_age_fade_does_not_inflate_the_authored_scale() {
@@ -33,6 +33,6 @@ fn the_max_age_fade_does_not_inflate_the_authored_scale() {
     let mut steps = 0;
     while g.update(1.0, &mut |_| {}) {
         steps += 1;
-        assert!(steps < 10, "the fade must finish");
+        assert!(steps < FADE_FRAMES as i32 + 2, "the fade must finish");
     }
 }
