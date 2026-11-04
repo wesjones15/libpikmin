@@ -48,6 +48,9 @@ Workspace:
   (a Sunshine NPC body from `libsms-present::body`, posed from Mario's clips, the Pianta's own and Olimar's
   retargeted; voice from Sunshine's sound system): `View::load_pianta`, `set_captain_skin`; see
   `../ror2-olimar/DOCS/pianta-skin.md`.
+  `vr_arms` cuts every captain body's forearms and hands for a VR host's controllers (libcommon's `vr_arms`,
+  laid out as the view pushes each body; Olimar's arms are joints 7 and 8, whole limbs): `pik_bake_vr_arms` on
+  first run writes `assets/vr_arms/pik-*.arms`; `--example vr_arms` captures them.
 - `crates/libpikmin-teki/`: Pikmin 1's enemies as engine-free state machines ported from the decomp's `Tai*` (plugPikiNakata) and
   `TAI*` (plugPikiYamashita) strategies: `tai.rs`/`yai.rs` the shared actions, one module per enemy, `info.rs` the per-kind
   disc facts. A host spawns an enemy for a body of its own, feeds it the ground, water and damage, and applies its `Out`s
