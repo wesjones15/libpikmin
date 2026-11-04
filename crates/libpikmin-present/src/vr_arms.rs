@@ -125,3 +125,56 @@ pub fn bake(olimar: &ViewModel, cache: &Path, src: Sources<'_>) -> Vec<String> {
         Err(e) => Some(e),
     }).collect()
 }
+
+/// The low bits of a VR arm draw's key under [`crate::view::kinds::VR_ARM`]: + 0 right, + 1 left (as libsms's
+/// `VR_ARM_KEY`, so hosts share ror2-common's `VrCharacter.ArmSide`).
+pub const VR_ARM_KEY: u64 = 0x10;
+
+/// A body's cut as the view draws it: the arms, and each side's vertex map over the body's draw.
+pub(crate) struct Cut {
+    pub(crate) arms: Arms,
+    pub(crate) maps: Vec<(u8, Vec<u32>)>,
+}
+
+impl Cut {
+    pub(crate) fn new(mesh: &Mesh, arms: Arms) -> Cut {
+        let maps = arms.arms.iter().map(|a| (a.side, a.vertex_map(&mesh.triangles, mesh.positions.len()))).collect();
+        Cut { arms, maps }
+    }
+}
+
+/// Which captain body a cut is for, as the view holds it.
+pub(crate) enum Body<'a> {
+    Olimar(&'a ViewModel),
+    Louie(&'a libsms_present::view::Model),
+    Pianta(&'a libsms_present::view::Model, bool),
+    Pikachu(&'a crate::pikachu::HsdBody),
+}
+
+/// A body's cut from `cache` for drawing: read, or cut now where it can be (Pikachu's needs the Melee cache's bones,
+/// so his is only read; the first-run bake writes it).
+pub(crate) fn cut(cache: &Path, body: Body<'_>) -> Option<Cut> {
+    use libsms_present::vr_arms as j3d;
+    let (mesh, arms) = match body {
+        Body::Olimar(vm) => {
+            let m = mod_mesh(vm);
+            let (arms, _) = Arms::load_or_cut(cache, "pik-olimar", &m, OLIMAR_ARMS.map(|j| Some(Side::limb(j))));
+            (m, arms)
+        }
+        Body::Louie(m) => {
+            let (mesh, arms, _) = j3d::load_or_cut(cache, "pik-louie", &m.bmd, &m.batches, j3d::LOUIE);
+            (mesh, arms)
+        }
+        Body::Pianta(m, female) => {
+            let name = if female { "pik-pianta-f" } else { "pik-pianta-m" };
+            let (mesh, arms, _) = j3d::load_or_cut(cache, name, &m.bmd, &m.batches, j3d::PIANTA);
+            (mesh, arms)
+        }
+        Body::Pikachu(b) => {
+            let m = hsd_mesh(b);
+            let arms = Arms::load(cache, "pik-pikachu")?;
+            (m, arms)
+        }
+    };
+    (!arms.arms.is_empty() && arms.fits(mesh.positions.len(), mesh.triangles.len())).then(|| Cut::new(&mesh, arms))
+}

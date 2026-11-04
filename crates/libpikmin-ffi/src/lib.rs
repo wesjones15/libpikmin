@@ -42,7 +42,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 61;
+pub const PIK_ABI_VERSION: u32 = 62;
 
 /// The replica snapshot's wire version (`libpikmin::snapshot::SNAPSHOT_VERSION`). Hosts put it in
 /// their multiplayer envelope: a snapshot is nested bytes there, so without this a host and client

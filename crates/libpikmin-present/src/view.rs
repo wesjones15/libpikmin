@@ -85,6 +85,9 @@ pub mod kinds {
     pub const TEKI: u8 = 12;
     pub const NECTAR_DROP: u8 = 13;
     pub const NECTAR_PUDDLE: u8 = 14;
+    /// A VR player's forearm and hand ([`super::View::set_vr_arms`]), in its own arm space; keyed
+    /// [`crate::vr_arms::VR_ARM_KEY`] + side (0 right, 1 left), its model the body's.
+    pub const VR_ARM: u8 = 15;
 }
 
 /// Draw flags.
@@ -613,6 +616,15 @@ pub struct View {
     /// draw, in his body's own units; the push applies its scale and ground lift and stores
     /// them in `captain_anchors`.
     pending_anchors: Option<[Option<Mat4>; 15]>,
+    /// The captain a VR host draws arms for and the asset cache their cuts are in ([`View::set_vr_arms`]),
+    /// and each body's cut once read (by model; None where it has none).
+    vr_arms: Option<(u32, std::path::PathBuf)>,
+    vr_cuts: HashMap<u32, Option<crate::vr_arms::Cut>>,
+    /// How the last captain body push placed his skinned vertices: its base (root and scale), ground lift and
+    /// scale, for his VR arms' wrists.
+    body_xform: Option<(Mat4, f32, f32)>,
+    /// The loaded Pianta is the female one (her cut's name).
+    pianta_female: bool,
     /// The Pianta body some captains wear ([`View::load_pianta`]) and who wears it.
     pub(crate) pianta: Option<crate::pianta::PiantaSkin>,
     /// The Louie body some captains wear ([`View::load_louie`]).
@@ -901,6 +913,10 @@ impl View {
             captain_skins: HashMap::new(),
             captain_anchors: HashMap::new(),
             pending_anchors: None,
+            vr_arms: None,
+            vr_cuts: HashMap::new(),
+            body_xform: None,
+            pianta_female: false,
             pianta_voices: Vec::new(),
         })
     }
@@ -1339,7 +1355,86 @@ impl View {
             m.batch_lit.iter().map(|l| l & 3).collect(),
         ));
         self.pianta = Some(skin);
+        self.pianta_female = female;
         Ok(model)
+    }
+
+    /// Also draws `captain`'s forearms and hands on their own, for a host that puts them on a VR player's
+    /// controllers (his body is then the host's to leave out), in every skin: Olimar, Louie, both Piantas and
+    /// Captain Pikachu. Each is libcommon's `vr_arms` cut of that body from the asset cache `cache`
+    /// (`vr_arms/pik-<skin>.arms`, baked on first run by [`crate::vr_arms::bake`]; cut then if missing, but
+    /// Pikachu's only read). Each draw is posed as his body is but given in its arm space, kind
+    /// [`kinds::VR_ARM`], keyed [`crate::vr_arms::VR_ARM_KEY`] + side. Louie's head light isn't drawn for him.
+    /// None stops.
+    pub fn set_vr_arms(&mut self, captain: Option<u32>, cache: &std::path::Path) {
+        self.vr_arms = captain.map(|c| (c, cache.to_path_buf()));
+    }
+
+    /// The VR arms of the captain body just drawn as `k`, from its own skinned vertices: each side's cut taken
+    /// into its arm space by the wrist's posed matrix in `joints` (the body's own units when `based`: placed as
+    /// the push did, by [`View::body_xform`]; else already in draw space), at the body's size.
+    fn push_vr_arms(&mut self, k: u64, joints: &[Mat4], based: bool, flags: u8) {
+        let Some(d) = self.draws.iter().rev().find(|d| d.key == k).copied() else { return };
+        let (base, low, scale) = if based { self.body_xform.unwrap_or((Mat4::IDENTITY, 0.0, 1.0)) } else { (Mat4::IDENTITY, 0.0, 1.0) };
+        if !self.vr_cuts.contains_key(&d.model) {
+            let cache = self.vr_arms.as_ref().map(|(_, c)| c.clone());
+            let body = if d.model == models::OLIMAR {
+                Some(crate::vr_arms::Body::Olimar(&self.models[models::OLIMAR as usize]))
+            } else if let Some(l) = self.louie.as_ref().filter(|l| l.model == d.model) {
+                Some(crate::vr_arms::Body::Louie(&l.body.model))
+            } else if let Some(p) = self.pianta.as_ref().filter(|p| p.model == d.model) {
+                Some(crate::vr_arms::Body::Pianta(&p.body.model, self.pianta_female))
+            } else {
+                self.pikachu.as_ref().filter(|p| p.captain.index == d.model).map(|p| crate::vr_arms::Body::Pikachu(&p.captain))
+            };
+            let cut = cache.zip(body).and_then(|(c, b)| crate::vr_arms::cut(&c, b));
+            self.vr_cuts.insert(d.model, cut);
+        }
+        let Some(Some(cut)) = self.vr_cuts.remove(&d.model) else {
+            self.vr_cuts.insert(d.model, None);
+            return;
+        };
+        let (fv, fc) = (d.first_vertex as usize, d.first_color as usize);
+        let count = self.positions.len().saturating_sub(fv);
+        let colors = self.colors.len().saturating_sub(fc);
+        let lift = Mat4::from_translation(Vec3::new(0.0, -low, 0.0)) * base;
+        for arm in &cut.arms.arms {
+            let (Some(wrist), Some((_, map))) = (joints.get(arm.wrist as usize), cut.maps.iter().find(|(s, _)| *s == arm.side)) else { continue };
+            let wrist = lift * *wrist;
+            let to_arm = Mat4::from_scale(Vec3::splat(scale)) * Mat4::from_cols_array(&arm.to_arm(&wrist.to_cols_array()));
+            let first_vertex = self.positions.len() as u32;
+            let first_color = self.colors.len() as u32;
+            for i in 0..count {
+                let src = map.get(i).copied().unwrap_or(libcommon::vr_arms::COLLAPSED) as usize;
+                if src < count {
+                    let (p, n) = (self.positions[fv + src], self.normals[fv + src]);
+                    self.positions.push(to_arm.transform_point3(p));
+                    self.normals.push(to_arm.transform_vector3(n).normalize_or_zero());
+                } else {
+                    self.positions.push(Vec3::ZERO);
+                    self.normals.push(Vec3::Y);
+                }
+                let uv = self.uvs.get(fv + i).copied().unwrap_or([0.0, 0.0]);
+                self.uvs.push(uv);
+            }
+            for c in 0..colors {
+                let (tex, color) = (self.texture_ids[fc + c], self.colors[fc + c]);
+                self.texture_ids.push(tex);
+                self.colors.push(color);
+            }
+            self.draws.push(Draw {
+                key: key(kinds::VR_ARM, crate::vr_arms::VR_ARM_KEY + arm.side as u64),
+                kind: kinds::VR_ARM,
+                flags,
+                model: d.model,
+                pos: Vec3::ZERO,
+                rot: Quat::IDENTITY,
+                first_vertex,
+                first_color,
+                alpha: 1.0,
+            });
+        }
+        self.vr_cuts.insert(d.model, Some(cut));
     }
 
     /// A body attachment point as this captain's last draw posed it, in his model's space:
@@ -1411,6 +1506,9 @@ impl View {
         let pose = libsms_assets::Pose::new(&m.bmd, root * Mat4::from_scale(Vec3::splat(scale)), joints);
         let low = m.batches.iter().flat_map(|b| &b.vertices).map(|v| pose.skin(v).0.y).fold(f32::INFINITY, f32::min);
         let low = if low.is_finite() && !std::mem::take(&mut self.no_lift) { low } else { 0.0 };
+        if kind == kinds::CAPTAIN {
+            self.body_xform = Some((root * Mat4::from_scale(Vec3::splat(scale)), low, scale));
+        }
         if kind == kinds::CAPTAIN
             && let Some(raw) = self.pending_anchors.take()
         {
@@ -1502,6 +1600,9 @@ impl View {
             let (mut p, mut n) = (Vec::new(), Vec::new());
             let low = body.skin_into(joints, root, &mut p, &mut n);
             let low = if low.is_finite() { low } else { 0.0 };
+            if kind == kinds::CAPTAIN {
+                self.body_xform = Some((root * Mat4::from_scale(Vec3::splat(body.scale)), low, body.scale));
+            }
             if kind == kinds::CAPTAIN
                 && let Some(raw) = self.pending_anchors.take()
             {
@@ -2717,21 +2818,30 @@ impl View {
             }
             self.captain_anchors.insert(c.id.0, anchors);
             self.captain_anchors.insert(c.id.0, anchors);
+            let vr = self.vr_arms.as_ref().is_some_and(|(id, _)| *id == c.id.0);
             if let Some(joints) = pianta_joints {
                 self.push_pianta(k, pos, rot, root, &joints, &anchors, 1.0, f);
+                if vr { self.push_vr_arms(k, &joints, true, f); }
             } else if let Some(joints) = louie_joints {
                 self.push_louie(k, pos, rot, root, &joints, &anchors, 1.0, f);
-                if let Some(l) = &self.louie {
+                // His light burns over his head, which a VR player's eye is in.
+                if let Some(l) = &self.louie
+                    && !vr
+                {
                     self.light_spots.push((pos, l.scale * l.body.height()));
                 }
+                if vr { self.push_vr_arms(k, &joints, true, f); }
             } else if let Some(world) = pikachu_world {
                 if let Some(sk) = self.pikachu.clone() {
                     self.pending_anchors = Some(anchors);
                     self.push_hsd(&sk.captain, kinds::CAPTAIN, k, pos, rot, root, &world, 1.0, f, false);
+                    if vr { self.push_vr_arms(k, &world, true, f); }
                 }
             } else {
                 self.captain_anchors.insert(c.id.0, anchors);
+                let joints = if vr { pose.joints.clone() } else { Vec::new() };
                 self.push(k, kinds::CAPTAIN, models::OLIMAR, pos, rot, pose, &no_inputs, 1.0, f);
+                if vr { self.push_vr_arms(k, &joints, false, f); }
             }
             if !self.show_cursors {
                 continue;

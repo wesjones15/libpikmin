@@ -548,6 +548,23 @@ pub unsafe extern "C" fn pik_ssbm_extract_ice_climbers(iso: *const c_char, out: 
     }
 }
 
+/// Draws `captain`'s forearms and hands on their own for a VR player's controllers
+/// ([`libpikmin_present::View::set_vr_arms`]), their cuts read from the asset cache `cache`: kind 15 draws keyed
+/// 0x10 + side (0 right, 1 left) in arm space. `captain` < 0 (or a null `cache`) stops.
+///
+/// # Safety
+/// `view` is a live handle; `cache` null or a NUL-terminated path.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_set_vr_arms(view: *mut PikView, captain: i32, cache: *const std::ffi::c_char) {
+    let Some(v) = (unsafe { view.as_mut() }) else { return };
+    if captain < 0 || cache.is_null() {
+        v.view.set_vr_arms(None, std::path::Path::new(""));
+        return;
+    }
+    let dir = unsafe { std::ffi::CStr::from_ptr(cache) }.to_string_lossy().into_owned();
+    v.view.set_vr_arms(Some(captain as u32), std::path::Path::new(&dir));
+}
+
 /// Which body a captain wears: 0 Olimar, 1 Louie, 2 the Pianta, 3 Pikachu (when loaded). Takes effect on the next update.
 /// # Safety
 /// `view` is a live handle.
