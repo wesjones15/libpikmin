@@ -24,6 +24,7 @@ pub mod teki;
 pub mod treasure;
 pub mod tev;
 pub mod view;
+pub mod vr_arms;
 
 pub use audio::Audio;
 pub use view::View;

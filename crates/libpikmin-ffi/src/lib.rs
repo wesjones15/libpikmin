@@ -948,6 +948,40 @@ pub unsafe extern "C" fn pik_render_stings(dir: *const c_char, msg: *mut u8, msg
     ok
 }
 
+/// First run: cuts each captain body's VR arms (`libpikmin_present::vr_arms`) into `assets_dir/vr_arms/`, keeping
+/// cuts already there: Olimar from `assets_dir`, Louie from `p2_dir`, the Piantas from `sms_dir` and Captain Pikachu
+/// from `melee_dir` (each null to skip it). Returns 1 with each body's note in `msg`.
+///
+/// # Safety
+/// The dirs null or nul-terminated strings; `msg` null or writable for `msg_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_bake_vr_arms(
+    assets_dir: *const c_char,
+    sms_dir: *const c_char,
+    p2_dir: *const c_char,
+    melee_dir: *const c_char,
+    msg: *mut u8,
+    msg_len: u32,
+) -> u8 {
+    // SAFETY: as documented.
+    let (dir, sms, p2, melee) = unsafe { (path_arg(assets_dir), path_arg(sms_dir), path_arg(p2_dir), path_arg(melee_dir)) };
+    let result = catch_unwind(|| -> Result<String, String> {
+        let dir = dir.ok_or("missing asset directory")?;
+        let view = libpikmin_present::View::load(&libpikmin_assets::Assets { root: dir.clone() }).map_err(|e| e.to_string())?;
+        let src = libpikmin_present::vr_arms::Sources { sms: sms.as_deref(), p2: p2.as_deref(), melee: melee.as_deref() };
+        let olimar = &view.models[libpikmin_present::view::models::OLIMAR as usize];
+        Ok(libpikmin_present::vr_arms::bake(olimar, &dir, src).join("; "))
+    });
+    let (ok, text) = match result {
+        Ok(Ok(text)) => (1, text),
+        Ok(Err(text)) => (0, text),
+        Err(_) => (0, "the VR arm bake panicked".into()),
+    };
+    // SAFETY: as documented.
+    unsafe { write_str(&text, msg, msg_len) };
+    ok
+}
+
 /// # Safety
 /// `p` null or a nul-terminated string.
 unsafe fn path_arg(p: *const c_char) -> Option<PathBuf> {
