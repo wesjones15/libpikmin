@@ -42,7 +42,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 60;
+pub const PIK_ABI_VERSION: u32 = 61;
 
 /// The replica snapshot's wire version (`libpikmin::snapshot::SNAPSHOT_VERSION`). Hosts put it in
 /// their multiplayer envelope: a snapshot is nested bytes there, so without this a host and client
@@ -192,7 +192,8 @@ pub struct PikInput {
     pub pose_pos: PikVec3,
     pub pose_vel: PikVec3,
     pub pose_face: f32,
-    /// With `use_cursor`, the world point the player is aiming at.
+    /// With `use_cursor`, the world point the player is aiming at: 1 puts the cursor on the ground
+    /// below it, 2 keeps the point itself (`CaptainInput::cursor_free`, a VR pointer's hit).
     pub cursor: PikVec3,
     pub whistle: u8,
     pub throw: u8,
@@ -219,6 +220,7 @@ impl PikInput {
                 face: self.pose_face,
             }),
             cursor: (self.use_cursor != 0).then(|| self.cursor.into()),
+            cursor_free: self.use_cursor == 2,
             cycle: self.cycle != 0,
             jump: self.jump != 0,
             jump_blocked: self.jump_blocked != 0,

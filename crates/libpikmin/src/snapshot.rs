@@ -31,7 +31,7 @@ use crate::strike::Strike;
 use crate::{CaptainId, PikiId};
 
 /// Bumped when the encoding changes.
-pub const SNAPSHOT_VERSION: u8 = 14;
+pub const SNAPSHOT_VERSION: u8 = 15;
 
 // Far more than any real sim has; a corrupt length can't make decoding allocate wildly.
 const MAX_ENTITIES: usize = 4096;
@@ -965,6 +965,7 @@ fn w_input(w: &mut Writer, i: &CaptainInput) {
         w.f32(p.face);
     });
     w.opt(i.cursor.as_ref(), |w, c| w.vec3(*c));
+    w.bool(i.cursor_free);
     w.bool(i.cycle);
     w.bool(i.jump);
     w.bool(i.jump_blocked);
@@ -979,6 +980,7 @@ fn r_input(r: &mut Reader) -> Option<CaptainInput> {
         swarm: r.vec2()?,
         pose: r.opt(|r| Some(CaptainPose { pos: r.vec3()?, vel: r.vec3()?, face: r.f32()? }))?,
         cursor: r.opt(|r| r.vec3())?,
+        cursor_free: r.bool()?,
         cycle: r.bool()?,
         jump: r.bool()?,
         jump_blocked: r.bool()?,

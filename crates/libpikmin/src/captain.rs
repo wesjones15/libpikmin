@@ -45,6 +45,10 @@ pub struct CaptainInput {
     /// reach (`NaviParms` cursor max radius). Not in the game, where only the stick moves the
     /// cursor; hosts that aim with a camera use it instead.
     pub cursor: Option<Vec3>,
+    /// Host extension: `cursor` is a 3D point to keep (a VR pointer's hit on an enemy's side or
+    /// a ledge), not a spot to drop onto the ground below, as a lock-on's part centre is kept.
+    /// Within reach only; past it the cursor goes on the ground at the edge as usual.
+    pub cursor_free: bool,
     /// Picks the next colour to throw (Pikmin 2's type switch; not in Pikmin 1, which always
     /// throws the nearest).
     pub cycle: bool,
@@ -411,7 +415,7 @@ impl Sim {
         }
 
         if self.captains[ci].actions_held {
-            let held = CaptainInput { pose: input.pose, cursor: input.cursor, ..Default::default() };
+            let held = CaptainInput { pose: input.pose, cursor: input.cursor, cursor_free: input.cursor_free, ..Default::default() };
             self.captain_move(ci, host, dt, held, false);
             let c = &mut self.captains[ci];
             c.whistle = WhistleState::Off;
@@ -609,6 +613,17 @@ impl Sim {
             .ground_height(c.pos + c.cursor + Vec3::Y * CURSOR_PROBE_LIFT)
             .unwrap_or(c.pos.y);
         c.cursor_world = Vec3::new(c.pos.x + c.cursor.x, ground + 1.0, c.pos.z + c.cursor.z);
+        // A free cursor (cursor_free) stays on the point itself while it's within reach of where
+        // he is now; a lock below still takes it.
+        if input.cursor_free
+            && let Some(aim) = input.cursor
+        {
+            let off = Vec3::new(aim.x - c.pos.x, 0.0, aim.z - c.pos.z);
+            if off.length() <= reach {
+                c.cursor = off;
+                c.cursor_world = aim;
+            }
+        }
         c.lock_view = None;
         if let Some(target) = c.lock_target.and_then(|id| self.creatures.get(id)).filter(|t| t.alive)
             && let Some(part) = self.creatures.parts_of(target).iter().find(|p| p.stickable)
