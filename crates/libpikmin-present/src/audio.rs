@@ -3,13 +3,14 @@
 //!
 //! The sound system runs on the audio thread behind a mutex; the game thread posts sounds and
 //! the listener once per frame. The stream is opened and kept on a thread of its own, so the
-//! host's thread (COM apartment, panics) doesn't matter.
+//! host's thread (COM apartment, panics) doesn't matter, and it follows the default output
+//! device (libcommon's `audio::out`): a headset's audio coming back doesn't leave it silent.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::DeviceTrait;
 use glam::{Mat4, Vec3};
 use libpikmin::event::Event;
 use libpikmin::host::CreatureId;
@@ -74,9 +75,9 @@ pub struct Audio {
     sys: Arc<Mutex<SoundSystem>>,
     /// Output gain, as f32 bits.
     gain: Arc<AtomicU32>,
-    stop: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    /// The stream, kept on the default device (dropped with the Audio: the sound stops).
+    _output: libcommon::audio::out::Output,
     whistling: bool,
     onion_spot: bool,
     external_death_sting: bool,
@@ -98,16 +99,6 @@ pub struct Audio {
     pub channels: u16,
 }
 
-impl Drop for Audio {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(t) = self.thread.take() {
-            t.thread().unpark();
-            let _ = t.join();
-        }
-    }
-}
-
 impl Audio {
     /// Starts the sound system and an output stream on the default device. `Err` says why
     /// there's no sound (no sound data, no device).
@@ -121,39 +112,17 @@ impl Audio {
         }
         let sys = Arc::new(Mutex::new(sys));
         let gain = Arc::new(AtomicU32::new(1f32.to_bits()));
-        let stop = Arc::new(AtomicBool::new(false));
         let paused = Arc::new(AtomicBool::new(false));
-        let (ready_tx, ready_rx) = mpsc::channel::<Result<(u32, u16), String>>();
-        let (shared, g, st, p) = (sys.clone(), gain.clone(), stop.clone(), paused.clone());
-        let thread = std::thread::Builder::new()
-            .name("pikmin-audio".into())
-            .spawn(move || {
-                let stream = open_stream(shared, g, p);
-                match stream {
-                    Ok((stream, rate, channels)) => {
-                        let _ = ready_tx.send(Ok((rate, channels)));
-                        while !st.load(Ordering::Relaxed) {
-                            std::thread::park();
-                        }
-                        drop(stream);
-                    }
-                    Err(e) => {
-                        let _ = ready_tx.send(Err(e));
-                    }
-                }
-            })
-            .map_err(|e| format!("audio thread: {e}"))?;
-        let (rate, channels) = match ready_rx.recv() {
-            Ok(Ok(v)) => v,
-            Ok(Err(e)) => return Err(e),
-            Err(_) => return Err("audio thread died".into()),
-        };
+        let (shared, g, p) = (sys.clone(), gain.clone(), paused.clone());
+        let output = libcommon::audio::out::Output::start("pikmin-audio", move |device: &cpal::Device, lost| {
+            open_stream(device, lost, shared.clone(), g.clone(), p.clone())
+        })?;
+        let (rate, channels) = (output.rate, output.channels);
         Ok(Audio {
             sys,
             gain,
-            stop,
             paused,
-            thread: Some(thread),
+            _output: output,
             whistling: false,
             onion_spot: false,
             external_death_sting: false,
@@ -586,11 +555,9 @@ impl Audio {
     }
 }
 
-/// Opens the default output device and starts rendering `sys` into it.
-fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>, paused: Arc<AtomicBool>) -> Result<(cpal::Stream, u32, u16), String> {
-    let device = cpal::default_host()
-        .default_output_device()
-        .ok_or("no output device")?;
+/// A stream rendering `sys` on `device` (not yet playing); `lost` is set when it fails.
+fn open_stream(device: &cpal::Device, lost: Arc<AtomicBool>, sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>,
+    paused: Arc<AtomicBool>) -> Result<(cpal::Stream, u32, u16), String> {
     let config = device.default_output_config().map_err(|e| format!("output config: {e}"))?;
     if config.sample_format() != cpal::SampleFormat::F32 {
         return Err(format!("output format {:?} isn't f32", config.sample_format()));
@@ -617,10 +584,12 @@ fn open_stream(sys: Arc<Mutex<SoundSystem>>, gain: Arc<AtomicU32>, paused: Arc<A
                     }
                 }
             },
-            |e| eprintln!("sound: stream error: {e}"),
+            move |e| {
+                eprintln!("sound: stream error: {e}");
+                lost.store(true, Ordering::Relaxed);
+            },
             None,
         )
         .map_err(|e| format!("output stream: {e}"))?;
-    stream.play().map_err(|e| format!("play: {e}"))?;
     Ok((stream, rate, channels))
 }

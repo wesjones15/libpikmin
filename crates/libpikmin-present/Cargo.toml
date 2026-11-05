@@ -10,7 +10,7 @@ libpikmin-assets.workspace = true
 libpikmin-audio.workspace = true
 libpikmin-teki.workspace = true
 glam.workspace = true
-libcommon.workspace = true
+libcommon = { workspace = true, features = ["cpal"] }
 # A Sunshine Pianta as an alt-skin body for Olimar (pianta.rs).
 libsms.workspace = true
 libsms-assets.workspace = true
