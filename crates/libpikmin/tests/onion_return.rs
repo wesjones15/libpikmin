@@ -104,3 +104,38 @@ fn death_recall_cancels_jobs_and_timeout_preserves_unreachable_living_pikmin() {
     assert!(sim.onions()[0].dormancy.is_some());
     assert_eq!(sim.piki_deaths(), 0);
 }
+
+#[test]
+fn entry_jump_is_an_arc_peaking_on_the_grab_point() {
+    let mut sim = Sim::new(Params::default(), 9);
+    let captain = sim.add_captain(Vec3::ZERO);
+    let onion = sim.add_onion(Vec3::Y * 100.0, &PikiColor::EVERY);
+    sim.set_onion_pose(onion, Vec3::Y * 100.0, true);
+    let id = sim.spawn_piki_in_squad(PikiColor::Red, Vec3::ZERO, captain).unwrap();
+    sim.onion_put_away(captain, onion, PikiColor::Red, 1);
+    // Watch the jump: height only rises, each step rises less than the last (ease-out), and the
+    // climb starts from the jump's end point with no vertical overshoot.
+    let (mut last_y, mut last_dy, mut samples, mut climb_start) = (None::<f32>, f32::MAX, 0, None);
+    for _ in 0..600 {
+        sim.step(&mut FlatHost);
+        match sim.piki(id).state {
+            PikiState::Enter { climbing: false, ratio, .. } if ratio < 0.0 => {
+                let y = sim.piki(id).pos.y;
+                if let Some(prev) = last_y {
+                    let dy = y - prev;
+                    assert!(dy >= -1e-3, "the jump never descends");
+                    assert!(dy <= last_dy + 1e-3, "rise slows toward the peak");
+                    last_dy = dy;
+                    samples += 1;
+                }
+                last_y = Some(y);
+            }
+            PikiState::Enter { climbing: true, .. } if climb_start.is_none() => climb_start = Some(sim.piki(id).pos.y),
+            _ => {}
+        }
+        if climb_start.is_some() { break; }
+    }
+    assert!(samples > 5, "the jump runs for several steps");
+    let (top, start) = (last_y.unwrap(), climb_start.expect("jump hands over to the climb"));
+    assert!((start - top).abs() < last_dy.abs() + 2.0, "peak lands on the grab point: {top} -> {start}");
+}

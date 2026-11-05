@@ -515,7 +515,15 @@ impl Sim {
                         let p = &mut self.pikis[pi];
                         let remaining = -ratio;
                         let step = dt.min(remaining);
-                        p.pos += (foot - p.pos) * (step / remaining);
+                        // Arc jump: sideways at a steady pace, height eased out so the climb
+                        // peaks (zero vertical speed) exactly on the leg's grab point. Both
+                        // chase the live `foot` each step, so the Onion's mirror, wobble,
+                        // pitch and yaw still carry the target. The remaining gap shrinks as
+                        // (time left)^2, which keeps this stateless for snapshots and replicas.
+                        let left = (remaining - step) / remaining;
+                        p.pos.x += (foot.x - p.pos.x) * (step / remaining);
+                        p.pos.z += (foot.z - p.pos.z) * (step / remaining);
+                        p.pos.y = foot.y - (foot.y - p.pos.y) * left * left;
                         p.vel = Vec3::ZERO;
                         p.on_ground = false;
                         p.state = if remaining <= dt {
