@@ -16,7 +16,8 @@ use glam::Vec3;
 use crate::event::Event;
 use crate::math::{ang_dist, dist_xz, round_ang, yaw_of};
 use crate::onion::{OnionId, SproutId};
-use crate::onion_menu::{SLIDE_SPEED, leg_length, leg_point};
+use crate::onion::OnionAnim;
+use crate::onion_menu::{SLIDE_SPEED, flying_pose, leg_length, leg_point};
 use crate::piki::{Happa, PikiState};
 use crate::{Host, Sim};
 
@@ -28,6 +29,11 @@ const PULL_DISTANCE: f32 = 6.0;
 /// A plucker that hasn't got closer to its sprout in this long (a wall, a cliff, a slope) is
 /// put down beside it.
 const STUCK_TIME: f32 = 3.0;
+/// A plucker this far (sideways) from its Onion has lost it (the Onion flies with Olimar): it is
+/// put down near its captain and comes back for the Onion from there.
+const TELEPORT_DISTANCE: f32 = 900.0;
+/// Under the hovering Onion this closely, the plucker jumps for a leg (`ActEnter`).
+const RETURN_RADIUS: f32 = 60.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PluckerJob {
@@ -37,6 +43,10 @@ pub enum PluckerJob {
     Walk { sprout: SproutId, best: f32, stuck: f32 },
     /// Pulling `sprout` ("NUKU" at `frame`); `popped` once the Pikmin is out.
     Pull { sprout: SproutId, frame: f32, popped: bool },
+    /// Dropped from the middle of a hovering Onion's leg, falling to the ground.
+    Fall,
+    /// Done (or the Onion flew off): heading for the spot under a hovering Onion to climb in.
+    Return,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -85,8 +95,9 @@ impl Sim {
     /// Host button: ask this landed Onion's plucker to collect nearby ready sprouts
     /// now, without changing the automatic pluck delay for the other Onions.
     pub fn trigger_plucker(&mut self, onion: OnionId) -> bool {
+        // A hovering Onion works too: the plucker drops from its leg and climbs back up.
         let Some(oi) = self.onions.iter().position(|o| o.id == onion && o.ship.is_none()
-            && o.grounded() && o.stored_total() > 0) else { return false; };
+            && o.takes_deliveries() && o.stored_total() > 0) else { return false; };
         let at = self.onions[oi].pos;
         if self.pikis.iter().any(|p| matches!(p.state, PikiState::Plucker(pl) if pl.onion == onion))
             || !self.sprouts.iter().flatten().any(|s| s.pluckable() && s.claimed_by.is_none()
@@ -113,8 +124,9 @@ impl Sim {
             return;
         };
         let (onion, opos, owner) = (o.id, o.pos, o.owner);
+        let hover = flying_pose(o).then_some(o.hover_frame);
         let leg = (self.rng.f32() * 3.0) as u8 % 3;
-        let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, None, mirror)) else {
+        let Some(id) = self.spawn_piki(color, leg_point(opos, leg, 1.0, hover, mirror)) else {
             return;
         };
         self.onions[oi].stored[color.index()][happa as usize] -= 1;
@@ -153,19 +165,20 @@ impl Sim {
         }
     }
 
-    /// Back into its Onion up the nearest leg, or, if the Onion has left, off to its captain.
+    /// Back into its Onion up the nearest leg; for a hovering Onion, first to the spot under it.
+    /// If the Onion has left, off to its captain.
     fn plucker_home(&mut self, pi: usize, onion: OnionId) {
+        let mirror = self.mirror_onion_legs;
         let o = &self.onions[onion.0 as usize];
         let p = &mut self.pikis[pi];
         p.target_vel = Vec3::ZERO;
         if o.grounded() {
-            let mirror = self.mirror_onion_legs;
-            let leg = (0..3u8)
-                .min_by(|&a, &b| {
-                    dist_xz(leg_point(o.pos, a, 0.0, None, mirror), p.pos).total_cmp(&dist_xz(leg_point(o.pos, b, 0.0, None, mirror), p.pos))
-                })
-                .unwrap_or(0);
+            let leg = nearest_leg(o.pos, p.pos, None, mirror);
             p.state = PikiState::Enter { onion, leg, climbing: false, ratio: 0.0 };
+            return;
+        }
+        if !onion_gone(o) {
+            p.state = PikiState::Plucker(Plucker { onion, job: PluckerJob::Return });
             return;
         }
         let id = p.id;
@@ -175,20 +188,58 @@ impl Sim {
         }
     }
 
+    /// Put down beside its captain (or the Onion if nobody is up), on the ground, to come back
+    /// for a hovering Onion that flew far off.
+    fn plucker_teleport(&mut self, pi: usize, onion: OnionId, host: &mut dyn Host) {
+        let o = &self.onions[onion.0 as usize];
+        let base = self.pikis[pi]
+            .captain
+            .filter(|c| !self.captains[c.0 as usize].down)
+            .map(|c| self.captains[c.0 as usize].pos)
+            .unwrap_or(o.pos);
+        let angle = self.rng.f32() * std::f32::consts::TAU;
+        let mut at = base + Vec3::new(angle.sin(), 0.0, angle.cos()) * 60.0;
+        at.y = host.ground_height(at + Vec3::Y * 400.0).unwrap_or(base.y);
+        let p = &mut self.pikis[pi];
+        p.pos = at;
+        p.vel = Vec3::ZERO;
+        p.target_vel = Vec3::ZERO;
+        p.on_ground = true;
+    }
+
     pub(crate) fn piki_plucker(&mut self, pi: usize, pl: Plucker, host: &mut dyn Host, dt: f32) {
         let mirror = self.mirror_onion_legs;
-        // The Onion took off under it: it gives up and goes to its captain.
-        if !self.onions[pl.onion.0 as usize].grounded() && !matches!(pl.job, PluckerJob::Descend { .. }) {
+        // The Onion left the stage (or went dormant) under it: it gives up and goes to its captain.
+        // A hovering Onion is fine: the plucker works from the ground and climbs back up.
+        if onion_gone(&self.onions[pl.onion.0 as usize]) && !matches!(pl.job, PluckerJob::Descend { .. }) {
             return self.plucker_home(pi, pl.onion);
+        }
+        // Lost the Onion (it flew off with Olimar): near the captain, head back for it.
+        if matches!(pl.job, PluckerJob::Walk { .. } | PluckerJob::Return)
+            && dist_xz(self.pikis[pi].pos, self.onions[pl.onion.0 as usize].pos) > TELEPORT_DISTANCE
+        {
+            self.plucker_teleport(pi, pl.onion, host);
+            self.pikis[pi].state = PikiState::Plucker(Plucker { job: PluckerJob::Return, ..pl });
+            return;
         }
         match pl.job {
             PluckerJob::Descend { leg, ratio } => {
-                let opos = self.onions[pl.onion.0 as usize].pos;
-                let r = ratio - SLIDE_SPEED * dt / leg_length(leg, None);
+                let o = &self.onions[pl.onion.0 as usize];
+                let opos = o.pos;
+                let hover = flying_pose(o).then_some(o.hover_frame);
+                let r = ratio - SLIDE_SPEED * dt / leg_length(leg, hover);
                 let p = &mut self.pikis[pi];
-                p.pos = leg_point(opos, leg, r, None, mirror);
+                if hover.is_some() && r <= 0.5 {
+                    // As a Pikmin called out of a hovering Onion: half the slide, then it drops.
+                    p.pos = leg_point(opos, leg, 0.5, hover, mirror);
+                    p.vel = Vec3::NEG_Y * SLIDE_SPEED;
+                    p.on_ground = false;
+                    p.state = PikiState::Plucker(Plucker { job: PluckerJob::Fall, ..pl });
+                    return;
+                }
+                p.pos = leg_point(opos, leg, r, hover, mirror);
                 p.vel = Vec3::ZERO;
-                let d = p.pos - leg_point(opos, leg, 1.0, None, mirror);
+                let d = p.pos - leg_point(opos, leg, 1.0, hover, mirror);
                 p.face = d.x.atan2(d.z);
                 if r > 0.0 {
                     p.state = PikiState::Plucker(Plucker { job: PluckerJob::Descend { leg, ratio: r }, ..pl });
@@ -196,6 +247,41 @@ impl Sim {
                 }
                 p.on_ground = true;
                 self.plucker_next(pi, pl);
+            }
+            PluckerJob::Fall => {
+                let p = &mut self.pikis[pi];
+                p.target_vel = p.vel;
+                self.physics(pi, host, dt);
+                if self.pikis[pi].on_ground {
+                    self.pikis[pi].vel = Vec3::ZERO;
+                    self.plucker_next(pi, pl);
+                }
+            }
+            PluckerJob::Return => {
+                let o = &self.onions[pl.onion.0 as usize];
+                if o.grounded() {
+                    return self.plucker_home(pi, pl.onion);
+                }
+                let (opos, hover) = (o.pos, flying_pose(o).then_some(o.hover_frame));
+                let ready = o.takes_deliveries();
+                let to = (opos - self.pikis[pi].pos).with_y(0.0);
+                if ready && to.length() <= RETURN_RADIUS {
+                    // `ActEnter` takes over: walk to the leg's foot, jump, climb.
+                    let leg = nearest_leg(opos, self.pikis[pi].pos, hover, mirror);
+                    let p = &mut self.pikis[pi];
+                    p.target_vel = Vec3::ZERO;
+                    p.state = PikiState::Enter { onion: pl.onion, leg, climbing: false, ratio: 0.0 };
+                    return;
+                }
+                // Landing or taking off: wait where it stands.
+                let speed = self.piki_speed(pi, 1.0);
+                let dir = to.normalize_or_zero();
+                let p = &mut self.pikis[pi];
+                p.target_vel = if ready { dir * speed } else { Vec3::ZERO };
+                if ready {
+                    p.face = round_ang(p.face + 0.3 * ang_dist(yaw_of(dir), p.face));
+                }
+                self.physics(pi, host, dt);
             }
             PluckerJob::Walk { sprout, best, stuck } => {
                 let Some(s) = self.sprouts.get(sprout.0 as usize).and_then(Option::as_ref)
@@ -275,6 +361,22 @@ impl Sim {
     }
 }
 
+/// The Onion is off the stage or dormant: a plucker out for it has nowhere to climb back to.
+fn onion_gone(o: &crate::onion::Onion) -> bool {
+    o.ship.is_some() || o.dormancy.is_some() || o.anim == OnionAnim::Away
+}
+
+/// The leg whose foot (or, hovering, grab point) is nearest `from`.
+fn nearest_leg(onion: Vec3, from: Vec3, hover: Option<f32>, mirror: bool) -> u8 {
+    let ratio = if hover.is_some() { 0.5 } else { 0.0 };
+    (0..3u8)
+        .min_by(|&a, &b| {
+            dist_xz(leg_point(onion, a, ratio, hover, mirror), from)
+                .total_cmp(&dist_xz(leg_point(onion, b, ratio, hover, mirror), from))
+        })
+        .unwrap_or(0)
+}
+
 /// Near enough, at any height: the plucker is put down beside a sprout it can't walk to.
 fn in_reach(onion: Vec3, at: Vec3) -> bool {
     dist_xz(onion, at) <= PLUCKER_RANGE
@@ -305,6 +407,50 @@ mod tests {
         assert!(sim.trigger_plucker(onion));
         assert!(!sim.trigger_plucker(onion), "one plucker per Onion");
         assert_eq!(sim.onions()[0].stored_total(), 1);
+    }
+
+    fn hovering_sim(captain_at: Vec3) -> (Sim, OnionId) {
+        let mut sim = Sim::new(Params::default(), 7);
+        let captain = sim.add_captain(captain_at);
+        let onion = sim.add_onion(Vec3::ZERO, &PikiColor::ALL);
+        sim.set_onion_owner(onion, Some(captain));
+        sim.store_in_onion(onion, PikiColor::Red, Happa::Leaf, 1);
+        sim.plant_sprout(PikiColor::Blue, Vec3::new(150.0, 0.0, 0.0));
+        sim.plant_sprout(PikiColor::Yellow, Vec3::new(-150.0, 0.0, 60.0));
+        sim.set_onion_pose(onion, Vec3::new(0.0, 300.0, 0.0), true);
+        (sim, onion)
+    }
+
+    #[test]
+    fn a_hovering_onions_plucker_drops_pulls_everything_and_climbs_back_up() {
+        let (mut sim, onion) = hovering_sim(Vec3::new(200.0, 0.0, 0.0));
+        let mut host = FlatHost;
+        run(&mut sim, &mut host, 1.0);
+        assert!(sim.trigger_plucker(onion), "a flying Onion can send its plucker");
+        let mut pulled = 0;
+        for _ in 0..(60 * crate::TICK_HZ) {
+            sim.step(&mut host);
+            pulled += sim.drain_events().filter(|e| matches!(e, Event::PluckerPulled { .. })).count();
+        }
+        assert_eq!(pulled, 2);
+        assert_eq!(sim.sprouts().count(), 0);
+        assert_eq!(sim.onions()[0].stored_total(), 1, "the plucker climbed back up into the hovering Onion");
+        assert!(!sim.pikis().iter().any(|p| matches!(p.state, PikiState::Plucker(_))));
+    }
+
+    #[test]
+    fn a_plucker_left_far_behind_is_put_down_by_its_captain_and_still_gets_home() {
+        let far = Vec3::new(20000.0, 0.0, 0.0); // too far to walk back in the test time
+        let (mut sim, onion) = hovering_sim(far);
+        let mut host = FlatHost;
+        run(&mut sim, &mut host, 1.0);
+        assert!(sim.trigger_plucker(onion));
+        run(&mut sim, &mut host, 2.0);
+        // The Onion flies off with Olimar while the plucker is out.
+        sim.set_onion_pose(onion, far + Vec3::Y * 300.0, true);
+        run(&mut sim, &mut host, 90.0);
+        assert_eq!(sim.onions()[0].stored_total(), 1, "back inside after being put down near the captain");
+        assert!(!sim.pikis().iter().any(|p| matches!(p.state, PikiState::Plucker(_))));
     }
 
     #[test]

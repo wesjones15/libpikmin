@@ -31,7 +31,7 @@ use crate::strike::Strike;
 use crate::{CaptainId, PikiId};
 
 /// Bumped when the encoding changes.
-pub const SNAPSHOT_VERSION: u8 = 15;
+pub const SNAPSHOT_VERSION: u8 = 16;
 
 // Far more than any real sim has; a corrupt length can't make decoding allocate wildly.
 const MAX_ENTITIES: usize = 4096;
@@ -641,6 +641,8 @@ fn w_pluck_job(w: &mut Writer, j: &PluckerJob) {
             w.f32(frame);
             w.bool(popped);
         }
+        PluckerJob::Fall => w.u8(3),
+        PluckerJob::Return => w.u8(4),
     }
 }
 
@@ -649,6 +651,8 @@ fn r_pluck_job(r: &mut Reader) -> Option<PluckerJob> {
         0 => PluckerJob::Descend { leg: r.u8()?, ratio: r.f32()? },
         1 => PluckerJob::Walk { sprout: SproutId(r.u32()?), best: r.f32()?, stuck: r.f32()? },
         2 => PluckerJob::Pull { sprout: SproutId(r.u32()?), frame: r.f32()?, popped: r.bool()? },
+        3 => PluckerJob::Fall,
+        4 => PluckerJob::Return,
         _ => return None,
     })
 }

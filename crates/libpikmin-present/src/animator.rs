@@ -325,7 +325,9 @@ pub fn piki_look(params: &Params, p: &Piki) -> Option<PikiLook> {
                 }
                 (Motion::HNoboru, Clock::Loop(30.0))
             }
-            PluckerJob::Walk { .. } => walk,
+            PluckerJob::Walk { .. } | PluckerJob::Return => walk,
+            // The drop from a hovering Onion's leg.
+            PluckerJob::Fall => (Motion::HNoboru, Clock::Loop(30.0)),
             PluckerJob::Pull { frame, .. } => (Motion::Nuku, Clock::Sim(frame)),
         },
         PikiState::GrowUp { frame, second, .. } => (
