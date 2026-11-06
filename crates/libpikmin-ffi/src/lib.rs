@@ -2552,6 +2552,34 @@ pub unsafe extern "C" fn pik_sim_set_onion_dormancy_seconds(sim: *mut PikSim, on
     })
 }
 
+/// An Onion's dormancy as the sim keeps it, so a host never runs a clock of its own: 0 when
+/// it is live (or a bad id), 1 while dormant, 2 while reviving. `remaining` (if not null) gets
+/// the seconds before the revival starts and `progress` (if not null) the pose, 1 live .. 0
+/// folded: it folds over 1.5 s as the wait starts and rises back over the 3 s revival.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`] or [`pik_replica_new`]; `remaining` and `progress` null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_onion_dormancy(sim: *mut PikSim, onion: u32, remaining: *mut f32, progress: *mut f32) -> u8 {
+    libcommon::ffi::guard("pik_sim_onion_dormancy", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                let Some(d) = s.sim.onions().get(onion as usize).and_then(|o| o.dormancy.as_ref()) else {
+                    return 0;
+                };
+                if let Some(r) = remaining.as_mut() {
+                    *r = d.remaining;
+                }
+                if let Some(p) = progress.as_mut() {
+                    *p = d.progress;
+                }
+                if d.reviving { 2 } else { 1 }
+            })
+        }
+    })
+}
+
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_onion_put_away(sim: *mut PikSim, captain: u32, onion: u32, color: u32, n: u32) -> u32 {

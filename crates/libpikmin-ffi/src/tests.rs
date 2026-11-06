@@ -564,6 +564,44 @@ fn pellets_onions_and_bad_arguments() {
 }
 
 #[test]
+fn onion_dormancy_is_read_from_the_sim() {
+    // SAFETY: every pointer below is live for its call.
+    unsafe {
+        let sim = pik_sim_new(std::ptr::null(), 1);
+        let at = PikVec3 { x: 300.0, y: 0.0, z: 0.0 };
+        assert_eq!(pik_sim_add_onion(sim, &at, 0b001), 0);
+        let (mut remaining, mut progress) = (-1.0f32, -1.0f32);
+        assert_eq!(pik_sim_onion_dormancy(sim, 0, &mut remaining, &mut progress), 0, "live");
+        assert_eq!(pik_sim_onion_dormancy(sim, 9, &mut remaining, &mut progress), 0, "bad id");
+        assert_eq!(pik_sim_onion_dormancy(std::ptr::null_mut(), 0, &mut remaining, &mut progress), 0);
+
+        pik_sim_make_onion_dormant(sim, 0, 2.0, &at);
+        assert_eq!(pik_sim_onion_dormancy(sim, 0, &mut remaining, &mut progress), 1);
+        assert_eq!((remaining, progress), (2.0, 1.0));
+        let mut on = [PikOnion::default(); 1];
+        pik_sim_onions(sim, on.as_mut_ptr(), 1);
+        assert_eq!(on[0].anim, 7, "the anim code the host reads agrees");
+
+        let mut world = World::default();
+        let h = host(&mut world);
+        let mut state = 1;
+        let mut seen = vec![1u8];
+        for _ in 0..(8 * 30) {
+            pik_sim_advance(sim, &h, 1.0 / 30.0);
+            let now = pik_sim_onion_dormancy(sim, 0, &mut remaining, std::ptr::null_mut());
+            if now != state {
+                seen.push(now);
+                state = now;
+            }
+        }
+        assert_eq!(seen, [1, 2, 0], "dormant, reviving, live");
+        pik_sim_onions(sim, on.as_mut_ptr(), 1);
+        assert!(on[0].anim < 7);
+        pik_sim_free(sim);
+    }
+}
+
+#[test]
 fn calling_pikmin_out_of_an_onion_and_putting_them_back() {
     // SAFETY: every pointer below is live for its call.
     unsafe {
