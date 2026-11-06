@@ -672,6 +672,7 @@ async fn main() {
                     cycle: is_key_down(KeyCode::Z),
                     jump: is_key_down(KeyCode::J),
                     jump_blocked: false,
+                    ..Default::default()
                 }
             } else {
                 CaptainInput::default()
