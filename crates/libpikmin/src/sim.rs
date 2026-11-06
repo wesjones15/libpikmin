@@ -68,6 +68,10 @@ pub struct Sim {
     /// A Pikmin whistled off a pellet does not auto-carry that same pellet again until this tick
     /// (see [`Sim::set_auto_carry_range`]), or it would walk straight back from the squad.
     pub(crate) auto_carry_skip: std::collections::HashMap<PikiId, (crate::carry::PelletId, u64)>,
+    /// See [`Sim::set_rebirth`].
+    pub(crate) rebirth: Option<crate::damage::Rebirth>,
+    /// Ticks at which Pikmin recently finished dying (mass-death window).
+    pub(crate) recent_gone: Vec<u64>,
     /// See [`Sim::set_auto_pluck`].
     pub(crate) auto_pluck_after: Option<f32>,
     /// See [`Sim::set_emergency_recovery`]: (seconds, Pikmin).
@@ -124,6 +128,8 @@ impl Sim {
             auto_carry_range: 0.0,
             carry_recall_until: Default::default(),
             auto_carry_skip: Default::default(),
+            rebirth: None,
+            recent_gone: Vec::new(),
             auto_pluck_after: None,
             recovery: None,
             mirror_onion_legs: false,

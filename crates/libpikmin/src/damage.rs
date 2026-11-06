@@ -375,12 +375,31 @@ impl Sim {
                     pos: p.pos.with_y(ground.min(p.pos.y)),
                 });
                 let p = &self.pikis[pi];
-                // A dead flower may leave a seed: rand >= mPikiLeaveSeedChance (so 20% at 0.8).
-                // The original saves it for the next day; we bury it right away.
-                if p.happa == Happa::Flower
+                let (color, happa, id, pos) = (p.color, p.happa, p.id, p.pos);
+                let _ = id;
+                if let Some(rb) = self.rebirth {
+                    // Our rule (not the decomp's): most dead Pikmin sprout again where they fell, as a
+                    // buried leaf, so one big blast is not the end of the squad. A cluster of deaths
+                    // within `window` seconds is a mass death and gets the higher chance.
+                    let now = self.tick;
+                    let span = (rb.window * 30.0).ceil() as u64;
+                    self.recent_gone.retain(|t| now.saturating_sub(*t) <= span);
+                    self.recent_gone.push(now);
+                    let mass = self.recent_gone.len() as u32 >= rb.burst_count;
+                    let chance = if mass { rb.burst_chance } else { rb.chance };
+                    if self.rng.f32() < chance {
+                        let up = self.params.piki.seed_up_time;
+                        let at = pos.with_y(ground.min(pos.y));
+                        let s = self.plant_sprout(color, at);
+                        if let Some(Some(sp)) = self.sprouts.get_mut(s.0 as usize) {
+                            sp.state = SproutState::Buried { timer: up };
+                        }
+                    }
+                } else if happa == Happa::Flower
                     && self.rng.f32() >= self.params.piki.piki_leave_seed_chance
                 {
-                    let (color, pos) = (p.color, p.pos);
+                    // A dead flower may leave a seed: rand >= mPikiLeaveSeedChance (so 20% at 0.8).
+                    // The original saves it for the next day; we bury it right away.
                     let up = self.params.piki.seed_up_time;
                     let s = self.plant_sprout(color, pos);
                     if let Some(Some(sp)) = self.sprouts.get_mut(s.0 as usize) {
@@ -565,5 +584,30 @@ mod freeze_tests {
         }
         assert_eq!(sim.piki(id).frozen, 0.0);
         assert!(sim.piki(id).pos.distance(at) > 5.0, "didn't follow after thawing");
+    }
+}
+
+/// How dead Pikmin come back as buried leaves (see [`Sim::set_rebirth`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rebirth {
+    /// Chance (0..1) a dead Pikmin sprouts again.
+    pub chance: f32,
+    /// Chance used while a mass death is under way.
+    pub burst_chance: f32,
+    /// This many Pikmin gone within `window` seconds is a mass death.
+    pub burst_count: u32,
+    pub window: f32,
+}
+
+impl Sim {
+    /// Turns on rebirth: `None` (the default) keeps the disc's rule, where only a dead flower
+    /// sometimes leaves a seed. Hosts opt in; the rule is ours, not Pikmin 1's.
+    pub fn set_rebirth(&mut self, r: Option<Rebirth>) {
+        self.rebirth = r.map(|r| Rebirth {
+            chance: r.chance.clamp(0.0, 1.0),
+            burst_chance: r.burst_chance.clamp(0.0, 1.0),
+            burst_count: r.burst_count.max(1),
+            window: if r.window.is_finite() { r.window.max(0.0) } else { 1.0 },
+        });
     }
 }

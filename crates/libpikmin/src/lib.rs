@@ -34,7 +34,7 @@ pub use captain::{Captain, CaptainInput, CaptainPose, LockView};
 pub use bulb::{Bulb, BulbId, BulbState};
 pub use carry::{Pellet, PelletDesc, PelletId, PelletState, TREASURE_PART_BASE};
 pub use clock::{FixedClock, TICK_DT, TICK_HZ};
-pub use damage::DeathCause;
+pub use damage::{DeathCause, Rebirth};
 pub use event::Event;
 pub use glam::{Vec2, Vec3};
 pub use host::{CreatureFrame, CreatureId, CreaturePart, DamageSource, Host};

@@ -51,7 +51,7 @@ Workspace:
   `vr_arms` cuts every captain body's forearms and hands for a VR host's controllers (libcommon's `vr_arms`,
   laid out as the view pushes each body; Olimar's arms are joints 7 and 8, whole limbs): `pik_bake_vr_arms` on
   first run writes `assets/vr_arms/pik-*.arms`; `--example vr_arms` captures them. The view draws
-  them for one captain (`View::set_vr_arms`, FFI `pik_view_set_vr_arms`, ABI 62) as kind 15
+  them for one captain (`View::set_vr_arms`, FFI `pik_view_set_vr_arms`, ABI 62; ABI 63 adds `pik_sim_set_rebirth`, dead Pikmin sprouting again) as kind 15
   (`VR_ARM`, keys 0x10 + side) in each body's own pose, for the host to place on the controllers.
 - Free cursor (VR pointer aim): `CaptainInput::cursor_free` (FFI `use_cursor` 2, ABI 61, snapshot
   version 15) puts the cursor on the aimed point itself instead of the ground under it, within reach.

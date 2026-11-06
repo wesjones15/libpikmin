@@ -42,7 +42,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 62;
+pub const PIK_ABI_VERSION: u32 = 63;
 
 /// The replica snapshot's wire version (`libpikmin::snapshot::SNAPSHOT_VERSION`). Hosts put it in
 /// their multiplayer envelope: a snapshot is nested bytes there, so without this a host and client
@@ -3486,6 +3486,33 @@ pub unsafe extern "C" fn pik_sim_set_auto_pluck(sim: *mut PikSim, seconds: f32) 
     libcommon::ffi::guard("pik_sim_set_auto_pluck", (), || {
         // SAFETY: as documented.
         unsafe { with(sim, (), |s| s.sim.set_auto_pluck((seconds >= 0.0).then_some(seconds))) }
+    })
+}
+
+/// [`Sim::set_rebirth`]: `chance` below 0 turns it off (the disc's flower-seed rule).
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_rebirth(
+    sim: *mut PikSim,
+    chance: f32,
+    burst_chance: f32,
+    burst_count: u32,
+    window: f32,
+) {
+    libcommon::ffi::guard("pik_sim_set_rebirth", (), || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, (), |s| {
+                s.sim.set_rebirth((chance >= 0.0).then_some(libpikmin::Rebirth {
+                    chance,
+                    burst_chance,
+                    burst_count,
+                    window,
+                }))
+            })
+        }
     })
 }
 
