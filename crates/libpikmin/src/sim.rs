@@ -12,6 +12,8 @@ use crate::{CaptainId, Host, Params, PikiId};
 #[derive(Debug)]
 pub struct Sim {
     pub(crate) params: Params,
+    /// The disc's gravity, kept while a host scales it (set_gravity_scale).
+    gravity_base: Option<f32>,
     clock: FixedClock,
     pub(crate) tick: u64,
     pub(crate) rng: Rng,
@@ -87,9 +89,19 @@ impl Default for Sim {
 }
 
 impl Sim {
+    /// Host extension: the world's gravity as a multiple of the usual (a low-gravity stage is below 1). Captain
+    /// jumps, thrown and falling Pikmin, Onion seeds and nectar drops all use the disc's gravity times this; host
+    /// pad flights keep the gravity the host gave them. 1 is the game's own.
+    pub fn set_gravity_scale(&mut self, scale: f32) {
+        let scale = if scale.is_finite() { scale.clamp(0.05, 4.0) } else { 1.0 };
+        let base = *self.gravity_base.get_or_insert(self.params.ai.gravity);
+        self.params.ai.gravity = base * scale;
+    }
+
     pub fn new(params: Params, seed: u64) -> Self {
         Self {
             params,
+            gravity_base: None,
             clock: FixedClock::default(),
             tick: 0,
             rng: Rng::new(seed),
@@ -683,5 +695,28 @@ mod ground_motion_tests {
             fell |= !grounded;
         }
         assert!(fell, "a body that runs off a 1 m ledge should leave the ground");
+    }
+}
+
+#[cfg(test)]
+mod gravity_scale_tests {
+    use super::*;
+
+    /// A host's low-gravity stage scales the disc's gravity and 1 restores it exactly; junk is ignored.
+    #[test]
+    fn gravity_scale_scales_the_discs_gravity_and_restores_it() {
+        let mut sim = Sim::new(Params::default(), 5);
+        let base = sim.params.ai.gravity;
+        sim.set_gravity_scale(1.0 / 6.0);
+        assert!((sim.params.ai.gravity - base / 6.0).abs() < 1e-3);
+        // Scaling is from the disc's value, not compounded.
+        sim.set_gravity_scale(0.5);
+        assert!((sim.params.ai.gravity - base * 0.5).abs() < 1e-3);
+        sim.set_gravity_scale(f32::NAN);
+        assert_eq!(sim.params.ai.gravity, base);
+        sim.set_gravity_scale(1000.0);
+        assert!((sim.params.ai.gravity - base * 4.0).abs() < 1e-3, "clamped to 4x");
+        sim.set_gravity_scale(1.0);
+        assert_eq!(sim.params.ai.gravity, base);
     }
 }

@@ -42,7 +42,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 63;
+pub const PIK_ABI_VERSION: u32 = 64;
 
 /// The replica snapshot's wire version (`libpikmin::snapshot::SNAPSHOT_VERSION`). Hosts put it in
 /// their multiplayer envelope: a snapshot is nested bytes there, so without this a host and client
@@ -1787,6 +1787,18 @@ pub unsafe extern "C" fn pik_sim_launch_captain(sim: *mut PikSim, captain: u32, 
     libcommon::ffi::guard("pik_sim_launch_captain", (), || {
         let Some(v) = (unsafe { velocity.as_ref() }) else { return; };
         unsafe { with(sim, (), |s| s.sim.launch_captain(CaptainId(captain), (*v).into(), gravity, squad != 0)) }
+    })
+}
+
+/// The world's gravity as a multiple of the game's (a low-gravity stage is below 1; clamped to 0.05..4):
+/// jumps and throws go higher and falls are slower. 1 is the game's own. Cheap to call every frame.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_set_gravity_scale(sim: *mut PikSim, scale: f32) {
+    libcommon::ffi::guard("pik_sim_set_gravity_scale", (), || {
+        unsafe { with(sim, (), |s| s.sim.set_gravity_scale(scale)) }
     })
 }
 
