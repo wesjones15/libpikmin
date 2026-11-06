@@ -27,7 +27,9 @@ pub unsafe extern "C" fn pik_music_new(folder: *const c_char) -> *mut PikMusic {
 /// `music` is a live handle; calls are serialized by the host.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_music_update(music: *mut PikMusic, song: u32, enemy: u8, volume: f32, paused: u8) -> u32 {
-    unsafe {pik_music_update_context(music,song,if enemy!=0 {1}else{0},volume,paused,1.0/30.0)}
+    libcommon::ffi::guard("pik_music_update", 0, || {
+        unsafe {pik_music_update_context(music,song,if enemy!=0 {1}else{0},volume,paused,1.0/30.0)}
+    })
 }
 
 /// Pikmin system menu cues: open, select, and confirm.

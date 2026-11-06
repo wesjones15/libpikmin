@@ -18,3 +18,4 @@ libsms.workspace = true
 libssbm-assets.workspace = true
 libpikmin-teki.workspace = true
 glam.workspace = true
+libcommon.workspace = true

@@ -107,10 +107,12 @@ pub unsafe extern "C" fn pik_tekis_new(assets_dir: *const c_char, seed: u64) -> 
 /// `t` from [`pik_tekis_new`], not used afterwards. Null is ignored.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_free(t: *mut PikTekis) {
-    if !t.is_null() {
-        // SAFETY: the caller hands back ownership.
-        drop(unsafe { Box::from_raw(t) });
-    }
+    libcommon::ffi::guard("pik_tekis_free", (), || {
+        if !t.is_null() {
+            // SAFETY: the caller hands back ownership.
+            drop(unsafe { Box::from_raw(t) });
+        }
+    })
 }
 
 /// `out[0]`, `out[1]`, `out[2]` the sizes of [`PikNavi`], [`PikTekiState`] and [`PikTekiOut`].
@@ -119,15 +121,17 @@ pub unsafe extern "C" fn pik_tekis_free(t: *mut PikTekis) {
 /// `out` writable for three `u32`s.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_sizes(out: *mut u32) {
-    if out.is_null() {
-        return;
-    }
-    // SAFETY: as documented.
-    unsafe {
-        out.write(std::mem::size_of::<PikNavi>() as u32);
-        out.add(1).write(std::mem::size_of::<PikTekiState>() as u32);
-        out.add(2).write(std::mem::size_of::<PikTekiOut>() as u32);
-    }
+    libcommon::ffi::guard("pik_tekis_sizes", (), || {
+        if out.is_null() {
+            return;
+        }
+        // SAFETY: as documented.
+        unsafe {
+            out.write(std::mem::size_of::<PikNavi>() as u32);
+            out.add(1).write(std::mem::size_of::<PikTekiState>() as u32);
+            out.add(2).write(std::mem::size_of::<PikTekiOut>() as u32);
+        }
+    })
 }
 
 /// Whether kind `kind` has files and a ported strategy.
@@ -136,8 +140,10 @@ pub unsafe extern "C" fn pik_tekis_sizes(out: *mut u32) {
 /// `t` from [`pik_tekis_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_has_strategy(t: *const PikTekis, kind: u32) -> u8 {
-    // SAFETY: as documented.
-    unsafe { t.as_ref() }.is_some_and(|t| u8::try_from(kind).is_ok_and(|k| t.tekis.has_strategy(k))) as u8
+    libcommon::ffi::guard("pik_tekis_has_strategy", 0, || {
+        // SAFETY: as documented.
+        unsafe { t.as_ref() }.is_some_and(|t| u8::try_from(kind).is_ok_and(|k| t.tekis.has_strategy(k))) as u8
+    })
 }
 
 /// A new enemy of `kind` for the host's body `creature` (the id the sim's creatures use). Its id, or -1.
@@ -146,20 +152,24 @@ pub unsafe extern "C" fn pik_tekis_has_strategy(t: *const PikTekis, kind: u32) -
 /// `t` from [`pik_tekis_new`]; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_spawn(t: *mut PikTekis, kind: u32, creature: u64, pos: *const PikVec3, yaw: f32) -> i32 {
-    // SAFETY: as documented.
-    let (Some(t), Some(pos)) = (unsafe { t.as_mut() }, unsafe { pos.as_ref() }) else { return -1 };
-    let Ok(kind) = u8::try_from(kind) else { return -1 };
-    t.tekis.spawn(kind, creature, Vec3::from(*pos), yaw).map_or(-1, |id| id as i32)
+    libcommon::ffi::guard("pik_tekis_spawn", -1, || {
+        // SAFETY: as documented.
+        let (Some(t), Some(pos)) = (unsafe { t.as_mut() }, unsafe { pos.as_ref() }) else { return -1 };
+        let Ok(kind) = u8::try_from(kind) else { return -1 };
+        t.tekis.spawn(kind, creature, Vec3::from(*pos), yaw).map_or(-1, |id| id as i32)
+    })
 }
 
 /// # Safety
 /// `t` from [`pik_tekis_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_remove(t: *mut PikTekis, id: u32) {
-    // SAFETY: as documented.
-    if let Some(t) = unsafe { t.as_mut() } {
-        t.tekis.remove(id);
-    }
+    libcommon::ffi::guard("pik_tekis_remove", (), || {
+        // SAFETY: as documented.
+        if let Some(t) = unsafe { t.as_mut() } {
+            t.tekis.remove(id);
+        }
+    })
 }
 
 /// A hit, in the disc's life units. `attacker_navi` the player who did it, or -1.
@@ -168,11 +178,13 @@ pub unsafe extern "C" fn pik_tekis_remove(t: *mut PikTekis, id: u32) {
 /// `t` from [`pik_tekis_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_damage(t: *mut PikTekis, id: u32, amount: f32, attacker_navi: i32) {
-    // SAFETY: as documented.
-    if let Some(t) = unsafe { t.as_mut() } {
-        let who = u32::try_from(attacker_navi).ok().map(Target::Navi);
-        t.tekis.damage(id, amount, who);
-    }
+    libcommon::ffi::guard("pik_tekis_damage", (), || {
+        // SAFETY: as documented.
+        if let Some(t) = unsafe { t.as_mut() } {
+            let who = u32::try_from(attacker_navi).ok().map(Target::Navi);
+            t.tekis.damage(id, amount, who);
+        }
+    })
 }
 
 /// The host's body is here (it was blocked or pushed): the enemy follows.
@@ -181,10 +193,12 @@ pub unsafe extern "C" fn pik_tekis_damage(t: *mut PikTekis, id: u32, amount: f32
 /// `t` from [`pik_tekis_new`]; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_set_position(t: *mut PikTekis, id: u32, pos: *const PikVec3) {
-    // SAFETY: as documented.
-    if let (Some(t), Some(pos)) = (unsafe { t.as_mut() }, unsafe { pos.as_ref() }) {
-        t.tekis.set_position(id, Vec3::from(*pos));
-    }
+    libcommon::ffi::guard("pik_tekis_set_position", (), || {
+        // SAFETY: as documented.
+        if let (Some(t), Some(pos)) = (unsafe { t.as_mut() }, unsafe { pos.as_ref() }) {
+            t.tekis.set_position(id, Vec3::from(*pos));
+        }
+    })
 }
 
 /// Where an enemy that roams goes (a Honeywisp's far point) and how far.
@@ -193,13 +207,15 @@ pub unsafe extern "C" fn pik_tekis_set_position(t: *mut PikTekis, id: u32, pos: 
 /// `t` from [`pik_tekis_new`]; `target` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_set_territory(t: *mut PikTekis, id: u32, territory: f32, target: *const PikVec3) {
-    // SAFETY: as documented.
-    if let (Some(t), Some(target)) = (unsafe { t.as_mut() }, unsafe { target.as_ref() })
-        && let Some(e) = t.tekis.get_mut(id)
-    {
-        e.territory = territory;
-        e.target_pos = Vec3::from(*target);
-    }
+    libcommon::ffi::guard("pik_tekis_set_territory", (), || {
+        // SAFETY: as documented.
+        if let (Some(t), Some(target)) = (unsafe { t.as_mut() }, unsafe { target.as_ref() })
+            && let Some(e) = t.tekis.get_mut(id)
+        {
+            e.territory = territory;
+            e.target_pos = Vec3::from(*target);
+        }
+    })
 }
 
 /// The ground under an enemy's body (its height, sim units) and whether it is water.
@@ -208,10 +224,12 @@ pub unsafe extern "C" fn pik_tekis_set_territory(t: *mut PikTekis, id: u32, terr
 /// `t` from [`pik_tekis_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_set_ground(t: *mut PikTekis, id: u32, ground: f32, water: u8) {
-    // SAFETY: as documented.
-    if let Some(t) = unsafe { t.as_mut() } {
-        t.tekis.set_ground(id, ground, water != 0);
-    }
+    libcommon::ffi::guard("pik_tekis_set_ground", (), || {
+        // SAFETY: as documented.
+        if let Some(t) = unsafe { t.as_mut() } {
+            t.tekis.set_ground(id, ground, water != 0);
+        }
+    })
 }
 
 /// Where an enemy that heads for a place goes (a Smoky Progg's Onion); null for none.
@@ -220,10 +238,12 @@ pub unsafe extern "C" fn pik_tekis_set_ground(t: *mut PikTekis, id: u32, ground:
 /// `t` from [`pik_tekis_new`]; `goal` null or readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_set_goal(t: *mut PikTekis, id: u32, goal: *const PikVec3) {
-    // SAFETY: as documented.
-    if let Some(t) = unsafe { t.as_mut() } {
-        t.tekis.set_goal(id, unsafe { goal.as_ref() }.map(|g| Vec3::from(*g)));
-    }
+    libcommon::ffi::guard("pik_tekis_set_goal", (), || {
+        // SAFETY: as documented.
+        if let Some(t) = unsafe { t.as_mut() } {
+            t.tekis.set_goal(id, unsafe { goal.as_ref() }.map(|g| Vec3::from(*g)));
+        }
+    })
 }
 
 /// A counter the enemy starts with: index 0 a Pellet Posy's size (0..2) or 1 for a Clamclamp whose pearl
@@ -233,10 +253,12 @@ pub unsafe extern "C" fn pik_tekis_set_goal(t: *mut PikTekis, id: u32, goal: *co
 /// `t` from [`pik_tekis_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_set_count(t: *mut PikTekis, id: u32, index: u32, value: i32) {
-    // SAFETY: as documented.
-    if let Some(t) = unsafe { t.as_mut() } {
-        t.tekis.set_count(id, index as usize, value);
-    }
+    libcommon::ffi::guard("pik_tekis_set_count", (), || {
+        // SAFETY: as documented.
+        if let Some(t) = unsafe { t.as_mut() } {
+            t.tekis.set_count(id, index as usize, value);
+        }
+    })
 }
 
 /// The velocity an enemy was shot with (a Rolling Boulder), before its first update.
@@ -245,10 +267,12 @@ pub unsafe extern "C" fn pik_tekis_set_count(t: *mut PikTekis, id: u32, index: u
 /// `t` from [`pik_tekis_new`]; `v` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_set_spawn_velocity(t: *mut PikTekis, id: u32, v: *const PikVec3) {
-    // SAFETY: as documented.
-    if let (Some(t), Some(v)) = (unsafe { t.as_mut() }, unsafe { v.as_ref() }) {
-        t.tekis.set_spawn_velocity(id, Vec3::from(*v));
-    }
+    libcommon::ffi::guard("pik_tekis_set_spawn_velocity", (), || {
+        // SAFETY: as documented.
+        if let (Some(t), Some(v)) = (unsafe { t.as_mut() }, unsafe { v.as_ref() }) {
+            t.tekis.set_spawn_velocity(id, Vec3::from(*v));
+        }
+    })
 }
 
 /// Squashed by something.
@@ -257,10 +281,12 @@ pub unsafe extern "C" fn pik_tekis_set_spawn_velocity(t: *mut PikTekis, id: u32,
 /// `t` from [`pik_tekis_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_press(t: *mut PikTekis, id: u32) {
-    // SAFETY: as documented.
-    if let Some(t) = unsafe { t.as_mut() } {
-        t.tekis.press(id);
-    }
+    libcommon::ffi::guard("pik_tekis_press", (), || {
+        // SAFETY: as documented.
+        if let Some(t) = unsafe { t.as_mut() } {
+            t.tekis.press(id);
+        }
+    })
 }
 
 /// Runs `ticks` 30 Hz ticks of every enemy against `sim` and the players. Returns how many things they did
@@ -309,44 +335,46 @@ pub unsafe extern "C" fn pik_tekis_update(t: *mut PikTekis, sim: *mut PikSim, na
 /// `t` from [`pik_tekis_new`]; `out` writable for `max`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_outs(t: *const PikTekis, out: *mut PikTekiOut, max: u32) -> u32 {
-    // SAFETY: as documented.
-    let Some(t) = (unsafe { t.as_ref() }) else { return 0 };
-    if out.is_null() {
-        return t.outs.len() as u32;
-    }
-    let visible:Vec<_>=t.outs.iter().filter(|o|!matches!(o,Out::TableSound {..}|Out::Message {..})).take(max as usize).collect();
-    let n=visible.len();
-    for (i, o) in visible.into_iter().enumerate() {
-        let mut r = PikTekiOut::default();
-        match o {
-            Out::FollowEffect {key,id,pos,dir,scale} => (r.kind,r.b,r.a,r.pos,r.vel,r.x)=(11,*key,*id as u32,(*pos).into(),(*dir).into(),*scale),
-            Out::StopEffect {key} => (r.kind,r.b)=(12,*key),
-            Out::Effect { id, pos } => (r.kind, r.a, r.pos) = (1, *id as u32, (*pos).into()),
-            Out::Sound { name, pos } => {
-                r.kind = 2;
-                r.pos = (*pos).into();
-                let b = name.as_bytes();
-                let n = b.len().min(r.text.len() - 1);
-                r.text[..n].copy_from_slice(&b[..n]);
-            }
-            Out::Spawn { kind, pos, yaw, parent, velocity } => {
-                (r.kind, r.a, r.pos, r.x, r.teki, r.vel) = (3, *kind as u32, (*pos).into(), *yaw, *parent, (*velocity).into());
-            }
-            Out::HitNavi { teki, navi, damage, from, knock } => {
-                (r.kind, r.teki, r.a, r.x, r.y, r.vel) = (4, *teki, *navi, *damage, *knock, (*from).into());
-            }
-            Out::Died { teki } => (r.kind, r.teki) = (5, *teki),
-            Out::Dying { teki } => (r.kind, r.teki) = (6, *teki),
-            Out::Shake { pos, strength } => (r.kind, r.pos, r.x) = (7, (*pos).into(), *strength),
-            Out::SpawnPellets { pos, number, color, count } => (r.kind, r.pos, r.a, r.y, r.b) = (8, (*pos).into(), *number, *color as f32, *count),
-            Out::SpawnNectar { pos, count } => (r.kind, r.pos, r.b) = (9, (*pos).into(), *count),
-            Out::EffectDir { id, pos, dir } => (r.kind, r.a, r.pos, r.vel) = (10, *id as u32, (*pos).into(), (*dir).into()),
-            Out::TableSound { .. } | Out::Message { .. } => continue,
+    libcommon::ffi::guard("pik_tekis_outs", 0, || {
+        // SAFETY: as documented.
+        let Some(t) = (unsafe { t.as_ref() }) else { return 0 };
+        if out.is_null() {
+            return t.outs.len() as u32;
         }
-        // SAFETY: `i < max`.
-        unsafe { out.add(i).write(r) };
-    }
-    n as u32
+        let visible:Vec<_>=t.outs.iter().filter(|o|!matches!(o,Out::TableSound {..}|Out::Message {..})).take(max as usize).collect();
+        let n=visible.len();
+        for (i, o) in visible.into_iter().enumerate() {
+            let mut r = PikTekiOut::default();
+            match o {
+                Out::FollowEffect {key,id,pos,dir,scale} => (r.kind,r.b,r.a,r.pos,r.vel,r.x)=(11,*key,*id as u32,(*pos).into(),(*dir).into(),*scale),
+                Out::StopEffect {key} => (r.kind,r.b)=(12,*key),
+                Out::Effect { id, pos } => (r.kind, r.a, r.pos) = (1, *id as u32, (*pos).into()),
+                Out::Sound { name, pos } => {
+                    r.kind = 2;
+                    r.pos = (*pos).into();
+                    let b = name.as_bytes();
+                    let n = b.len().min(r.text.len() - 1);
+                    r.text[..n].copy_from_slice(&b[..n]);
+                }
+                Out::Spawn { kind, pos, yaw, parent, velocity } => {
+                    (r.kind, r.a, r.pos, r.x, r.teki, r.vel) = (3, *kind as u32, (*pos).into(), *yaw, *parent, (*velocity).into());
+                }
+                Out::HitNavi { teki, navi, damage, from, knock } => {
+                    (r.kind, r.teki, r.a, r.x, r.y, r.vel) = (4, *teki, *navi, *damage, *knock, (*from).into());
+                }
+                Out::Died { teki } => (r.kind, r.teki) = (5, *teki),
+                Out::Dying { teki } => (r.kind, r.teki) = (6, *teki),
+                Out::Shake { pos, strength } => (r.kind, r.pos, r.x) = (7, (*pos).into(), *strength),
+                Out::SpawnPellets { pos, number, color, count } => (r.kind, r.pos, r.a, r.y, r.b) = (8, (*pos).into(), *number, *color as f32, *count),
+                Out::SpawnNectar { pos, count } => (r.kind, r.pos, r.b) = (9, (*pos).into(), *count),
+                Out::EffectDir { id, pos, dir } => (r.kind, r.a, r.pos, r.vel) = (10, *id as u32, (*pos).into(), (*dir).into()),
+                Out::TableSound { .. } | Out::Message { .. } => continue,
+            }
+            // SAFETY: `i < max`.
+            unsafe { out.add(i).write(r) };
+        }
+        n as u32
+    })
 }
 
 /// An enemy's state; 0 if there is none.
@@ -355,38 +383,40 @@ pub unsafe extern "C" fn pik_tekis_outs(t: *const PikTekis, out: *mut PikTekiOut
 /// `t` from [`pik_tekis_new`]; `out` writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_state(t: *const PikTekis, id: u32, out: *mut PikTekiState) -> u8 {
-    // SAFETY: as documented.
-    let (Some(t), false) = (unsafe { t.as_ref() }, out.is_null()) else { return 0 };
-    let Some(e) = t.tekis.get(id) else { return 0 };
-    let mut flags = 0;
-    flags |= e.option(opt::VISIBLE) as u32;
-    flags |= (e.alive() as u32) << 1;
-    flags |= (e.flying as u32) << 2;
-    flags |= (e.option(opt::ATARI) as u32) << 3;
-    flags |= (e.held.is_some() as u32) << 4;
-    flags |= (e.airborne() as u32) << 5;
-    // Bits 8..9: Pellet Posy's BTeki::_3BC material-animation frame.
-    if e.kind == libpikmin_teki::info::PELLET_POSY { flags |= (e.count[1].rem_euclid(3) as u32) << 8; }
-    if (27..=55).contains(&e.kind) { flags |= (libpikmin_teki::presentation::flags(e) as u32) << 8; }
-    // SAFETY: as documented.
-    unsafe {
-        out.write(PikTekiState {
-            id,
-            kind: e.kind as u32,
-            pos: e.pos.into(),
-            yaw: e.yaw,
-            motion: e.anim.motion.max(0) as u32,
-            frame: e.anim.counter,
-            flash: e.flash,
-            shake: e.shake,
-            fade: e.fade,
-            state: e.state,
-            flags,
-            held_pellet: e.held.map_or(-1, |p| p.0 as i32),
-            hp: e.hp,
-        })
-    };
-    1
+    libcommon::ffi::guard("pik_tekis_state", 0, || {
+        // SAFETY: as documented.
+        let (Some(t), false) = (unsafe { t.as_ref() }, out.is_null()) else { return 0 };
+        let Some(e) = t.tekis.get(id) else { return 0 };
+        let mut flags = 0;
+        flags |= e.option(opt::VISIBLE) as u32;
+        flags |= (e.alive() as u32) << 1;
+        flags |= (e.flying as u32) << 2;
+        flags |= (e.option(opt::ATARI) as u32) << 3;
+        flags |= (e.held.is_some() as u32) << 4;
+        flags |= (e.airborne() as u32) << 5;
+        // Bits 8..9: Pellet Posy's BTeki::_3BC material-animation frame.
+        if e.kind == libpikmin_teki::info::PELLET_POSY { flags |= (e.count[1].rem_euclid(3) as u32) << 8; }
+        if (27..=55).contains(&e.kind) { flags |= (libpikmin_teki::presentation::flags(e) as u32) << 8; }
+        // SAFETY: as documented.
+        unsafe {
+            out.write(PikTekiState {
+                id,
+                kind: e.kind as u32,
+                pos: e.pos.into(),
+                yaw: e.yaw,
+                motion: e.anim.motion.max(0) as u32,
+                frame: e.anim.counter,
+                flash: e.flash,
+                shake: e.shake,
+                fade: e.fade,
+                state: e.state,
+                flags,
+                held_pellet: e.held.map_or(-1, |p| p.0 as i32),
+                hp: e.hp,
+            })
+        };
+        1
+    })
 }
 
 /// A Long Legs boss's legs as the view draws them (`libpikmin_teki::legs::LegsView`): the body is drawn at `trace`
@@ -408,7 +438,9 @@ pub struct PikLegs {
 /// The size of [`PikLegs`], for hosts to check their mirror.
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_legs_size() -> u32 {
-    std::mem::size_of::<PikLegs>() as u32
+    libcommon::ffi::guard("pik_legs_size", 0, || {
+        std::mem::size_of::<PikLegs>() as u32
+    })
 }
 
 /// An enemy's legs (a Long Legs boss: Beady Long Legs, Raging Long Legs, Man-at-Legs); 0 if it has none.
@@ -417,18 +449,20 @@ pub extern "C" fn pik_legs_size() -> u32 {
 /// `t` from [`pik_tekis_new`]; `out` writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_tekis_legs(t: *const PikTekis, id: u32, out: *mut PikLegs) -> u8 {
-    // SAFETY: as documented.
-    let (Some(t), false) = (unsafe { t.as_ref() }, out.is_null()) else { return 0 };
-    let Some(l) = t.tekis.get(id).and_then(|e| e.legs.as_ref()) else { return 0 };
-    let v = l.view();
-    let mut r = PikLegs { id, trace: v.trace.into(), face: v.face, ..Default::default() };
-    r.flags = v.active as u32 | (v.blend as u32) << 1 | (v.gun.is_some() as u32) << 2;
-    for i in 0..4 {
-        r.feet[i] = v.feet[i].into();
-        r.bend[i] = v.bend[i];
-    }
-    r.gun = v.gun.unwrap_or(Vec3::ZERO).into();
-    // SAFETY: as documented.
-    unsafe { out.write(r) };
-    1
+    libcommon::ffi::guard("pik_tekis_legs", 0, || {
+        // SAFETY: as documented.
+        let (Some(t), false) = (unsafe { t.as_ref() }, out.is_null()) else { return 0 };
+        let Some(l) = t.tekis.get(id).and_then(|e| e.legs.as_ref()) else { return 0 };
+        let v = l.view();
+        let mut r = PikLegs { id, trace: v.trace.into(), face: v.face, ..Default::default() };
+        r.flags = v.active as u32 | (v.blend as u32) << 1 | (v.gun.is_some() as u32) << 2;
+        for i in 0..4 {
+            r.feet[i] = v.feet[i].into();
+            r.bend[i] = v.bend[i];
+        }
+        r.gun = v.gun.unwrap_or(Vec3::ZERO).into();
+        // SAFETY: as documented.
+        unsafe { out.write(r) };
+        1
+    })
 }

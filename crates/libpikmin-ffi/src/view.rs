@@ -230,11 +230,13 @@ pub unsafe extern "C" fn pik_view_free(view: *mut PikView) {
 /// `view` from [`pik_view_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_status(view: *const PikView) -> *const c_char {
-    // SAFETY: as documented.
-    match unsafe { view.as_ref() } {
-        Some(v) => v.status.as_ptr(),
-        None => std::ptr::null(),
-    }
+    libcommon::ffi::guard("pik_view_status", std::ptr::null(), || {
+        // SAFETY: as documented.
+        match unsafe { view.as_ref() } {
+            Some(v) => v.status.as_ptr(),
+            None => std::ptr::null(),
+        }
+    })
 }
 
 /// Whether to draw each captain's cursor and marker (`show` nonzero; the default). Off for a
@@ -244,8 +246,10 @@ pub unsafe extern "C" fn pik_view_status(view: *const PikView) -> *const c_char 
 /// `view` from [`pik_view_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_show_cursors(view: *mut PikView, show: u8) {
-    // SAFETY: as documented.
-    unsafe { with_view(view, (), |v| v.view.show_cursors = show != 0) }
+    libcommon::ffi::guard("pik_view_show_cursors", (), || {
+        // SAFETY: as documented.
+        unsafe { with_view(view, (), |v| v.view.show_cursors = show != 0) }
+    })
 }
 
 /// Host UI and Onion-healing sounds. 0 open, 1 count changed, 2 count limit,
@@ -255,25 +259,27 @@ pub unsafe extern "C" fn pik_view_show_cursors(view: *mut PikView, show: u8) {
 /// `view` is a live view handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_play_sound(view: *mut PikView, sound: u8, pos: PikVec3) {
-    let name = match sound {
-        0 => "SYSSE_CMENU_ON",
-        1 => "SYSSE_CMENU_SELECT",
-        2 => "SYSSE_CMENU_ERROR",
-        3 => "SYSSE_CMENU_OFF",
-        4 => "SE_PLAYER_TOUCHHONEY",
-        5 => "SE_PIKI_DEAD",
-        6 => "SE_GATHER",
-        7 => "SE_GATHER",
-        _ => return,
-    };
-    // Menu cues in drawContainer.cpp; honey heals Olimar in itemAI.cpp; ghost
-    // calls follow Piki::doKill in pikidoKill.cpp.
-    unsafe { with_view(view, (), |v| {
-        if let Some(audio) = &v.audio {
-            if sound == 7 { audio.stop(name); }
-            else { audio.play_at(name, pos.into()); }
-        }
-    }) }
+    libcommon::ffi::guard("pik_view_play_sound", (), || {
+        let name = match sound {
+            0 => "SYSSE_CMENU_ON",
+            1 => "SYSSE_CMENU_SELECT",
+            2 => "SYSSE_CMENU_ERROR",
+            3 => "SYSSE_CMENU_OFF",
+            4 => "SE_PLAYER_TOUCHHONEY",
+            5 => "SE_PIKI_DEAD",
+            6 => "SE_GATHER",
+            7 => "SE_GATHER",
+            _ => return,
+        };
+        // Menu cues in drawContainer.cpp; honey heals Olimar in itemAI.cpp; ghost
+        // calls follow Piki::doKill in pikidoKill.cpp.
+        unsafe { with_view(view, (), |v| {
+            if let Some(audio) = &v.audio {
+                if sound == 7 { audio.stop(name); }
+                else { audio.play_at(name, pos.into()); }
+            }
+        }) }
+    })
 }
 
 /// Holds this view's sounds still while the host's game is paused (nonzero) and lets them go on
@@ -282,9 +288,11 @@ pub unsafe extern "C" fn pik_view_play_sound(view: *mut PikView, sound: u8, pos:
 /// `view` is a live view handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_paused(view: *mut PikView, paused: u8) {
-    if let Some(v) = unsafe { view.as_mut() } {
-        if let Some(audio) = &v.audio { audio.set_paused(paused != 0); }
-    }
+    libcommon::ffi::guard("pik_view_set_paused", (), || {
+        if let Some(v) = unsafe { view.as_mut() } {
+            if let Some(audio) = &v.audio { audio.set_paused(paused != 0); }
+        }
+    })
 }
 
 /// Budget distant Pikmin skinning (sim units); zero disables it. Requires draw flag 4 support.
@@ -292,16 +300,20 @@ pub unsafe extern "C" fn pik_view_set_paused(view: *mut PikView, paused: u8) {
 /// `view` is a live view handle, `eye` is readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_pose_budget(view: *mut PikView, eye: *const PikVec3, far: f32) {
-    if let (Some(v), Some(eye)) = (unsafe { view.as_mut() }, unsafe { eye.as_ref() }) {
-        v.view.pose_budget = (far.is_finite() && far > 0.0).then_some((Vec3::from(*eye), far));
-    }
+    libcommon::ffi::guard("pik_view_set_pose_budget", (), || {
+        if let (Some(v), Some(eye)) = (unsafe { view.as_mut() }, unsafe { eye.as_ref() }) {
+            v.view.pose_budget = (far.is_finite() && far > 0.0).then_some((Vec3::from(*eye), far));
+        }
+    })
 }
 
 /// Have views made after this draw the Dolphin's parts as the sim fits them (`animator`'s sibling,
 /// `view::set_repaired_ship`). Call before [`pik_view_new`]: the parts' models are loaded then.
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_view_set_repaired_ship(on: u8) {
-    libpikmin_present::view::set_repaired_ship(on != 0);
+    libcommon::ffi::guard("pik_view_set_repaired_ship", (), || {
+        libpikmin_present::view::set_repaired_ship(on != 0);
+    })
 }
 
 /// Victory posing is host-owned and leaves the simulation unchanged.
@@ -309,7 +321,9 @@ pub extern "C" fn pik_view_set_repaired_ship(on: u8) {
 /// `view` is a live view handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_celebrating(view: *mut PikView, on: u8) {
-    if let Some(v) = unsafe { view.as_mut() } { v.view.celebrating = on != 0; }
+    libcommon::ffi::guard("pik_view_set_celebrating", (), || {
+        if let Some(v) = unsafe { view.as_mut() } { v.view.celebrating = on != 0; }
+    })
 }
 
 /// Loads the Pianta body an Olimar can wear (skin 2) from the Sunshine assets folder `dir`, appending it
@@ -320,18 +334,20 @@ pub unsafe extern "C" fn pik_view_set_celebrating(view: *mut PikView, on: u8) {
 /// `view` is a live handle; `dir` a NUL-terminated string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_load_pianta(view: *mut PikView, dir: *const c_char, female: u8, colour: u32) -> i32 {
-    if dir.is_null() { return -1; }
-    // SAFETY: as documented.
-    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
-    unsafe {
-        with_view(view, -1, |v| match v.view.load_pianta(std::path::Path::new(&dir), female != 0, colour as usize) {
-            Ok(m) => {
-                v.pianta_dir = Some(std::path::PathBuf::from(&dir));
-                m as i32
-            }
-            Err(_) => -1,
-        })
-    }
+    libcommon::ffi::guard("pik_view_load_pianta", -1, || {
+        if dir.is_null() { return -1; }
+        // SAFETY: as documented.
+        let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+        unsafe {
+            with_view(view, -1, |v| match v.view.load_pianta(std::path::Path::new(&dir), female != 0, colour as usize) {
+                Ok(m) => {
+                    v.pianta_dir = Some(std::path::PathBuf::from(&dir));
+                    m as i32
+                }
+                Err(_) => -1,
+            })
+        }
+    })
 }
 
 /// Loads Louie (skin 1) from the Pikmin 2 cache `dir` ([`pik_p2_extract`]), appending his model to the
@@ -340,18 +356,20 @@ pub unsafe extern "C" fn pik_view_load_pianta(view: *mut PikView, dir: *const c_
 /// `view` is a live handle; `dir` a NUL-terminated string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_load_louie(view: *mut PikView, dir: *const c_char) -> i32 {
-    if dir.is_null() { return -1; }
-    // SAFETY: as documented.
-    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
-    unsafe {
-        with_view(view, -1, |v| match v.view.load_louie(std::path::Path::new(&dir)) {
-            Ok(m) => {
-                v.louie_dir = Some(std::path::PathBuf::from(&dir));
-                m as i32
-            }
-            Err(_) => -1,
-        })
-    }
+    libcommon::ffi::guard("pik_view_load_louie", -1, || {
+        if dir.is_null() { return -1; }
+        // SAFETY: as documented.
+        let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+        unsafe {
+            with_view(view, -1, |v| match v.view.load_louie(std::path::Path::new(&dir)) {
+                Ok(m) => {
+                    v.louie_dir = Some(std::path::PathBuf::from(&dir));
+                    m as i32
+                }
+                Err(_) => -1,
+            })
+        }
+    })
 }
 
 /// Loads Purple and White Pikmin from the Pikmin 2 cache `dir` ([`pik_p2_extract`]), appending their two models
@@ -361,15 +379,17 @@ pub unsafe extern "C" fn pik_view_load_louie(view: *mut PikView, dir: *const c_c
 /// `view` is a live handle; `dir` a NUL-terminated string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_load_pikmin2(view: *mut PikView, dir: *const c_char) -> i32 {
-    if dir.is_null() { return -1; }
-    // SAFETY: as documented.
-    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
-    unsafe {
-        with_view(view, -1, |v| match v.view.load_pikmin2(std::path::Path::new(&dir)) {
-            Ok(m) => m as i32,
-            Err(_) => -1,
-        })
-    }
+    libcommon::ffi::guard("pik_view_load_pikmin2", -1, || {
+        if dir.is_null() { return -1; }
+        // SAFETY: as documented.
+        let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+        unsafe {
+            with_view(view, -1, |v| match v.view.load_pikmin2(std::path::Path::new(&dir)) {
+                Ok(m) => m as i32,
+                Err(_) => -1,
+            })
+        }
+    })
 }
 
 /// Loads Pikmin 2's 188 treasures from the Pikmin 2 cache `dir` ([`crate::pik_p2_extract_treasures`]), appending their models to
@@ -380,18 +400,20 @@ pub unsafe extern "C" fn pik_view_load_pikmin2(view: *mut PikView, dir: *const c
 /// `view` is a live handle; `dir` a NUL-terminated string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_load_treasures(view: *mut PikView, dir: *const c_char) -> i32 {
-    if dir.is_null() { return -1; }
-    // SAFETY: as documented.
-    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
-    unsafe {
-        with_view(view, -1, |v| match v.view.load_treasures(std::path::Path::new(&dir)) {
-            Ok(m) => {
-                if v.p2_dir.is_none() { v.p2_dir = Some(std::path::PathBuf::from(&dir)); }
-                m as i32
-            }
-            Err(_) => -1,
-        })
-    }
+    libcommon::ffi::guard("pik_view_load_treasures", -1, || {
+        if dir.is_null() { return -1; }
+        // SAFETY: as documented.
+        let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+        unsafe {
+            with_view(view, -1, |v| match v.view.load_treasures(std::path::Path::new(&dir)) {
+                Ok(m) => {
+                    if v.p2_dir.is_none() { v.p2_dir = Some(std::path::PathBuf::from(&dir)); }
+                    m as i32
+                }
+                Err(_) => -1,
+            })
+        }
+    })
 }
 
 /// Loads Pikmin 2's Candypop Bud ([`libpikmin::bulb`]) from the Pikmin 2 cache `dir` (the folder holding `enemy/`,
@@ -401,22 +423,24 @@ pub unsafe extern "C" fn pik_view_load_treasures(view: *mut PikView, dir: *const
 /// `view` is a live handle; `dir` a NUL-terminated string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_load_bulbs(view: *mut PikView, dir: *const c_char) -> i32 {
-    if dir.is_null() { return -1; }
-    // SAFETY: as documented.
-    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
-    unsafe {
-        with_view(view, -1, |v| match v.view.load_bulbs(std::path::Path::new(&dir)) {
-            Ok(m) => {
-                // The buds' sounds play on the Pikmin 2 output, which starts from this cache.
-                if v.p2_dir.is_none() { v.p2_dir = Some(std::path::PathBuf::from(&dir)); }
-                m as i32
-            }
-            Err(e) => {
-                eprintln!("Candypop Buds: {e}");
-                -1
-            }
-        })
-    }
+    libcommon::ffi::guard("pik_view_load_bulbs", -1, || {
+        if dir.is_null() { return -1; }
+        // SAFETY: as documented.
+        let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+        unsafe {
+            with_view(view, -1, |v| match v.view.load_bulbs(std::path::Path::new(&dir)) {
+                Ok(m) => {
+                    // The buds' sounds play on the Pikmin 2 output, which starts from this cache.
+                    if v.p2_dir.is_none() { v.p2_dir = Some(std::path::PathBuf::from(&dir)); }
+                    m as i32
+                }
+                Err(e) => {
+                    eprintln!("Candypop Buds: {e}");
+                    -1
+                }
+            })
+        }
+    })
 }
 
 /// Draws the ship of Onion `onion` as Louie's Hocotate Ship (`on` 1; it loads with Louie, [`pik_view_load_louie`]) or as
@@ -425,7 +449,9 @@ pub unsafe extern "C" fn pik_view_load_bulbs(view: *mut PikView, dir: *const c_c
 /// `view` is a live handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_ship_hocotate(view: *mut PikView, onion: u32, on: u8) {
-    if let Some(v) = unsafe { view.as_mut() } { v.view.set_ship_hocotate(onion, on != 0); }
+    libcommon::ffi::guard("pik_view_set_ship_hocotate", (), || {
+        if let Some(v) = unsafe { view.as_mut() } { v.view.set_ship_hocotate(onion, on != 0); }
+    })
 }
 
 /// How tall Louie stands as a multiple of Olimar (1 by default).
@@ -433,7 +459,9 @@ pub unsafe extern "C" fn pik_view_set_ship_hocotate(view: *mut PikView, onion: u
 /// `view` is a live handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_louie_height(view: *mut PikView, ratio: f32) {
-    if let Some(v) = unsafe { view.as_mut() } { v.view.set_louie_height(ratio); }
+    libcommon::ffi::guard("pik_view_set_louie_height", (), || {
+        if let Some(v) = unsafe { view.as_mut() } { v.view.set_louie_height(ratio); }
+    })
 }
 
 /// Whether `dir` holds a complete Pikmin 2 extraction ([`pik_p2_extract`]).
@@ -441,10 +469,12 @@ pub unsafe extern "C" fn pik_view_set_louie_height(view: *mut PikView, ratio: f3
 /// `dir` is a NUL-terminated string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_p2_complete(dir: *const c_char) -> u8 {
-    if dir.is_null() { return 0; }
-    // SAFETY: as documented.
-    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
-    libsms::extract::p2::is_complete(std::path::Path::new(&dir)) as u8
+    libcommon::ffi::guard("pik_p2_complete", 0, || {
+        if dir.is_null() { return 0; }
+        // SAFETY: as documented.
+        let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+        libsms::extract::p2::is_complete(std::path::Path::new(&dir)) as u8
+    })
 }
 
 /// Extracts Pikmin 2's player files (Louie) from the user's disc image `iso` into the folder `out`; 0 when
@@ -453,15 +483,17 @@ pub unsafe extern "C" fn pik_p2_complete(dir: *const c_char) -> u8 {
 /// Both arguments are NUL-terminated strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_p2_extract(iso: *const c_char, out: *const c_char) -> i32 {
-    if iso.is_null() || out.is_null() { return 1; }
-    // SAFETY: as documented.
-    let (iso, out) = unsafe {
-        (std::ffi::CStr::from_ptr(iso).to_string_lossy().into_owned(), std::ffi::CStr::from_ptr(out).to_string_lossy().into_owned())
-    };
-    match libsms::extract::p2::extract_navi(std::path::Path::new(&iso), std::path::Path::new(&out), &mut |_| {}) {
-        Ok(_) => 0,
-        Err(_) => 1,
-    }
+    libcommon::ffi::guard("pik_p2_extract", -1, || {
+        if iso.is_null() || out.is_null() { return 1; }
+        // SAFETY: as documented.
+        let (iso, out) = unsafe {
+            (std::ffi::CStr::from_ptr(iso).to_string_lossy().into_owned(), std::ffi::CStr::from_ptr(out).to_string_lossy().into_owned())
+        };
+        match libsms::extract::p2::extract_navi(std::path::Path::new(&iso), std::path::Path::new(&out), &mut |_| {}) {
+            Ok(_) => 0,
+            Err(_) => 1,
+        }
+    })
 }
 
 /// Whether the Pikmin 2 cache `dir` holds the enemies' files ([`pik_p2_enemies_extract`]).
@@ -469,10 +501,12 @@ pub unsafe extern "C" fn pik_p2_extract(iso: *const c_char, out: *const c_char) 
 /// `dir` is a NUL-terminated string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_p2_enemies_complete(dir: *const c_char) -> u8 {
-    if dir.is_null() { return 0; }
-    // SAFETY: as documented.
-    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
-    libsms::extract::p2_enemy::is_complete(std::path::Path::new(&dir)) as u8
+    libcommon::ffi::guard("pik_p2_enemies_complete", 0, || {
+        if dir.is_null() { return 0; }
+        // SAFETY: as documented.
+        let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+        libsms::extract::p2_enemy::is_complete(std::path::Path::new(&dir)) as u8
+    })
 }
 
 /// Extracts Pikmin 2's enemies (models, clips, textures, parameter text) from the user's disc image `iso` into the
@@ -482,15 +516,17 @@ pub unsafe extern "C" fn pik_p2_enemies_complete(dir: *const c_char) -> u8 {
 /// Both arguments are NUL-terminated strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_p2_enemies_extract(iso: *const c_char, out: *const c_char) -> i32 {
-    if iso.is_null() || out.is_null() { return 1; }
-    // SAFETY: as documented.
-    let (iso, out) = unsafe {
-        (std::ffi::CStr::from_ptr(iso).to_string_lossy().into_owned(), std::ffi::CStr::from_ptr(out).to_string_lossy().into_owned())
-    };
-    match libsms::extract::p2_enemy::extract(std::path::Path::new(&iso), std::path::Path::new(&out), &mut |_| {}) {
-        Ok(_) => 0,
-        Err(_) => 1,
-    }
+    libcommon::ffi::guard("pik_p2_enemies_extract", -1, || {
+        if iso.is_null() || out.is_null() { return 1; }
+        // SAFETY: as documented.
+        let (iso, out) = unsafe {
+            (std::ffi::CStr::from_ptr(iso).to_string_lossy().into_owned(), std::ffi::CStr::from_ptr(out).to_string_lossy().into_owned())
+        };
+        match libsms::extract::p2_enemy::extract(std::path::Path::new(&iso), std::path::Path::new(&out), &mut |_| {}) {
+            Ok(_) => 0,
+            Err(_) => 1,
+        }
+    })
 }
 
 /// Loads Pikachu and the Ice Climbers (skin 3) from the Melee cache `dir` (which must hold `PlPp.dat` and
@@ -501,15 +537,17 @@ pub unsafe extern "C" fn pik_p2_enemies_extract(iso: *const c_char, out: *const 
 /// `view` is a live handle; `dir` a NUL-terminated string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_load_pikachu(view: *mut PikView, dir: *const c_char) -> i32 {
-    if dir.is_null() { return -1; }
-    // SAFETY: as documented.
-    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
-    unsafe {
-        with_view(view, -1, |v| match v.view.load_pikachu(std::path::Path::new(&dir)) {
-            Ok(m) => m as i32,
-            Err(_) => -1,
-        })
-    }
+    libcommon::ffi::guard("pik_view_load_pikachu", -1, || {
+        if dir.is_null() { return -1; }
+        // SAFETY: as documented.
+        let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+        unsafe {
+            with_view(view, -1, |v| match v.view.load_pikachu(std::path::Path::new(&dir)) {
+                Ok(m) => m as i32,
+                Err(_) => -1,
+            })
+        }
+    })
 }
 
 /// Pikachu's height and an Ice Climber's, as multiples of Olimar's (1 and 0.42 by default).
@@ -517,7 +555,9 @@ pub unsafe extern "C" fn pik_view_load_pikachu(view: *mut PikView, dir: *const c
 /// `view` is a live handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_pikachu_ratios(view: *mut PikView, captain: f32, climber: f32) {
-    if let Some(v) = unsafe { view.as_mut() } { v.view.set_pikachu_ratios(captain, climber); }
+    libcommon::ffi::guard("pik_view_set_pikachu_ratios", (), || {
+        if let Some(v) = unsafe { view.as_mut() } { v.view.set_pikachu_ratios(captain, climber); }
+    })
 }
 
 /// Whether the Melee cache `dir` holds the Ice Climbers' models.
@@ -525,10 +565,12 @@ pub unsafe extern "C" fn pik_view_set_pikachu_ratios(view: *mut PikView, captain
 /// `dir` is a NUL-terminated string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_ssbm_ice_climbers_complete(dir: *const c_char) -> u8 {
-    if dir.is_null() { return 0; }
-    // SAFETY: as documented.
-    let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
-    libssbm_assets::disc::ice_climbers_present(std::path::Path::new(&dir)) as u8
+    libcommon::ffi::guard("pik_ssbm_ice_climbers_complete", 0, || {
+        if dir.is_null() { return 0; }
+        // SAFETY: as documented.
+        let dir = unsafe { std::ffi::CStr::from_ptr(dir) }.to_string_lossy().into_owned();
+        libssbm_assets::disc::ice_climbers_present(std::path::Path::new(&dir)) as u8
+    })
 }
 
 /// Extracts the Ice Climbers' models from the user's Melee (GALE01 revision 2) image `iso` into the Melee
@@ -537,15 +579,17 @@ pub unsafe extern "C" fn pik_ssbm_ice_climbers_complete(dir: *const c_char) -> u
 /// Both arguments are NUL-terminated strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_ssbm_extract_ice_climbers(iso: *const c_char, out: *const c_char) -> i32 {
-    if iso.is_null() || out.is_null() { return 1; }
-    // SAFETY: as documented.
-    let (iso, out) = unsafe {
-        (std::ffi::CStr::from_ptr(iso).to_string_lossy().into_owned(), std::ffi::CStr::from_ptr(out).to_string_lossy().into_owned())
-    };
-    match libssbm_assets::disc::extract_ice_climbers(std::path::Path::new(&iso), std::path::Path::new(&out)) {
-        Ok(()) => 0,
-        Err(_) => 1,
-    }
+    libcommon::ffi::guard("pik_ssbm_extract_ice_climbers", -1, || {
+        if iso.is_null() || out.is_null() { return 1; }
+        // SAFETY: as documented.
+        let (iso, out) = unsafe {
+            (std::ffi::CStr::from_ptr(iso).to_string_lossy().into_owned(), std::ffi::CStr::from_ptr(out).to_string_lossy().into_owned())
+        };
+        match libssbm_assets::disc::extract_ice_climbers(std::path::Path::new(&iso), std::path::Path::new(&out)) {
+            Ok(()) => 0,
+            Err(_) => 1,
+        }
+    })
 }
 
 /// Draws `captain`'s forearms and hands on their own for a VR player's controllers
@@ -556,13 +600,15 @@ pub unsafe extern "C" fn pik_ssbm_extract_ice_climbers(iso: *const c_char, out: 
 /// `view` is a live handle; `cache` null or a NUL-terminated path.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_vr_arms(view: *mut PikView, captain: i32, cache: *const std::ffi::c_char) {
-    let Some(v) = (unsafe { view.as_mut() }) else { return };
-    if captain < 0 || cache.is_null() {
-        v.view.set_vr_arms(None, std::path::Path::new(""));
-        return;
-    }
-    let dir = unsafe { std::ffi::CStr::from_ptr(cache) }.to_string_lossy().into_owned();
-    v.view.set_vr_arms(Some(captain as u32), std::path::Path::new(&dir));
+    libcommon::ffi::guard("pik_view_set_vr_arms", (), || {
+        let Some(v) = (unsafe { view.as_mut() }) else { return };
+        if captain < 0 || cache.is_null() {
+            v.view.set_vr_arms(None, std::path::Path::new(""));
+            return;
+        }
+        let dir = unsafe { std::ffi::CStr::from_ptr(cache) }.to_string_lossy().into_owned();
+        v.view.set_vr_arms(Some(captain as u32), std::path::Path::new(&dir));
+    })
 }
 
 /// Which body a captain wears: 0 Olimar, 1 Louie, 2 the Pianta, 3 Pikachu (when loaded). Takes effect on the next update.
@@ -570,23 +616,25 @@ pub unsafe extern "C" fn pik_view_set_vr_arms(view: *mut PikView, captain: i32, 
 /// `view` is a live handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_captain_skin(view: *mut PikView, captain: u32, skin: u8) {
-    if let Some(v) = unsafe { view.as_mut() } {
-        v.view.set_captain_skin(captain, skin);
-        // His voice is Sunshine's sound system: start it now, not at his first jump.
-        // Louie's voice is Pikmin 2's sound effects, on a second output of their own.
-        if skin == libpikmin_present::louie::SKIN_LOUIE && v.audio.is_some() && !v.louie_audio_tried {
-            v.louie_audio_tried = true;
-            if let Some(dir) = &v.louie_dir {
-                v.louie_audio = libsms_present::audio::Pikmin2Audio::start(dir);
+    libcommon::ffi::guard("pik_view_set_captain_skin", (), || {
+        if let Some(v) = unsafe { view.as_mut() } {
+            v.view.set_captain_skin(captain, skin);
+            // His voice is Sunshine's sound system: start it now, not at his first jump.
+            // Louie's voice is Pikmin 2's sound effects, on a second output of their own.
+            if skin == libpikmin_present::louie::SKIN_LOUIE && v.audio.is_some() && !v.louie_audio_tried {
+                v.louie_audio_tried = true;
+                if let Some(dir) = &v.louie_dir {
+                    v.louie_audio = libsms_present::audio::Pikmin2Audio::start(dir);
+                }
+            }
+            if skin == libpikmin_present::pianta::SKIN_PIANTA && v.audio.is_some() && !v.pianta_audio_tried {
+                v.pianta_audio_tried = true;
+                if let Some(dir) = &v.pianta_dir {
+                    v.pianta_audio = libsms_present::audio::Audio::start(dir, false);
+                }
             }
         }
-        if skin == libpikmin_present::pianta::SKIN_PIANTA && v.audio.is_some() && !v.pianta_audio_tried {
-            v.pianta_audio_tried = true;
-            if let Some(dir) = &v.pianta_dir {
-                v.pianta_audio = libsms_present::audio::Audio::start(dir, false);
-            }
-        }
-    }
+    })
 }
 
 /// How tall the Pianta stands, to the top of his head, in sim units (Olimar is about 25).
@@ -594,14 +642,18 @@ pub unsafe extern "C" fn pik_view_set_captain_skin(view: *mut PikView, captain: 
 /// `view` is a live handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_pianta_height(view: *mut PikView, units: f32) {
-    if let Some(v) = unsafe { view.as_mut() } { v.view.set_pianta_height(units); }
+    libcommon::ffi::guard("pik_view_set_pianta_height", (), || {
+        if let Some(v) = unsafe { view.as_mut() } { v.view.set_pianta_height(units); }
+    })
 }
 
 /// # Safety
 /// `view` is a live handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_ship_repair_mode(view: *mut PikView, on: u8) {
-    if let Some(v) = unsafe { view.as_mut() } { v.view.repair_mode = on != 0; }
+    libcommon::ffi::guard("pik_view_set_ship_repair_mode", (), || {
+        if let Some(v) = unsafe { view.as_mut() } { v.view.repair_mode = on != 0; }
+    })
 }
 
 /// The host's terrain height below an Onion, in simulation units.
@@ -609,9 +661,11 @@ pub unsafe extern "C" fn pik_view_set_ship_repair_mode(view: *mut PikView, on: u
 /// `view` is a live view handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_onion_ground(view: *mut PikView, onion: u32, height: f32) {
-    if let Some(v) = unsafe { view.as_mut() } {
-        v.view.onion_ground.insert(onion, height);
-    }
+    libcommon::ffi::guard("pik_view_set_onion_ground", (), || {
+        if let Some(v) = unsafe { view.as_mut() } {
+            v.view.onion_ground.insert(onion, height);
+        }
+    })
 }
 
 /// The host has opened or closed a hovering Onion's menu beam.
@@ -619,17 +673,21 @@ pub unsafe extern "C" fn pik_view_set_onion_ground(view: *mut PikView, onion: u3
 /// `view` is a live view handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_onion_menu_beam(view: *mut PikView, onion: u32, active: u8) {
-    if let Some(v) = unsafe { view.as_mut() } {
-        if active != 0 { v.view.onion_menu_beams.insert(onion); }
-        else { v.view.onion_menu_beams.remove(&onion); }
-    }
+    libcommon::ffi::guard("pik_view_set_onion_menu_beam", (), || {
+        if let Some(v) = unsafe { view.as_mut() } {
+            if active != 0 { v.view.onion_menu_beams.insert(onion); }
+            else { v.view.onion_menu_beams.remove(&onion); }
+        }
+    })
 }
 
 /// # Safety
 /// `view` is a live view handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_repairs_pending(view: *const PikView) -> u32 {
-    unsafe { view.as_ref() }.map_or(0, |v| v.view.pending_repairs() as u32)
+    libcommon::ffi::guard("pik_view_repairs_pending", 0, || {
+        unsafe { view.as_ref() }.map_or(0, |v| v.view.pending_repairs() as u32)
+    })
 }
 
 /// The complete-ending farewell music: pikidemo.c DEMOID_GoodEndingWave's
@@ -668,10 +726,12 @@ pub unsafe extern "C" fn pik_victory_pcm(assets_dir: *const c_char, out: *mut f3
 /// `view` from [`pik_view_new`]; `at` points to a vector.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_boarding(view: *mut PikView, captain: u32, frame: f32, at: *const PikVec3) -> u8 {
-    if at.is_null() { return 0; }
-    // SAFETY: as documented.
-    let at = unsafe { *at };
-    unsafe { with_view(view, 0, |v| v.view.set_boarding(captain, frame, at.into()) as u8) }
+    libcommon::ffi::guard("pik_view_set_boarding", 0, || {
+        if at.is_null() { return 0; }
+        // SAFETY: as documented.
+        let at = unsafe { *at };
+        unsafe { with_view(view, 0, |v| v.view.set_boarding(captain, frame, at.into()) as u8) }
+    })
 }
 
 /// Where the boarding clip starts and ends, in its own frames (30 a second).
@@ -680,11 +740,13 @@ pub unsafe extern "C" fn pik_view_set_boarding(view: *mut PikView, captain: u32,
 /// Each pointer is null or writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_boarding_frames(first: *mut f32, last: *mut f32) {
-    // SAFETY: as documented.
-    unsafe {
-        if !first.is_null() { *first = libpikmin_present::View::BOARDING_FRAMES.0; }
-        if !last.is_null() { *last = libpikmin_present::View::BOARDING_FRAMES.1; }
-    }
+    libcommon::ffi::guard("pik_view_boarding_frames", (), || {
+        // SAFETY: as documented.
+        unsafe {
+            if !first.is_null() { *first = libpikmin_present::View::BOARDING_FRAMES.0; }
+            if !last.is_null() { *last = libpikmin_present::View::BOARDING_FRAMES.1; }
+        }
+    })
 }
 
 /// Captain `captain` appears in a beam: `progress` 0 (a thin column) to 1 (himself, which ends it).
@@ -693,8 +755,10 @@ pub unsafe extern "C" fn pik_view_boarding_frames(first: *mut f32, last: *mut f3
 /// `view` from [`pik_view_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_materialize(view: *mut PikView, captain: u32, progress: f32) {
-    // SAFETY: as documented.
-    unsafe { with_view(view, (), |v| v.view.set_materialize(captain, progress)) }
+    libcommon::ffi::guard("pik_view_set_materialize", (), || {
+        // SAFETY: as documented.
+        unsafe { with_view(view, (), |v| v.view.set_materialize(captain, progress)) }
+    })
 }
 
 /// Dolphin healing particles and one ghost per sacrificed Pikmin at a captain.
@@ -702,13 +766,17 @@ pub unsafe extern "C" fn pik_view_set_materialize(view: *mut PikView, captain: u
 /// `view` from `pik_view_new`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_healing(view: *mut PikView, captain: u32, progress: f32, ghosts: u32) {
-    unsafe { with_view(view, (), |v| v.view.set_healing(captain, progress, ghosts)) }
+    libcommon::ffi::guard("pik_view_set_healing", (), || {
+        unsafe { with_view(view, (), |v| v.view.set_healing(captain, progress, ghosts)) }
+    })
 }
 
 /// Olimar jumps with the Pikmin's own jump motion (`animator::set_captain_pikmin_jump`).
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_view_set_captain_pikmin_jump(on: u8) {
-    libpikmin_present::animator::set_captain_pikmin_jump(on != 0);
+    libcommon::ffi::guard("pik_view_set_captain_pikmin_jump", (), || {
+        libpikmin_present::animator::set_captain_pikmin_jump(on != 0);
+    })
 }
 
 /// How loud the swarming trumpet plays, times the disc's level (default 1; 0 to 4).
@@ -717,14 +785,16 @@ pub extern "C" fn pik_view_set_captain_pikmin_jump(on: u8) {
 /// `view` from [`pik_view_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_trumpet_gain(view: *mut PikView, gain: f32) {
-    // SAFETY: as documented.
-    unsafe {
-        with_view(view, (), |v| {
-            if let Some(a) = v.audio.as_ref() {
-                a.set_formation_gain(gain);
-            }
-        })
-    }
+    libcommon::ffi::guard("pik_view_set_trumpet_gain", (), || {
+        // SAFETY: as documented.
+        unsafe {
+            with_view(view, (), |v| {
+                if let Some(a) = v.audio.as_ref() {
+                    a.set_formation_gain(gain);
+                }
+            })
+        }
+    })
 }
 
 /// Transfer death-bell playback to the host. Writes 640000 stereo f32 samples at 32000 Hz
@@ -735,14 +805,16 @@ pub unsafe extern "C" fn pik_view_set_trumpet_gain(view: *mut PikView, gain: f32
 /// `view` from [`pik_view_new`]; `out` writable for `max` f32 samples.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_take_death_sting(view: *mut PikView, out: *mut f32, max: u32) -> u32 {
-    if out.is_null() || max < 640000 { return 0; }
-    unsafe {
-        with_view(view, 0, |v| {
-            let Some(pcm) = v.audio.as_mut().and_then(Audio::take_death_sting) else { return 0; };
-            std::ptr::copy_nonoverlapping(pcm.as_ptr(), out, pcm.len());
-            pcm.len() as u32
-        })
-    }
+    libcommon::ffi::guard("pik_view_take_death_sting", 0, || {
+        if out.is_null() || max < 640000 { return 0; }
+        unsafe {
+            with_view(view, 0, |v| {
+                let Some(pcm) = v.audio.as_mut().and_then(Audio::take_death_sting) else { return 0; };
+                std::ptr::copy_nonoverlapping(pcm.as_ptr(), out, pcm.len());
+                pcm.len() as u32
+            })
+        }
+    })
 }
 
 /// Runs `f` on a live view, poisoning it if `f` panics.
@@ -774,31 +846,35 @@ unsafe fn with_view<R>(view: *mut PikView, fallback: R, f: impl FnOnce(&mut PikV
 /// `view` from [`pik_view_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_model_count(view: *mut PikView) -> u32 {
-    // SAFETY: as documented.
-    unsafe { with_view(view, 0, |v| v.view.models.len() as u32) }
+    libcommon::ffi::guard("pik_view_model_count", 0, || {
+        // SAFETY: as documented.
+        unsafe { with_view(view, 0, |v| v.view.models.len() as u32) }
+    })
 }
 
 /// # Safety
 /// `view` from [`pik_view_new`]; `out` writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_model(view: *mut PikView, model: u32, out: *mut PikModelInfo) -> u8 {
-    // SAFETY: as documented.
-    unsafe {
-        with_view(view, 0, |v| {
-            let (Some(m), Some(out)) = (v.view.models.get(model as usize), out.as_mut()) else {
-                return 0;
-            };
-            *out = PikModelInfo {
-                vertex_count: m.vertex_count as u32,
-                index_count: m.batches.iter().map(|b| b.indices.len() as u32).sum(),
-                batch_count: m.batches.len() as u32,
-                texture_count: v.view.textures.list.len() as u32,
-                lo: m.lo.into(),
-                hi: m.hi.into(),
-            };
-            1
-        })
-    }
+    libcommon::ffi::guard("pik_view_model", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with_view(view, 0, |v| {
+                let (Some(m), Some(out)) = (v.view.models.get(model as usize), out.as_mut()) else {
+                    return 0;
+                };
+                *out = PikModelInfo {
+                    vertex_count: m.vertex_count as u32,
+                    index_count: m.batches.iter().map(|b| b.indices.len() as u32).sum(),
+                    batch_count: m.batches.len() as u32,
+                    texture_count: v.view.textures.list.len() as u32,
+                    lo: m.lo.into(),
+                    hi: m.hi.into(),
+                };
+                1
+            })
+        }
+    })
 }
 
 /// Writes up to `max` of the model's batches; returns how many.
@@ -807,39 +883,41 @@ pub unsafe extern "C" fn pik_view_model(view: *mut PikView, model: u32, out: *mu
 /// `view` from [`pik_view_new`]; `out` writable for `max`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_batches(view: *mut PikView, model: u32, out: *mut PikBatch, max: u32) -> u32 {
-    // SAFETY: as documented.
-    unsafe {
-        with_view(view, 0, |v| {
-            let Some(m) = v.view.models.get(model as usize) else { return 0 };
-            let (mut index, mut vertex) = (0u32, 0u32);
-            let mut n = 0;
-            for (i, b) in m.batches.iter().enumerate() {
-                if n >= max as usize || out.is_null() {
-                    break;
+    libcommon::ffi::guard("pik_view_batches", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with_view(view, 0, |v| {
+                let Some(m) = v.view.models.get(model as usize) else { return 0 };
+                let (mut index, mut vertex) = (0u32, 0u32);
+                let mut n = 0;
+                for (i, b) in m.batches.iter().enumerate() {
+                    if n >= max as usize || out.is_null() {
+                        break;
+                    }
+                    let cull = match b.cull {
+                        Cull::Back => 0,
+                        Cull::Front => 1,
+                        Cull::None => 2,
+                    };
+                    out.add(n).write(PikBatch {
+                        first_index: index,
+                        index_count: b.indices.len() as u32,
+                        first_vertex: vertex,
+                        vertex_count: b.vertices.len() as u32,
+                        texture: m.batch_texture[i],
+                        blend: m.batch_blend[i],
+                        lit: m.batch_light(i),
+                        cull,
+                        env: m.batch_env.get(i).is_some_and(|e| e.is_some()) as u8,
+                    });
+                    index += b.indices.len() as u32;
+                    vertex += b.vertices.len() as u32;
+                    n += 1;
                 }
-                let cull = match b.cull {
-                    Cull::Back => 0,
-                    Cull::Front => 1,
-                    Cull::None => 2,
-                };
-                out.add(n).write(PikBatch {
-                    first_index: index,
-                    index_count: b.indices.len() as u32,
-                    first_vertex: vertex,
-                    vertex_count: b.vertices.len() as u32,
-                    texture: m.batch_texture[i],
-                    blend: m.batch_blend[i],
-                    lit: m.batch_light(i),
-                    cull,
-                    env: m.batch_env.get(i).is_some_and(|e| e.is_some()) as u8,
-                });
-                index += b.indices.len() as u32;
-                vertex += b.vertices.len() as u32;
-                n += 1;
-            }
-            n as u32
-        })
-    }
+                n as u32
+            })
+        }
+    })
 }
 
 /// The model's triangle indices, batch after batch, into the model's whole vertex list (so
@@ -849,27 +927,29 @@ pub unsafe extern "C" fn pik_view_batches(view: *mut PikView, model: u32, out: *
 /// `view` from [`pik_view_new`]; `out` writable for `max`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_indices(view: *mut PikView, model: u32, out: *mut u32, max: u32) -> u32 {
-    // SAFETY: as documented.
-    unsafe {
-        with_view(view, 0, |v| {
-            let Some(m) = v.view.models.get(model as usize) else { return 0 };
-            if out.is_null() {
-                return 0;
-            }
-            let (mut n, mut base) = (0usize, 0u32);
-            for b in &m.batches {
-                for &i in &b.indices {
-                    if n >= max as usize {
-                        return n as u32;
-                    }
-                    out.add(n).write(base + i);
-                    n += 1;
+    libcommon::ffi::guard("pik_view_indices", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with_view(view, 0, |v| {
+                let Some(m) = v.view.models.get(model as usize) else { return 0 };
+                if out.is_null() {
+                    return 0;
                 }
-                base += b.vertices.len() as u32;
-            }
-            n as u32
-        })
-    }
+                let (mut n, mut base) = (0usize, 0u32);
+                for b in &m.batches {
+                    for &i in &b.indices {
+                        if n >= max as usize {
+                            return n as u32;
+                        }
+                        out.add(n).write(base + i);
+                        n += 1;
+                    }
+                    base += b.vertices.len() as u32;
+                }
+                n as u32
+            })
+        }
+    })
 }
 
 /// The model's texture coordinates, one per vertex in vertex order. Returns how many.
@@ -878,24 +958,26 @@ pub unsafe extern "C" fn pik_view_indices(view: *mut PikView, model: u32, out: *
 /// `view` from [`pik_view_new`]; `out` writable for `max` pairs of floats.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_uvs(view: *mut PikView, model: u32, out: *mut [f32; 2], max: u32) -> u32 {
-    // SAFETY: as documented.
-    unsafe {
-        with_view(view, 0, |v| {
-            let Some(m) = v.view.models.get(model as usize) else { return 0 };
-            if out.is_null() {
-                return 0;
-            }
-            let mut n = 0usize;
-            for vtx in m.batches.iter().flat_map(|b| &b.vertices) {
-                if n >= max as usize {
-                    break;
+    libcommon::ffi::guard("pik_view_uvs", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with_view(view, 0, |v| {
+                let Some(m) = v.view.models.get(model as usize) else { return 0 };
+                if out.is_null() {
+                    return 0;
                 }
-                out.add(n).write([vtx.uv.x, vtx.uv.y]);
-                n += 1;
-            }
-            n as u32
-        })
-    }
+                let mut n = 0usize;
+                for vtx in m.batches.iter().flat_map(|b| &b.vertices) {
+                    if n >= max as usize {
+                        break;
+                    }
+                    out.add(n).write([vtx.uv.x, vtx.uv.y]);
+                    n += 1;
+                }
+                n as u32
+            })
+        }
+    })
 }
 
 /// Baked texture `id`: its size and wrap modes in `info`, and if `rgba` isn't null, its pixels
@@ -907,36 +989,40 @@ pub unsafe extern "C" fn pik_view_uvs(view: *mut PikView, model: u32, out: *mut 
 /// `view` from [`pik_view_new`]; `info` null or writable; `rgba` null or writable for `len`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_texture(view: *mut PikView, id: u32, info: *mut PikTexture, rgba: *mut u8, len: u32) -> u8 {
-    // SAFETY: as documented.
-    unsafe {
-        with_view(view, 0, |v| {
-            let Some(t) = v.view.textures.list.get(id as usize) else { return 0 };
-            if let Some(info) = info.as_mut() {
-                *info = PikTexture {
-                    width: t.width,
-                    height: t.height,
-                    wrap_s: t.wrap[0],
-                    wrap_t: t.wrap[1],
-                    _pad: [0; 2],
-                };
-            }
-            if rgba.is_null() {
-                return 1;
-            }
-            if t.rgba.len() > len as usize {
-                return 0;
-            }
-            std::ptr::copy_nonoverlapping(t.rgba.as_ptr(), rgba, t.rgba.len());
-            1
-        })
-    }
+    libcommon::ffi::guard("pik_view_texture", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with_view(view, 0, |v| {
+                let Some(t) = v.view.textures.list.get(id as usize) else { return 0 };
+                if let Some(info) = info.as_mut() {
+                    *info = PikTexture {
+                        width: t.width,
+                        height: t.height,
+                        wrap_s: t.wrap[0],
+                        wrap_t: t.wrap[1],
+                        _pad: [0; 2],
+                    };
+                }
+                if rgba.is_null() {
+                    return 1;
+                }
+                if t.rgba.len() > len as usize {
+                    return 0;
+                }
+                std::ptr::copy_nonoverlapping(t.rgba.as_ptr(), rgba, t.rgba.len());
+                1
+            })
+        }
+    })
 }
 
 /// # Safety
 /// `view` must be a live view handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_texture_version(view: *mut PikView, id: u32) -> u32 {
-    unsafe { with_view(view, 0, |v| v.view.textures.version(id)) }
+    libcommon::ffi::guard("pik_view_texture_version", 0, || {
+        unsafe { with_view(view, 0, |v| v.view.textures.version(id)) }
+    })
 }
 
 /// World-to-camera for the sound system: camera looking down -Z with +X to its right.
@@ -959,15 +1045,17 @@ fn listener_view(eye: Vec3, forward: Vec3, up: Vec3) -> Mat4 {
 /// `view` from [`pik_view_new`]; `out` 16 writable floats.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_anchor(view: *const PikView, captain: u32, id: u32, out: *mut f32) -> u32 {
-    if view.is_null() || out.is_null() {
-        return 0;
-    }
-    // SAFETY: as documented.
-    let Some(m) = (unsafe { &*view }).view.captain_anchor(captain, id as usize) else {
-        return 0;
-    };
-    unsafe { std::ptr::copy_nonoverlapping(m.to_cols_array().as_ptr(), out, 16) };
-    1
+    libcommon::ffi::guard("pik_view_anchor", 0, || {
+        if view.is_null() || out.is_null() {
+            return 0;
+        }
+        // SAFETY: as documented.
+        let Some(m) = (unsafe { &*view }).view.captain_anchor(captain, id as usize) else {
+            return 0;
+        };
+        unsafe { std::ptr::copy_nonoverlapping(m.to_cols_array().as_ptr(), out, 16) };
+        1
+    })
 }
 
 /// Poses `sim` for this frame and plays the sounds for its events since the last update.
@@ -976,103 +1064,59 @@ pub unsafe extern "C" fn pik_view_anchor(view: *const PikView, captain: u32, id:
 /// `view` from [`pik_view_new`]; `sim` from `pik_sim_new`; `frame` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, frame: *const PikViewFrame) {
-    // SAFETY: as documented.
-    let (Some(s), Some(f)) = (unsafe { sim.as_mut() }, unsafe { frame.as_ref() }) else {
-        return;
-    };
-    if s.poisoned {
-        return;
-    }
-    let f = *f;
-    // SAFETY: as documented.
-    unsafe {
-        with_view(view, (), |v| {
-            if let Some(a) = v.audio.as_mut() {
-                a.set_listener_captain(usize::try_from(f.listener).ok());
-            }
-            let mut events = std::mem::take(&mut s.view_log);
-            let positions: Vec<(libpikmin::CreatureId, Vec3)> =
-                s.frame.creatures.iter().map(|c| (c.id, c.pos)).collect();
-            let creatures = Creatures { positions: &positions, table_sounds: &[] };
-            for e in &events {
-                v.view.on_event(e);
+    libcommon::ffi::guard("pik_view_update", (), || {
+        // SAFETY: as documented.
+        let (Some(s), Some(f)) = (unsafe { sim.as_mut() }, unsafe { frame.as_ref() }) else {
+            return;
+        };
+        if s.poisoned {
+            return;
+        }
+        let f = *f;
+        // SAFETY: as documented.
+        unsafe {
+            with_view(view, (), |v| {
                 if let Some(a) = v.audio.as_mut() {
-                    a.on_event(e, &s.sim, creatures);
+                    a.set_listener_captain(usize::try_from(f.listener).ok());
                 }
-            }
-            // A Pianta's or Louie's cries are his own, not Olimar's (Louie's only once his sound output is running).
-            let mut wear = v.view.pianta_captains();
-            if v.louie_audio.is_some() {
-                wear.extend(v.view.louie_captains());
-            }
-            if let Some(a) = v.audio.as_mut() {
-                a.pianta_captains = wear;
-            }
-            let voices = v.view.take_pianta_voices();
-            use libpikmin_present::pianta::SOUND_SCALE;
-            let eye = Vec3::from(f.eye) * SOUND_SCALE;
-            let heard_at = |captain: u32| {
-                let at = s.sim.captains().get(captain as usize).map_or(Vec3::from(f.eye), |c| c.pos);
-                // Your own captain is in your ears; another player's is where he stands.
-                if f.listener < 0 || f.listener as u32 == captain { eye } else { at * SOUND_SCALE }
-            };
-            if let Some(sa) = v.pianta_audio.as_ref() {
-                sa.set_volume(f.volume);
-                sa.set_listener(listener_view(eye, f.forward.into(), f.up.into()), eye);
-                for &(captain, skin, voice) in &voices {
-                    if skin == libpikmin_present::pianta::SKIN_PIANTA && let Some(cue) = voice.cue() {
-                        sa.play_at(cue, heard_at(captain));
+                let mut events = std::mem::take(&mut s.view_log);
+                let positions: Vec<(libpikmin::CreatureId, Vec3)> =
+                    s.frame.creatures.iter().map(|c| (c.id, c.pos)).collect();
+                let creatures = Creatures { positions: &positions, table_sounds: &[] };
+                for e in &events {
+                    v.view.on_event(e);
+                    if let Some(a) = v.audio.as_mut() {
+                        a.on_event(e, &s.sim, creatures);
                     }
                 }
-            }
-            // Treasures sound on the Pikmin 2 output (started on the first, like the enemies' sounds below).
-            let treasure_cues = v.view.take_treasure_cues();
-            if !treasure_cues.is_empty() {
-                if v.louie_audio.is_none() && !v.louie_audio_tried && v.audio.is_some() {
-                    v.louie_audio_tried = true;
-                    if let Some(dir) = v.louie_dir.clone().or_else(|| v.p2_dir.clone()) {
-                        v.louie_audio = libsms_present::audio::Pikmin2Audio::start(&dir);
+                // A Pianta's or Louie's cries are his own, not Olimar's (Louie's only once his sound output is running).
+                let mut wear = v.view.pianta_captains();
+                if v.louie_audio.is_some() {
+                    wear.extend(v.view.louie_captains());
+                }
+                if let Some(a) = v.audio.as_mut() {
+                    a.pianta_captains = wear;
+                }
+                let voices = v.view.take_pianta_voices();
+                use libpikmin_present::pianta::SOUND_SCALE;
+                let eye = Vec3::from(f.eye) * SOUND_SCALE;
+                let heard_at = |captain: u32| {
+                    let at = s.sim.captains().get(captain as usize).map_or(Vec3::from(f.eye), |c| c.pos);
+                    // Your own captain is in your ears; another player's is where he stands.
+                    if f.listener < 0 || f.listener as u32 == captain { eye } else { at * SOUND_SCALE }
+                };
+                if let Some(sa) = v.pianta_audio.as_ref() {
+                    sa.set_volume(f.volume);
+                    sa.set_listener(listener_view(eye, f.forward.into(), f.up.into()), eye);
+                    for &(captain, skin, voice) in &voices {
+                        if skin == libpikmin_present::pianta::SKIN_PIANTA && let Some(cue) = voice.cue() {
+                            sa.play_at(cue, heard_at(captain));
+                        }
                     }
                 }
-                if let Some(la) = v.louie_audio.as_ref() {
-                    for c in &treasure_cues {
-                        la.play(c.id, Some(c.at * SOUND_SCALE), 0x5452_0000 + c.id as u64);
-                    }
-                }
-            }
-            let cues = v.view.take_pianta_cues();
-            if let Some(sa) = v.pianta_audio.as_ref() {
-                for (captain, sound) in cues {
-                    sa.play_id_at(sound, heard_at(captain), 0x5049_0000 + captain as u64);
-                }
-            }
-            if let Some(la) = v.louie_audio.as_mut() {
-                la.set_volume(f.volume);
-                la.set_listener(listener_view(eye, f.forward.into(), f.up.into()), eye);
-                for &(captain, skin, voice) in &voices {
-                    if skin == libpikmin_present::louie::SKIN_LOUIE && let Some(id) = libpikmin_present::louie::voice_id(voice) {
-                        la.play(id, Some(heard_at(captain)), 0x4C4F_0000 + captain as u64);
-                    }
-                }
-                la.advance(f.dt);
-            }
-            let dt = f.dt.clamp(0.0, 0.25);
-            // The camera, for environment maps and billboards: the same axes the listener uses.
-            let fwd = Vec3::from(f.forward).normalize_or(Vec3::Z);
-            let right = Vec3::from(f.up).cross(fwd).normalize_or(Vec3::X);
-            let up = fwd.cross(right);
-            v.view.set_camera(right, up, fwd);
-            let alpha = if f.lag.is_finite() { 1.0 - f.lag.clamp(0.0, 1.0) } else { 1.0 };
-            v.view.update(&s.sim, alpha, dt);
-            // The host's enemies sound from where they are (creature ids apart from the sim's).
-            let mut positions = positions;
-            positions.extend(v.view.teki_positions.iter().copied());
-            // They wait for the sound system's next once-per-tick frame (or are dropped with no audio).
-            let mut table_sounds = if v.audio.is_none() || v.last_tick != Some(s.sim.tick()) { std::mem::take(&mut v.view.teki_sounds) } else { Vec::new() };
-            // Named sounds sound from stand-in creatures where they were asked for.
-            for (i, (name, at)) in std::mem::take(&mut v.named).into_iter().enumerate() {
-                // Pikmin 2's enemies name `PSSE_EN_*` sounds, which play on the Pikmin 2 output (started on the first).
-                if let Some(sound) = libpikmin_teki::p2::sound_id(name).or_else(||libpikmin_teki::presentation::sound_id(name)) {
+                // Treasures sound on the Pikmin 2 output (started on the first, like the enemies' sounds below).
+                let treasure_cues = v.view.take_treasure_cues();
+                if !treasure_cues.is_empty() {
                     if v.louie_audio.is_none() && !v.louie_audio_tried && v.audio.is_some() {
                         v.louie_audio_tried = true;
                         if let Some(dir) = v.louie_dir.clone().or_else(|| v.p2_dir.clone()) {
@@ -1080,52 +1124,98 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
                         }
                     }
                     if let Some(la) = v.louie_audio.as_ref() {
-                        la.play(sound, Some(at * SOUND_SCALE), 0x5032_0000 + sound as u64);
+                        for c in &treasure_cues {
+                            la.play(c.id, Some(c.at * SOUND_SCALE), 0x5452_0000 + c.id as u64);
+                        }
                     }
-                    continue;
                 }
-                let id = 0xFFFF_0000_0000u64 + i as u64;
-                positions.push((id, at));
-                table_sounds.push((id, name, 0));
-            }
-            let creatures = Creatures { positions: &positions, table_sounds: &table_sounds };
-            v.view.particles(right, up);
-            v.particles.clear();
-            v.particles.extend(v.view.particles.quads.iter().map(|q| PikParticle {
-                corners: q.corners.map(PikVec3::from),
-                uvs: q.uvs,
-                color: q.color,
-                texture: q.texture,
-                additive: if q.refraction {2}else{q.additive as u8},
-                _pad: [0; 3],
-            }));
-            let tick = s.sim.tick();
-            if let Some(a) = v.audio.as_mut() {
-                a.set_volume(f.volume);
-                for command in std::mem::take(&mut v.view.demo_sounds) { a.demo(command); }
-                // `SeSystem::update` runs once per game frame (30 Hz): once per tick here.
-                if v.last_tick != Some(tick) {
-                    let me = usize::try_from(f.listener).ok().and_then(|i| s.sim.captains().get(i));
-                    let at = me.map_or(Vec3::from(f.eye), |c| c.pos);
-                    let whistling = me.is_some_and(|c| matches!(c.whistle, WhistleState::Calling { .. }));
-                    let cam = listener_view(f.eye.into(), f.forward.into(), f.up.into());
-                    let sprouts = std::mem::take(&mut v.view.animator.sprout_sounds);
-                    let ship = std::mem::take(&mut v.view.ship_sounds);
-                    let swarm = me.filter(|c| c.swarming).map_or(glam::Vec2::ZERO, |c| c.swarm_input());
-                    let onion_spot = me.is_some_and(|c| s.sim.onion_in_reach(c.id).is_some());
-                    let scene = libpikmin_present::audio::SceneSounds { sprouts: &sprouts, ship: &ship, swarm, onion_spot };
-                    a.frame(cam, at, &s.sim, creatures, whistling, scene);
+                let cues = v.view.take_pianta_cues();
+                if let Some(sa) = v.pianta_audio.as_ref() {
+                    for (captain, sound) in cues {
+                        sa.play_id_at(sound, heard_at(captain), 0x5049_0000 + captain as u64);
+                    }
                 }
-            } else {
-                v.view.animator.sprout_sounds.clear();
-                v.view.ship_sounds.clear();
-                v.view.demo_sounds.clear();
-            }
-            v.last_tick = Some(tick);
-            events.clear();
-            s.view_log = events;
-        })
-    }
+                if let Some(la) = v.louie_audio.as_mut() {
+                    la.set_volume(f.volume);
+                    la.set_listener(listener_view(eye, f.forward.into(), f.up.into()), eye);
+                    for &(captain, skin, voice) in &voices {
+                        if skin == libpikmin_present::louie::SKIN_LOUIE && let Some(id) = libpikmin_present::louie::voice_id(voice) {
+                            la.play(id, Some(heard_at(captain)), 0x4C4F_0000 + captain as u64);
+                        }
+                    }
+                    la.advance(f.dt);
+                }
+                let dt = f.dt.clamp(0.0, 0.25);
+                // The camera, for environment maps and billboards: the same axes the listener uses.
+                let fwd = Vec3::from(f.forward).normalize_or(Vec3::Z);
+                let right = Vec3::from(f.up).cross(fwd).normalize_or(Vec3::X);
+                let up = fwd.cross(right);
+                v.view.set_camera(right, up, fwd);
+                let alpha = if f.lag.is_finite() { 1.0 - f.lag.clamp(0.0, 1.0) } else { 1.0 };
+                v.view.update(&s.sim, alpha, dt);
+                // The host's enemies sound from where they are (creature ids apart from the sim's).
+                let mut positions = positions;
+                positions.extend(v.view.teki_positions.iter().copied());
+                // They wait for the sound system's next once-per-tick frame (or are dropped with no audio).
+                let mut table_sounds = if v.audio.is_none() || v.last_tick != Some(s.sim.tick()) { std::mem::take(&mut v.view.teki_sounds) } else { Vec::new() };
+                // Named sounds sound from stand-in creatures where they were asked for.
+                for (i, (name, at)) in std::mem::take(&mut v.named).into_iter().enumerate() {
+                    // Pikmin 2's enemies name `PSSE_EN_*` sounds, which play on the Pikmin 2 output (started on the first).
+                    if let Some(sound) = libpikmin_teki::p2::sound_id(name).or_else(||libpikmin_teki::presentation::sound_id(name)) {
+                        if v.louie_audio.is_none() && !v.louie_audio_tried && v.audio.is_some() {
+                            v.louie_audio_tried = true;
+                            if let Some(dir) = v.louie_dir.clone().or_else(|| v.p2_dir.clone()) {
+                                v.louie_audio = libsms_present::audio::Pikmin2Audio::start(&dir);
+                            }
+                        }
+                        if let Some(la) = v.louie_audio.as_ref() {
+                            la.play(sound, Some(at * SOUND_SCALE), 0x5032_0000 + sound as u64);
+                        }
+                        continue;
+                    }
+                    let id = 0xFFFF_0000_0000u64 + i as u64;
+                    positions.push((id, at));
+                    table_sounds.push((id, name, 0));
+                }
+                let creatures = Creatures { positions: &positions, table_sounds: &table_sounds };
+                v.view.particles(right, up);
+                v.particles.clear();
+                v.particles.extend(v.view.particles.quads.iter().map(|q| PikParticle {
+                    corners: q.corners.map(PikVec3::from),
+                    uvs: q.uvs,
+                    color: q.color,
+                    texture: q.texture,
+                    additive: if q.refraction {2}else{q.additive as u8},
+                    _pad: [0; 3],
+                }));
+                let tick = s.sim.tick();
+                if let Some(a) = v.audio.as_mut() {
+                    a.set_volume(f.volume);
+                    for command in std::mem::take(&mut v.view.demo_sounds) { a.demo(command); }
+                    // `SeSystem::update` runs once per game frame (30 Hz): once per tick here.
+                    if v.last_tick != Some(tick) {
+                        let me = usize::try_from(f.listener).ok().and_then(|i| s.sim.captains().get(i));
+                        let at = me.map_or(Vec3::from(f.eye), |c| c.pos);
+                        let whistling = me.is_some_and(|c| matches!(c.whistle, WhistleState::Calling { .. }));
+                        let cam = listener_view(f.eye.into(), f.forward.into(), f.up.into());
+                        let sprouts = std::mem::take(&mut v.view.animator.sprout_sounds);
+                        let ship = std::mem::take(&mut v.view.ship_sounds);
+                        let swarm = me.filter(|c| c.swarming).map_or(glam::Vec2::ZERO, |c| c.swarm_input());
+                        let onion_spot = me.is_some_and(|c| s.sim.onion_in_reach(c.id).is_some());
+                        let scene = libpikmin_present::audio::SceneSounds { sprouts: &sprouts, ship: &ship, swarm, onion_spot };
+                        a.frame(cam, at, &s.sim, creatures, whistling, scene);
+                    }
+                } else {
+                    v.view.animator.sprout_sounds.clear();
+                    v.view.ship_sounds.clear();
+                    v.view.demo_sounds.clear();
+                }
+                v.last_tick = Some(tick);
+                events.clear();
+                s.view_log = events;
+            })
+        }
+    })
 }
 
 /// Writes up to `max` of this frame's instances; returns how many.
@@ -1134,31 +1224,33 @@ pub unsafe extern "C" fn pik_view_update(view: *mut PikView, sim: *mut PikSim, f
 /// `view` from [`pik_view_new`]; `out` writable for `max`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_draws(view: *mut PikView, out: *mut PikDraw, max: u32) -> u32 {
-    // SAFETY: as documented.
-    unsafe {
-        with_view(view, 0, |v| {
-            if out.is_null() {
-                return v.view.draws.len() as u32;
-            }
-            let n = v.view.draws.len().min(max as usize);
-            for (i, d) in v.view.draws.iter().take(n).enumerate() {
-                out.add(i).write(PikDraw {
-                    key: d.key,
-                    model: d.model,
-                    kind: d.kind,
-                    flags: d.flags,
-                    _pad: [0; 2],
-                    pos: d.pos.into(),
-                    rot: d.rot.to_array(),
-                    first_vertex: d.first_vertex,
-                    first_color: d.first_color,
-                    alpha: d.alpha,
-                    id: (d.key & 0xFFFF_FFFF) as u32,
-                });
-            }
-            n as u32
-        })
-    }
+    libcommon::ffi::guard("pik_view_draws", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with_view(view, 0, |v| {
+                if out.is_null() {
+                    return v.view.draws.len() as u32;
+                }
+                let n = v.view.draws.len().min(max as usize);
+                for (i, d) in v.view.draws.iter().take(n).enumerate() {
+                    out.add(i).write(PikDraw {
+                        key: d.key,
+                        model: d.model,
+                        kind: d.kind,
+                        flags: d.flags,
+                        _pad: [0; 2],
+                        pos: d.pos.into(),
+                        rot: d.rot.to_array(),
+                        first_vertex: d.first_vertex,
+                        first_color: d.first_color,
+                        alpha: d.alpha,
+                        id: (d.key & 0xFFFF_FFFF) as u32,
+                    });
+                }
+                n as u32
+            })
+        }
+    })
 }
 
 /// This frame's skinned positions for every instance; `count` gets how many. Valid until the
@@ -1168,15 +1260,17 @@ pub unsafe extern "C" fn pik_view_draws(view: *mut PikView, out: *mut PikDraw, m
 /// `view` from [`pik_view_new`]; `count` writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_positions(view: *mut PikView, count: *mut u32) -> *const PikVec3 {
-    // SAFETY: as documented. `PikVec3` and glam's `Vec3` are both three packed f32s.
-    unsafe {
-        with_view(view, std::ptr::null(), |v| {
-            if let Some(c) = count.as_mut() {
-                *c = v.view.positions.len() as u32;
-            }
-            v.view.positions.as_ptr().cast()
-        })
-    }
+    libcommon::ffi::guard("pik_view_positions", std::ptr::null(), || {
+        // SAFETY: as documented. `PikVec3` and glam's `Vec3` are both three packed f32s.
+        unsafe {
+            with_view(view, std::ptr::null(), |v| {
+                if let Some(c) = count.as_mut() {
+                    *c = v.view.positions.len() as u32;
+                }
+                v.view.positions.as_ptr().cast()
+            })
+        }
+    })
 }
 
 /// Like [`pik_view_positions`], the normals.
@@ -1185,15 +1279,17 @@ pub unsafe extern "C" fn pik_view_positions(view: *mut PikView, count: *mut u32)
 /// As [`pik_view_positions`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_normals(view: *mut PikView, count: *mut u32) -> *const PikVec3 {
-    // SAFETY: as above.
-    unsafe {
-        with_view(view, std::ptr::null(), |v| {
-            if let Some(c) = count.as_mut() {
-                *c = v.view.normals.len() as u32;
-            }
-            v.view.normals.as_ptr().cast()
-        })
-    }
+    libcommon::ffi::guard("pik_view_normals", std::ptr::null(), || {
+        // SAFETY: as above.
+        unsafe {
+            with_view(view, std::ptr::null(), |v| {
+                if let Some(c) = count.as_mut() {
+                    *c = v.view.normals.len() as u32;
+                }
+                v.view.normals.as_ptr().cast()
+            })
+        }
+    })
 }
 
 /// This frame's batch colours (RGBA 0..1, one per batch of every instance: what its texture
@@ -1203,15 +1299,17 @@ pub unsafe extern "C" fn pik_view_normals(view: *mut PikView, count: *mut u32) -
 /// As [`pik_view_positions`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_colors(view: *mut PikView, count: *mut u32) -> *const [f32; 4] {
-    // SAFETY: as above.
-    unsafe {
-        with_view(view, std::ptr::null(), |v| {
-            if let Some(c) = count.as_mut() {
-                *c = v.view.colors.len() as u32;
-            }
-            v.view.colors.as_ptr()
-        })
-    }
+    libcommon::ffi::guard("pik_view_colors", std::ptr::null(), || {
+        // SAFETY: as above.
+        unsafe {
+            with_view(view, std::ptr::null(), |v| {
+                if let Some(c) = count.as_mut() {
+                    *c = v.view.colors.len() as u32;
+                }
+                v.view.colors.as_ptr()
+            })
+        }
+    })
 }
 
 /// This frame's batch textures (one per batch of every instance, alongside
@@ -1221,15 +1319,17 @@ pub unsafe extern "C" fn pik_view_colors(view: *mut PikView, count: *mut u32) ->
 /// As [`pik_view_positions`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_texture_ids(view: *mut PikView, count: *mut u32) -> *const i32 {
-    // SAFETY: as above.
-    unsafe {
-        with_view(view, std::ptr::null(), |v| {
-            if let Some(c) = count.as_mut() {
-                *c = v.view.texture_ids.len() as u32;
-            }
-            v.view.texture_ids.as_ptr()
-        })
-    }
+    libcommon::ffi::guard("pik_view_texture_ids", std::ptr::null(), || {
+        // SAFETY: as above.
+        unsafe {
+            with_view(view, std::ptr::null(), |v| {
+                if let Some(c) = count.as_mut() {
+                    *c = v.view.texture_ids.len() as u32;
+                }
+                v.view.texture_ids.as_ptr()
+            })
+        }
+    })
 }
 
 /// This frame's texture coordinates for every instance, alongside [`pik_view_positions`]:
@@ -1240,15 +1340,17 @@ pub unsafe extern "C" fn pik_view_texture_ids(view: *mut PikView, count: *mut u3
 /// As [`pik_view_positions`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_frame_uvs(view: *mut PikView, count: *mut u32) -> *const [f32; 2] {
-    // SAFETY: as above.
-    unsafe {
-        with_view(view, std::ptr::null(), |v| {
-            if let Some(c) = count.as_mut() {
-                *c = v.view.uvs.len() as u32;
-            }
-            v.view.uvs.as_ptr()
-        })
-    }
+    libcommon::ffi::guard("pik_view_frame_uvs", std::ptr::null(), || {
+        // SAFETY: as above.
+        unsafe {
+            with_view(view, std::ptr::null(), |v| {
+                if let Some(c) = count.as_mut() {
+                    *c = v.view.uvs.len() as u32;
+                }
+                v.view.uvs.as_ptr()
+            })
+        }
+    })
 }
 
 /// This frame's particles; `count` gets how many. Valid as [`pik_view_positions`].
@@ -1257,15 +1359,17 @@ pub unsafe extern "C" fn pik_view_frame_uvs(view: *mut PikView, count: *mut u32)
 /// As [`pik_view_positions`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_particles(view: *mut PikView, count: *mut u32) -> *const PikParticle {
-    // SAFETY: as above.
-    unsafe {
-        with_view(view, std::ptr::null(), |v| {
-            if let Some(c) = count.as_mut() {
-                *c = v.particles.len() as u32;
-            }
-            v.particles.as_ptr()
-        })
-    }
+    libcommon::ffi::guard("pik_view_particles", std::ptr::null(), || {
+        // SAFETY: as above.
+        unsafe {
+            with_view(view, std::ptr::null(), |v| {
+                if let Some(c) = count.as_mut() {
+                    *c = v.particles.len() as u32;
+                }
+                v.particles.as_ptr()
+            })
+        }
+    })
 }
 
 /// Particle texture `id`, as [`pik_view_texture`] (RGBA8, rows top first; wrap 0 repeat, 1
@@ -1281,29 +1385,31 @@ pub unsafe extern "C" fn pik_view_particle_texture(
     rgba: *mut u8,
     len: u32,
 ) -> u8 {
-    // SAFETY: as documented.
-    unsafe {
-        with_view(view, 0, |v| {
-            let Some(t) = v.view.particles.textures.get(id as usize) else { return 0 };
-            if let Some(info) = info.as_mut() {
-                *info = PikTexture {
-                    width: t.image.width,
-                    height: t.image.height,
-                    wrap_s: t.sampler.map_or((!t.wrap[0]) as u8, |s|s[0]),
-                    wrap_t: t.sampler.map_or((!t.wrap[1]) as u8, |s|s[1]),
-                    _pad: [0; 2],
-                };
-            }
-            if rgba.is_null() {
-                return 1;
-            }
-            if t.image.rgba.len() > len as usize {
-                return 0;
-            }
-            std::ptr::copy_nonoverlapping(t.image.rgba.as_ptr(), rgba, t.image.rgba.len());
-            1
-        })
-    }
+    libcommon::ffi::guard("pik_view_particle_texture", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with_view(view, 0, |v| {
+                let Some(t) = v.view.particles.textures.get(id as usize) else { return 0 };
+                if let Some(info) = info.as_mut() {
+                    *info = PikTexture {
+                        width: t.image.width,
+                        height: t.image.height,
+                        wrap_s: t.sampler.map_or((!t.wrap[0]) as u8, |s|s[0]),
+                        wrap_t: t.sampler.map_or((!t.wrap[1]) as u8, |s|s[1]),
+                        _pad: [0; 2],
+                    };
+                }
+                if rgba.is_null() {
+                    return 1;
+                }
+                if t.image.rgba.len() > len as usize {
+                    return 0;
+                }
+                std::ptr::copy_nonoverlapping(t.image.rgba.as_ptr(), rgba, t.image.rgba.len());
+                1
+            })
+        }
+    })
 }
 
 const _: () = assert!(std::mem::size_of::<PikVec3>() == std::mem::size_of::<Vec3>());
@@ -1311,7 +1417,9 @@ const _: () = assert!(std::mem::size_of::<PikVec3>() == std::mem::size_of::<Vec3
 /// zen::NumberPicCallBack per-digit pulse. Direction is the sign of the count change.
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_number_change_scale(direction:i32,elapsed:f32)->f32 {
-    libpikmin_present::hud_numbers::change_scale(direction,elapsed)
+    libcommon::ffi::guard("pik_number_change_scale", 0.0, || {
+        libpikmin_present::hud_numbers::change_scale(direction,elapsed)
+    })
 }
 
 // ------------------------------------------------------------------------------------------
@@ -1393,7 +1501,9 @@ pub struct PikTekiInstance {
 /// [`pik_view_new`].
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_view_set_teki_models(on: u8) {
-    libpikmin_present::view::set_teki_models(on != 0);
+    libcommon::ffi::guard("pik_view_set_teki_models", (), || {
+        libpikmin_present::view::set_teki_models(on != 0);
+    })
 }
 
 /// `out[0]` the size of [`PikTekiInfo`], `out[1]` of [`PikTekiInstance`], for hosts to check
@@ -1403,14 +1513,16 @@ pub extern "C" fn pik_view_set_teki_models(on: u8) {
 /// `out` writable for two `u32`s.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_teki_sizes(out: *mut u32) {
-    if out.is_null() {
-        return;
-    }
-    // SAFETY: as documented.
-    unsafe {
-        out.write(std::mem::size_of::<PikTekiInfo>() as u32);
-        out.add(1).write(std::mem::size_of::<PikTekiInstance>() as u32);
-    }
+    libcommon::ffi::guard("pik_view_teki_sizes", (), || {
+        if out.is_null() {
+            return;
+        }
+        // SAFETY: as documented.
+        unsafe {
+            out.write(std::mem::size_of::<PikTekiInfo>() as u32);
+            out.add(1).write(std::mem::size_of::<PikTekiInstance>() as u32);
+        }
+    })
 }
 
 /// Fills `out` for enemy kind `kind` (0 Dwarf Bulborb, 1 Spotty Bulborb); 0 if the kind's files
@@ -1420,17 +1532,19 @@ pub unsafe extern "C" fn pik_view_teki_sizes(out: *mut u32) {
 /// `view` from [`pik_view_new`]; `out` writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_teki_info(view: *mut PikView, kind: u32, out: *mut PikTekiInfo) -> u8 {
-    if out.is_null() {
-        return 0;
-    }
-    // SAFETY: as documented.
-    unsafe {
-        with_view(view, 0, |v| {
-            let Some(info) = u8::try_from(kind).ok().and_then(|k| v.view.teki_info(k)) else { return 0 };
-            out.write(info_struct(kind, info));
-            1
-        })
-    }
+    libcommon::ffi::guard("pik_view_teki_info", 0, || {
+        if out.is_null() {
+            return 0;
+        }
+        // SAFETY: as documented.
+        unsafe {
+            with_view(view, 0, |v| {
+                let Some(info) = u8::try_from(kind).ok().and_then(|k| v.view.teki_info(k)) else { return 0 };
+                out.write(info_struct(kind, info));
+                1
+            })
+        }
+    })
 }
 
 /// The enemies to draw at the next [`pik_view_update`] (replacing any given since the last):
@@ -1440,32 +1554,34 @@ pub unsafe extern "C" fn pik_view_teki_info(view: *mut PikView, kind: u32, out: 
 /// `view` from [`pik_view_new`]; `list` readable for `count`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_tekis(view: *mut PikView, list: *const PikTekiInstance, count: u32) {
-    // SAFETY: as documented.
-    unsafe {
-        with_view(view, (), |v| {
-            let src = if list.is_null() || count == 0 { &[][..] } else { std::slice::from_raw_parts(list, count as usize) };
-            let instances: Vec<_> = src
-                .iter()
-                .filter_map(|t| {
-                    Some(libpikmin_present::teki::TekiInstance {
-                        id: t.id,
-                        // Low byte: kind. Next byte: optional material frame + 1.
-                        kind: (t.kind & 255) as u8,
-                        pos: t.pos.into(),
-                        yaw: t.yaw,
-                        motion: t.motion,
-                        frame: t.frame,
-                        flash: t.flash,
-                        scale: t.scale,
-                        alpha: t.alpha,
-                        material_frame: ((t.kind >> 8) & 255).checked_sub(1).map(|f| f as f32),
-                        presentation: (t.kind >> 16) as u8,
+    libcommon::ffi::guard("pik_view_set_tekis", (), || {
+        // SAFETY: as documented.
+        unsafe {
+            with_view(view, (), |v| {
+                let src = if list.is_null() || count == 0 { &[][..] } else { std::slice::from_raw_parts(list, count as usize) };
+                let instances: Vec<_> = src
+                    .iter()
+                    .filter_map(|t| {
+                        Some(libpikmin_present::teki::TekiInstance {
+                            id: t.id,
+                            // Low byte: kind. Next byte: optional material frame + 1.
+                            kind: (t.kind & 255) as u8,
+                            pos: t.pos.into(),
+                            yaw: t.yaw,
+                            motion: t.motion,
+                            frame: t.frame,
+                            flash: t.flash,
+                            scale: t.scale,
+                            alpha: t.alpha,
+                            material_frame: ((t.kind >> 8) & 255).checked_sub(1).map(|f| f as f32),
+                            presentation: (t.kind >> 16) as u8,
+                        })
                     })
-                })
-                .collect();
-            v.view.set_tekis(&instances);
-        })
-    }
+                    .collect();
+                v.view.set_tekis(&instances);
+            })
+        }
+    })
 }
 
 /// [`pik_view_teki_info`] without a view, straight from the extracted assets (for a host that
@@ -1545,11 +1661,13 @@ fn info_struct(kind: u32, i: &libpikmin_present::teki::TekiInfo) -> PikTekiInfo 
 /// `view` from [`pik_view_new`]; `pos` and `dir` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_spawn_effect_dir(view: *mut PikView, id: u32, pos: *const PikVec3, dir: *const PikVec3) -> u8 {
-    // SAFETY: as documented.
-    let (Some(at), Some(dir)) = (unsafe { pos.as_ref() }, unsafe { dir.as_ref() }) else { return 0 };
-    let (at, dir) = (Vec3::from(*at), Vec3::from(*dir));
-    // SAFETY: as documented.
-    unsafe { with_view(view, 0, |v| v.view.spawn_effect_dir(id as usize, at, dir) as u8) }
+    libcommon::ffi::guard("pik_view_spawn_effect_dir", 0, || {
+        // SAFETY: as documented.
+        let (Some(at), Some(dir)) = (unsafe { pos.as_ref() }, unsafe { dir.as_ref() }) else { return 0 };
+        let (at, dir) = (Vec3::from(*at), Vec3::from(*dir));
+        // SAFETY: as documented.
+        unsafe { with_view(view, 0, |v| v.view.spawn_effect_dir(id as usize, at, dir) as u8) }
+    })
 }
 
 /// A sound effect the game's tables know by name (`SE_*`), from `pos` (sim units): an enemy's stamp, a shell
@@ -1559,26 +1677,28 @@ pub unsafe extern "C" fn pik_view_spawn_effect_dir(view: *mut PikView, id: u32, 
 /// `view` from [`pik_view_new`]; `name` a nul-terminated UTF-8 string; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_teki_named_sound(view: *mut PikView, name: *const c_char, pos: *const PikVec3) {
-    // SAFETY: as documented.
-    let (Some(at), false) = (unsafe { pos.as_ref() }, name.is_null()) else { return };
-    // SAFETY: as documented.
-    let Ok(name) = (unsafe { std::ffi::CStr::from_ptr(name) }).to_str() else { return };
-    let at = Vec3::from(*at);
-    // Names are interned: the audio takes them as `'static`, and only the game's own few dozen ever come.
-    static NAMES: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
-    let name: &'static str = {
-        let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
-        match names.iter().find(|n| **n == name) {
-            Some(n) => n,
-            None => {
-                let leaked: &'static str = Box::leak(name.to_string().into_boxed_str());
-                names.push(leaked);
-                leaked
+    libcommon::ffi::guard("pik_view_teki_named_sound", (), || {
+        // SAFETY: as documented.
+        let (Some(at), false) = (unsafe { pos.as_ref() }, name.is_null()) else { return };
+        // SAFETY: as documented.
+        let Ok(name) = (unsafe { std::ffi::CStr::from_ptr(name) }).to_str() else { return };
+        let at = Vec3::from(*at);
+        // Names are interned: the audio takes them as `'static`, and only the game's own few dozen ever come.
+        static NAMES: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+        let name: &'static str = {
+            let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+            match names.iter().find(|n| **n == name) {
+                Some(n) => n,
+                None => {
+                    let leaked: &'static str = Box::leak(name.to_string().into_boxed_str());
+                    names.push(leaked);
+                    leaked
+                }
             }
-        }
-    };
-    // SAFETY: as documented.
-    unsafe { with_view(view, (), |v| if v.named.len() < 64 { v.named.push((name, at)) }) }
+        };
+        // SAFETY: as documented.
+        unsafe { with_view(view, (), |v| if v.named.len() < 64 { v.named.push((name, at)) }) }
+    })
 }
 
 /// Plays `EffectMgr`'s effect `id` (`EFF_*`) once at `pos` (sim units): an enemy's death smoke, its soul,
@@ -1588,11 +1708,13 @@ pub unsafe extern "C" fn pik_view_teki_named_sound(view: *mut PikView, name: *co
 /// `view` from [`pik_view_new`]; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_spawn_effect(view: *mut PikView, id: u32, pos: *const PikVec3) -> u8 {
-    // SAFETY: as documented.
-    let Some(at) = (unsafe { pos.as_ref() }) else { return 0 };
-    let at = Vec3::from(*at);
-    // SAFETY: as documented.
-    unsafe { with_view(view, 0, |v| v.view.spawn_effect(id as usize, at) as u8) }
+    libcommon::ffi::guard("pik_view_spawn_effect", 0, || {
+        // SAFETY: as documented.
+        let Some(at) = (unsafe { pos.as_ref() }) else { return 0 };
+        let at = Vec3::from(*at);
+        // SAFETY: as documented.
+        unsafe { with_view(view, 0, |v| v.view.spawn_effect(id as usize, at) as u8) }
+    })
 }
 
 /// The Long Legs' legs ([`crate::teki_ai::pik_tekis_legs`], with `id` set to the draw instance's) for the instances of
@@ -1602,29 +1724,31 @@ pub unsafe extern "C" fn pik_view_spawn_effect(view: *mut PikView, id: u32, pos:
 /// `view` from [`pik_view_new`]; `list` readable for `count`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_set_teki_legs(view: *mut PikView, list: *const crate::teki_ai::PikLegs, count: u32) {
-    // SAFETY: as documented.
-    unsafe {
-        with_view(view, (), |v| {
-            let src = if list.is_null() || count == 0 { &[][..] } else { std::slice::from_raw_parts(list, count as usize) };
-            let legs: Vec<_> = src
-                .iter()
-                .map(|l| {
-                    let feet = std::array::from_fn(|i| glam::Vec3::from(l.feet[i]));
-                    let view = libpikmin_teki::legs::LegsView {
-                        active: l.flags & 1 != 0,
-                        blend: l.flags & 2 != 0,
-                        trace: l.trace.into(),
-                        face: l.face,
-                        feet,
-                        bend: l.bend,
-                        gun: (l.flags & 4 != 0).then(|| l.gun.into()),
-                    };
-                    (l.id, view)
-                })
-                .collect();
-            v.view.set_teki_legs(&legs);
-        })
-    }
+    libcommon::ffi::guard("pik_view_set_teki_legs", (), || {
+        // SAFETY: as documented.
+        unsafe {
+            with_view(view, (), |v| {
+                let src = if list.is_null() || count == 0 { &[][..] } else { std::slice::from_raw_parts(list, count as usize) };
+                let legs: Vec<_> = src
+                    .iter()
+                    .map(|l| {
+                        let feet = std::array::from_fn(|i| glam::Vec3::from(l.feet[i]));
+                        let view = libpikmin_teki::legs::LegsView {
+                            active: l.flags & 1 != 0,
+                            blend: l.flags & 2 != 0,
+                            trace: l.trace.into(),
+                            face: l.face,
+                            feet,
+                            bend: l.bend,
+                            gun: (l.flags & 4 != 0).then(|| l.gun.into()),
+                        };
+                        (l.id, view)
+                    })
+                    .collect();
+                v.view.set_teki_legs(&legs);
+            })
+        }
+    })
 }
 
 /// Revision of a particle texture; source stripe/colour animation may rebake its pixels.
@@ -1632,7 +1756,9 @@ pub unsafe extern "C" fn pik_view_set_teki_legs(view: *mut PikView, list: *const
 /// `view` is a live, serialized PikView handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_particle_texture_version(view:*mut PikView,id:u32)->u32 {
-    unsafe {with_view(view,0,|v|v.view.particles.textures.get(id as usize).map_or(0,|t|t.version))}
+    libcommon::ffi::guard("pik_view_particle_texture_version", 0, || {
+        unsafe {with_view(view,0,|v|v.view.particles.textures.get(id as usize).map_or(0,|t|t.version))}
+    })
 }
 
 /// Source emitter lifecycle, shared by enemy hosts. Zero `on` ends emission and lets live particles fade.
@@ -1640,7 +1766,9 @@ pub unsafe extern "C" fn pik_view_particle_texture_version(view:*mut PikView,id:
 /// Live serialized view; valid vectors.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_view_follow_effect(view:*mut PikView,key:u32,id:u32,pos:*const PikVec3,dir:*const PikVec3,scale:f32,on:u8) {
-    let Some(pos)=(unsafe {pos.as_ref()}).copied() else {return};
-    let Some(dir)=(unsafe {dir.as_ref()}).copied() else {return};
-    unsafe {with_view(view,(),|v|{if let Some(fx)=v.view.p2_effects.as_mut(){fx.follow(key,id as u16,pos.into(),dir.into(),scale,on!=0);}})}
+    libcommon::ffi::guard("pik_view_follow_effect", (), || {
+        let Some(pos)=(unsafe {pos.as_ref()}).copied() else {return};
+        let Some(dir)=(unsafe {dir.as_ref()}).copied() else {return};
+        unsafe {with_view(view,(),|v|{if let Some(fx)=v.view.p2_effects.as_mut(){fx.follow(key,id as u16,pos.into(),dir.into(),scale,on!=0);}})}
+    })
 }

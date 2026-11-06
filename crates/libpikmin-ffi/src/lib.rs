@@ -50,27 +50,37 @@ pub const PIK_ABI_VERSION: u32 = 62;
 /// snapshot instead of refusing the build.
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_snapshot_version() -> u32 {
-    libpikmin::snapshot::SNAPSHOT_VERSION as u32
+    libcommon::ffi::guard("pik_snapshot_version", 0, || {
+        libpikmin::snapshot::SNAPSHOT_VERSION as u32
+    })
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_competitive_delivery(sim: *mut PikSim, enabled: u8) {
-    unsafe { with(sim, (), |s| s.sim.set_ship_part_competitive_delivery(enabled != 0)) }
+    libcommon::ffi::guard("pik_sim_set_ship_part_competitive_delivery", (), || {
+        unsafe { with(sim, (), |s| s.sim.set_ship_part_competitive_delivery(enabled != 0)) }
+    })
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_owner(sim: *mut PikSim, ship: u32, captain: u32) {
-    unsafe { with(sim, (), |s| s.sim.set_ship_part_owner(OnionId(ship), CaptainId(captain))) }
+    libcommon::ffi::guard("pik_sim_set_ship_part_owner", (), || {
+        unsafe { with(sim, (), |s| s.sim.set_ship_part_owner(OnionId(ship), CaptainId(captain))) }
+    })
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recruit_to_pellet(sim: *mut PikSim, pellet: u32, defeated: u64, range: f32) -> u32 {
-    unsafe { with(sim, 0, |s| s.sim.recruit_to_pellet(libpikmin::carry::PelletId(pellet), Some(defeated), range) as u32) }
+    libcommon::ffi::guard("pik_sim_recruit_to_pellet", 0, || {
+        unsafe { with(sim, 0, |s| s.sim.recruit_to_pellet(libpikmin::carry::PelletId(pellet), Some(defeated), range) as u32) }
+    })
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_lock_target(sim: *mut PikSim, captain: u32, target: u64, enabled: u8) {
-    unsafe { with(sim, (), |s| s.sim.set_lock_target(CaptainId(captain), (enabled != 0).then_some(target))) }
+    libcommon::ffi::guard("pik_sim_set_lock_target", (), || {
+        unsafe { with(sim, (), |s| s.sim.set_lock_target(CaptainId(captain), (enabled != 0).then_some(target))) }
+    })
 }
 
 /// Locks the captain onto a pellet, corpse or ship part (its `PikPellet::id`); `enabled` 0 lets go. Call it
@@ -82,16 +92,18 @@ pub unsafe extern "C" fn pik_sim_set_lock_target(sim: *mut PikSim, captain: u32,
 /// `sim` from `pik_sim_new`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_lock_pellet(sim: *mut PikSim, captain: u32, pellet: u32, enabled: u8) {
-    use libpikmin::bulb::LOCK_BASE;
-    unsafe {
-        with(sim, (), |s| {
-            let on = enabled != 0;
-            let bulb = (on && pellet >= LOCK_BASE).then(|| libpikmin::BulbId(pellet - LOCK_BASE));
-            let pellet = (on && pellet < LOCK_BASE).then_some(libpikmin::carry::PelletId(pellet));
-            s.sim.set_lock_pellet(CaptainId(captain), pellet);
-            s.sim.set_lock_bulb(CaptainId(captain), bulb);
-        })
-    }
+    libcommon::ffi::guard("pik_sim_set_lock_pellet", (), || {
+        use libpikmin::bulb::LOCK_BASE;
+        unsafe {
+            with(sim, (), |s| {
+                let on = enabled != 0;
+                let bulb = (on && pellet >= LOCK_BASE).then(|| libpikmin::BulbId(pellet - LOCK_BASE));
+                let pellet = (on && pellet < LOCK_BASE).then_some(libpikmin::carry::PelletId(pellet));
+                s.sim.set_lock_pellet(CaptainId(captain), pellet);
+                s.sim.set_lock_bulb(CaptainId(captain), bulb);
+            })
+        }
+    })
 }
 
 /// How many Pikmin a plain Candypop Bud and the rainbow Pop take before they wither (Pikmin 2: 5 and 1; at most 200),
@@ -101,31 +113,58 @@ pub unsafe extern "C" fn pik_sim_set_lock_pellet(sim: *mut PikSim, captain: u32,
 /// `sim` from `pik_sim_new`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_bulb_slots(sim: *mut PikSim, normal: u32, queen: u32) {
-    unsafe { with(sim, (), |s| s.sim.set_bulb_slots(normal, queen)) }
+    libcommon::ffi::guard("pik_sim_set_bulb_slots", (), || {
+        unsafe { with(sim, (), |s| s.sim.set_bulb_slots(normal, queen)) }
+    })
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_camera_preset(zoom: u32, top: u8, out: *mut PikVec3) {
-    if let Some(out) = unsafe { out.as_mut() } { *out = libpikmin::camera::preset(zoom, top != 0).into(); }
+    libcommon::ffi::guard("pik_camera_preset", (), || {
+        if let Some(out) = unsafe { out.as_mut() } { *out = libpikmin::camera::preset(zoom, top != 0).into(); }
+    })
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_camera_pan(mode: u32, angles: *mut PikVec3, x: f32, y: f32, dt: f32, min_pitch: f32) {
-    if let Some(a) = unsafe { angles.as_mut() } {
-        let mode = if mode == 1 { libpikmin::camera::CameraMode::Orbit } else { libpikmin::camera::CameraMode::Vanilla };
-        libpikmin::camera::pan(mode, &mut a.x, &mut a.y, Vec2::new(x, y), dt, min_pitch);
-    }
+    libcommon::ffi::guard("pik_camera_pan", (), || {
+        if let Some(a) = unsafe { angles.as_mut() } {
+            let mode = if mode == 1 { libpikmin::camera::CameraMode::Orbit } else { libpikmin::camera::CameraMode::Vanilla };
+            libpikmin::camera::pan(mode, &mut a.x, &mut a.y, Vec2::new(x, y), dt, min_pitch);
+        }
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_abi_version() -> u32 {
-    PIK_ABI_VERSION
+    libcommon::ffi::guard("pik_abi_version", 0, || {
+        PIK_ABI_VERSION
+    })
+}
+
+/// Takes the oldest panic caught at this library's boundary into `out`
+/// ("export: panicked at file:line:col: message", UTF-8, NUL-terminated when it fits; see
+/// `libcommon::ffi`). Every export catches its own panics and returns its "failed" value
+/// instead of crashing the host; hosts call this once a frame and log what it returns.
+/// Returns the bytes written, 0 when no panic is waiting.
+///
+/// # Safety
+/// `out` is null or writable for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_take_panic(out: *mut u8, len: u32) -> u32 {
+    if out.is_null() || len == 0 {
+        return 0;
+    }
+    // SAFETY: as documented.
+    libcommon::ffi::take_panic_into(unsafe { std::slice::from_raw_parts_mut(out, len as usize) })
 }
 
 /// The fixed simulation rate in Hz.
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_tick_hz() -> u32 {
-    libpikmin::TICK_HZ
+    libcommon::ffi::guard("pik_tick_hz", 0, || {
+        libpikmin::TICK_HZ
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -555,32 +594,34 @@ pub struct PikSizes {
 /// `out` must be writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_struct_sizes(out: *mut PikSizes) {
-    use std::mem::size_of;
-    let s = PikSizes {
-        vec3: size_of::<PikVec3>() as u32,
-        host: size_of::<PikHost>() as u32,
-        input: size_of::<PikInput>() as u32,
-        creature: size_of::<PikCreature>() as u32,
-        part: size_of::<PikPart>() as u32,
-        pellet_desc: size_of::<PikPelletDesc>() as u32,
-        captain: size_of::<PikCaptain>() as u32,
-        piki: size_of::<PikPiki>() as u32,
-        pellet: size_of::<PikPellet>() as u32,
-        onion: size_of::<PikOnion>() as u32,
-        sprout: size_of::<PikSprout>() as u32,
-        event: size_of::<PikEvent>() as u32,
-        onion_counts: size_of::<PikOnionCounts>() as u32,
-        model_info: size_of::<PikModelInfo>() as u32,
-        batch: size_of::<PikBatch>() as u32,
-        texture: size_of::<PikTexture>() as u32,
-        draw: size_of::<PikDraw>() as u32,
-        view_frame: size_of::<PikViewFrame>() as u32,
-        particle: size_of::<PikParticle>() as u32,
-    };
-    // SAFETY: the caller promised a writable pointer.
-    if let Some(o) = unsafe { out.as_mut() } {
-        *o = s;
-    }
+    libcommon::ffi::guard("pik_struct_sizes", (), || {
+        use std::mem::size_of;
+        let s = PikSizes {
+            vec3: size_of::<PikVec3>() as u32,
+            host: size_of::<PikHost>() as u32,
+            input: size_of::<PikInput>() as u32,
+            creature: size_of::<PikCreature>() as u32,
+            part: size_of::<PikPart>() as u32,
+            pellet_desc: size_of::<PikPelletDesc>() as u32,
+            captain: size_of::<PikCaptain>() as u32,
+            piki: size_of::<PikPiki>() as u32,
+            pellet: size_of::<PikPellet>() as u32,
+            onion: size_of::<PikOnion>() as u32,
+            sprout: size_of::<PikSprout>() as u32,
+            event: size_of::<PikEvent>() as u32,
+            onion_counts: size_of::<PikOnionCounts>() as u32,
+            model_info: size_of::<PikModelInfo>() as u32,
+            batch: size_of::<PikBatch>() as u32,
+            texture: size_of::<PikTexture>() as u32,
+            draw: size_of::<PikDraw>() as u32,
+            view_frame: size_of::<PikViewFrame>() as u32,
+            particle: size_of::<PikParticle>() as u32,
+        };
+        // SAFETY: the caller promised a writable pointer.
+        if let Some(o) = unsafe { out.as_mut() } {
+            *o = s;
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1271,7 +1312,9 @@ pub unsafe extern "C" fn pik_sim_new(assets_dir: *const c_char, seed: u64) -> *m
 /// `sim` is a live handle from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_field_limit(sim: *mut PikSim, limit: u32) {
-    unsafe { with(sim, (), |s| s.sim.params_mut().ai.max_pikis_on_field = limit.min(i32::MAX as u32) as i32) }
+    libcommon::ffi::guard("pik_sim_set_field_limit", (), || {
+        unsafe { with(sim, (), |s| s.sim.params_mut().ai.max_pikis_on_field = limit.min(i32::MAX as u32) as i32) }
+    })
 }
 
 // PelletConfig/PelletShapeObject (pelletMgr.cpp): dimensions and weights come from
@@ -1325,9 +1368,11 @@ fn load_treasure_specs(dir: Option<&Path>) -> Vec<Option<TreasureSpec>> {
 /// `dir` is a NUL-terminated string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_p2_treasures_complete(dir: *const c_char) -> u8 {
-    // SAFETY: as documented.
-    let Some(dir) = (unsafe { path_arg(dir) }) else { return 0 };
-    libsms::extract::p2_treasure::is_complete(&dir) as u8
+    libcommon::ffi::guard("pik_p2_treasures_complete", 0, || {
+        // SAFETY: as documented.
+        let Some(dir) = (unsafe { path_arg(dir) }) else { return 0 };
+        libsms::extract::p2_treasure::is_complete(&dir) as u8
+    })
 }
 
 /// Extracts Pikmin 2's treasures (models, configs, names, jingles) from the user's disc image `iso` into the Pikmin 2
@@ -1349,7 +1394,9 @@ pub unsafe extern "C" fn pik_p2_extract_treasures(iso: *const c_char, out: *cons
 /// `sim` is a live handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_treasure_count(sim: *mut PikSim) -> u32 {
-    unsafe { with(sim, 0, |s| s.treasure_specs.len() as u32) }
+    libcommon::ffi::guard("pik_sim_treasure_count", 0, || {
+        unsafe { with(sim, 0, |s| s.treasure_specs.len() as u32) }
+    })
 }
 
 /// Treasure `index`'s carry requirement (Pikmin needed to lift it), or 0 when it is not usable.
@@ -1357,7 +1404,9 @@ pub unsafe extern "C" fn pik_sim_treasure_count(sim: *mut PikSim) -> u32 {
 /// `sim` is a live handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_treasure_weight(sim: *mut PikSim, index: u32) -> u32 {
-    unsafe { with(sim, 0, |s| s.treasure_specs.get(index as usize).and_then(|t| t.as_ref()).map_or(0, |t| t.desc.min_carriers)) }
+    libcommon::ffi::guard("pik_sim_treasure_weight", 0, || {
+        unsafe { with(sim, 0, |s| s.treasure_specs.get(index as usize).and_then(|t| t.as_ref()).map_or(0, |t| t.desc.min_carriers)) }
+    })
 }
 
 /// Treasure `index`'s worth in Pokos (what the Onion pays in Pikmin 2), or 0 when it is not usable.
@@ -1365,7 +1414,9 @@ pub unsafe extern "C" fn pik_sim_treasure_weight(sim: *mut PikSim, index: u32) -
 /// `sim` is a live handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_treasure_value(sim: *mut PikSim, index: u32) -> u32 {
-    unsafe { with(sim, 0, |s| s.treasure_specs.get(index as usize).and_then(|t| t.as_ref()).map_or(0, |t| t.value)) }
+    libcommon::ffi::guard("pik_sim_treasure_value", 0, || {
+        unsafe { with(sim, 0, |s| s.treasure_specs.get(index as usize).and_then(|t| t.as_ref()).map_or(0, |t| t.value)) }
+    })
 }
 
 /// Copies treasure `index`'s English name, NUL terminated; returns the bytes written excluding the NUL.
@@ -1373,14 +1424,16 @@ pub unsafe extern "C" fn pik_sim_treasure_value(sim: *mut PikSim, index: u32) ->
 /// `out` is writable for `cap` bytes; `sim` is live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_treasure_name(sim: *mut PikSim, index: u32, out: *mut u8, cap: u32) -> u32 {
-    if out.is_null() || cap == 0 { return 0; }
-    unsafe { with(sim, 0, |s| {
-        let Some(t) = s.treasure_specs.get(index as usize).and_then(|t| t.as_ref()) else { return 0 };
-        let n = t.name.len().min(cap as usize - 1);
-        std::ptr::copy_nonoverlapping(t.name.as_ptr(), out, n);
-        *out.add(n) = 0;
-        n as u32
-    }) }
+    libcommon::ffi::guard("pik_sim_treasure_name", 0, || {
+        if out.is_null() || cap == 0 { return 0; }
+        unsafe { with(sim, 0, |s| {
+            let Some(t) = s.treasure_specs.get(index as usize).and_then(|t| t.as_ref()) else { return 0 };
+            let n = t.name.len().min(cap as usize - 1);
+            std::ptr::copy_nonoverlapping(t.name.as_ptr(), out, n);
+            *out.add(n) = 0;
+            n as u32
+        }) }
+    })
 }
 
 /// Spawns treasure `index` as a pellet a ship receives like a part; its part id in the receipt is
@@ -1389,13 +1442,15 @@ pub unsafe extern "C" fn pik_sim_treasure_name(sim: *mut PikSim, index: u32, out
 /// `sim` is live; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_spawn_treasure(sim: *mut PikSim, index: u32, pos: *const PikVec3, yaw: f32) -> i32 {
-    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return -1 };
-    if !Vec3::from(pos).is_finite() || !yaw.is_finite() { return -1; }
-    unsafe { with(sim, -1, |s| {
-        let Some(mut d) = s.treasure_specs.get(index as usize).and_then(|t| t.as_ref()).map(|t| t.desc) else { return -1 };
-        d.pos = pos.into(); d.yaw = yaw;
-        s.sim.spawn_pellet(d).0 as i32
-    }) }
+    libcommon::ffi::guard("pik_sim_spawn_treasure", -1, || {
+        let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return -1 };
+        if !Vec3::from(pos).is_finite() || !yaw.is_finite() { return -1; }
+        unsafe { with(sim, -1, |s| {
+            let Some(mut d) = s.treasure_specs.get(index as usize).and_then(|t| t.as_ref()).map(|t| t.desc) else { return -1 };
+            d.pos = pos.into(); d.yaw = yaw;
+            s.sim.spawn_pellet(d).0 as i32
+        }) }
+    })
 }
 
 /// Host-selected receipt policy; the default continues to deliver to ships.
@@ -1403,7 +1458,9 @@ pub unsafe extern "C" fn pik_sim_spawn_treasure(sim: *mut PikSim, index: u32, po
 /// `sim` is a live handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_onion_delivery(sim: *mut PikSim, enabled: u8) {
-    unsafe { with(sim, (), |s| s.sim.set_ship_part_onion_delivery(enabled != 0)) }
+    libcommon::ffi::guard("pik_sim_set_ship_part_onion_delivery", (), || {
+        unsafe { with(sim, (), |s| s.sim.set_ship_part_onion_delivery(enabled != 0)) }
+    })
 }
 
 /// Ship delivery with an authoritative host receipt before fitting.
@@ -1411,7 +1468,9 @@ pub unsafe extern "C" fn pik_sim_set_ship_part_onion_delivery(sim: *mut PikSim, 
 /// `sim` is a live handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_part_host_delivery(sim: *mut PikSim, enabled: u8) {
-    unsafe { with(sim, (), |s| s.sim.set_ship_part_host_delivery(enabled != 0)) }
+    libcommon::ffi::guard("pik_sim_set_ship_part_host_delivery", (), || {
+        unsafe { with(sim, (), |s| s.sim.set_ship_part_host_delivery(enabled != 0)) }
+    })
 }
 
 /// The part's disc carry requirement, or zero when its assets/config are invalid.
@@ -1419,7 +1478,9 @@ pub unsafe extern "C" fn pik_sim_set_ship_part_host_delivery(sim: *mut PikSim, e
 /// `sim` is a live handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_ship_part_weight(sim: *mut PikSim, part: u32) -> u32 {
-    unsafe { with(sim, 0, |s| s.part_specs.get(part as usize).and_then(|d| *d).map_or(0, |d| d.min_carriers)) }
+    libcommon::ffi::guard("pik_sim_ship_part_weight", 0, || {
+        unsafe { with(sim, 0, |s| s.part_specs.get(part as usize).and_then(|d| *d).map_or(0, |d| d.min_carriers)) }
+    })
 }
 
 /// Copies a UTF-8 part name, NUL terminated. Returns bytes written excluding NUL.
@@ -1427,19 +1488,21 @@ pub unsafe extern "C" fn pik_sim_ship_part_weight(sim: *mut PikSim, part: u32) -
 /// `out` is writable for `cap` bytes; `sim` is live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_ship_part_name(sim: *mut PikSim, part: u32, out: *mut u8, cap: u32) -> u32 {
-    if out.is_null() || cap == 0 { return 0; }
-    unsafe { with(sim, 0, |s| {
-        let Some(id) = libpikmin_assets::ship::PART_IDS.get(part as usize) else { return 0 };
-        // The part's name in the game (`UfoPartID`), not its config's file name.
-        let name = libpikmin_assets::ship::PART_NAMES.get(part as usize).copied().or_else(|| {
-            s.sim.params().pellets.iter().find(|c| c.kind == 3 && (c.model_id == *id || c.pellet_id == *id)).map(|c| c.name.as_str())
-        });
-        let Some(name) = name else { return 0 };
-        let n = name.len().min(cap as usize - 1);
-        std::ptr::copy_nonoverlapping(name.as_ptr(), out, n);
-        *out.add(n) = 0;
-        n as u32
-    }) }
+    libcommon::ffi::guard("pik_sim_ship_part_name", 0, || {
+        if out.is_null() || cap == 0 { return 0; }
+        unsafe { with(sim, 0, |s| {
+            let Some(id) = libpikmin_assets::ship::PART_IDS.get(part as usize) else { return 0 };
+            // The part's name in the game (`UfoPartID`), not its config's file name.
+            let name = libpikmin_assets::ship::PART_NAMES.get(part as usize).copied().or_else(|| {
+                s.sim.params().pellets.iter().find(|c| c.kind == 3 && (c.model_id == *id || c.pellet_id == *id)).map(|c| c.name.as_str())
+            });
+            let Some(name) = name else { return 0 };
+            let n = name.len().min(cap as usize - 1);
+            std::ptr::copy_nonoverlapping(name.as_ptr(), out, n);
+            *out.add(n) = 0;
+            n as u32
+        }) }
+    })
 }
 
 /// Spawns an actual ship-part pellet using its extracted dimensions and weight.
@@ -1447,13 +1510,15 @@ pub unsafe extern "C" fn pik_sim_ship_part_name(sim: *mut PikSim, part: u32, out
 /// `sim` is live; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_spawn_ship_part(sim: *mut PikSim, part: u32, pos: *const PikVec3, yaw: f32) -> i32 {
-    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return -1 };
-    if !Vec3::from(pos).is_finite() || !yaw.is_finite() { return -1; }
-    unsafe { with(sim, -1, |s| {
-        let Some(mut d) = s.part_specs.get(part as usize).and_then(|d| *d) else { return -1 };
-        d.pos = pos.into(); d.yaw = yaw;
-        s.sim.spawn_pellet(d).0 as i32
-    }) }
+    libcommon::ffi::guard("pik_sim_spawn_ship_part", -1, || {
+        let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return -1 };
+        if !Vec3::from(pos).is_finite() || !yaw.is_finite() { return -1; }
+        unsafe { with(sim, -1, |s| {
+            let Some(mut d) = s.part_specs.get(part as usize).and_then(|d| *d) else { return -1 };
+            d.pos = pos.into(); d.yaw = yaw;
+            s.sim.spawn_pellet(d).0 as i32
+        }) }
+    })
 }
 
 /// A host character (Mario) takes the pellet in his hands, or moves the one he holds.
@@ -1461,8 +1526,10 @@ pub unsafe extern "C" fn pik_sim_spawn_ship_part(sim: *mut PikSim, part: u32, po
 /// `sim` is live; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_hold_pellet(sim: *mut PikSim, pellet: u32, pos: *const PikVec3, yaw: f32) -> u8 {
-    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return 0 };
-    unsafe { with(sim, 0, |s| s.sim.hold_pellet(libpikmin::PelletId(pellet), pos.into(), yaw) as u8) }
+    libcommon::ffi::guard("pik_sim_hold_pellet", 0, || {
+        let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return 0 };
+        unsafe { with(sim, 0, |s| s.sim.hold_pellet(libpikmin::PelletId(pellet), pos.into(), yaw) as u8) }
+    })
 }
 
 /// Puts a held pellet down at `pos`.
@@ -1470,8 +1537,10 @@ pub unsafe extern "C" fn pik_sim_hold_pellet(sim: *mut PikSim, pellet: u32, pos:
 /// `sim` is live; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_release_pellet(sim: *mut PikSim, pellet: u32, pos: *const PikVec3, yaw: f32) -> u8 {
-    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return 0 };
-    unsafe { with(sim, 0, |s| s.sim.release_pellet(libpikmin::PelletId(pellet), pos.into(), yaw) as u8) }
+    libcommon::ffi::guard("pik_sim_release_pellet", 0, || {
+        let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return 0 };
+        unsafe { with(sim, 0, |s| s.sim.release_pellet(libpikmin::PelletId(pellet), pos.into(), yaw) as u8) }
+    })
 }
 
 /// Puts a held or loose ship part into `ship`'s receiver by hand; returns whether the ship took it.
@@ -1479,7 +1548,9 @@ pub unsafe extern "C" fn pik_sim_release_pellet(sim: *mut PikSim, pellet: u32, p
 /// `sim` is live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_hand_ship_part(sim: *mut PikSim, ship: u32, pellet: u32) -> u8 {
-    unsafe { with(sim, 0, |s| s.sim.hand_ship_part(libpikmin::OnionId(ship), libpikmin::PelletId(pellet)) as u8) }
+    libcommon::ffi::guard("pik_sim_hand_ship_part", 0, || {
+        unsafe { with(sim, 0, |s| s.sim.hand_ship_part(libpikmin::OnionId(ship), libpikmin::PelletId(pellet)) as u8) }
+    })
 }
 
 /// Marks `ship` as a captain-less host character's (Mario's): parts go in by hand, no Pikmin deliver.
@@ -1487,25 +1558,31 @@ pub unsafe extern "C" fn pik_sim_hand_ship_part(sim: *mut PikSim, ship: u32, pel
 /// `sim` is live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ship_hand_owned(sim: *mut PikSim, ship: u32) {
-    unsafe { with(sim, (), |s| s.sim.set_ship_hand_owned(libpikmin::OnionId(ship))) }
+    libcommon::ffi::guard("pik_sim_set_ship_hand_owned", (), || {
+        unsafe { with(sim, (), |s| s.sim.set_ship_hand_owned(libpikmin::OnionId(ship))) }
+    })
 }
 
 /// # Safety
 /// `sim` is live; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recover_pellet(sim: *mut PikSim, pellet: u32, pos: *const PikVec3) -> u8 {
-    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return 0 };
-    unsafe { with(sim, 0, |s| s.sim.recover_pellet(libpikmin::PelletId(pellet), pos.into()) as u8) }
+    libcommon::ffi::guard("pik_sim_recover_pellet", 0, || {
+        let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return 0 };
+        unsafe { with(sim, 0, |s| s.sim.recover_pellet(libpikmin::PelletId(pellet), pos.into()) as u8) }
+    })
 }
 
 /// # Safety
 /// `sim` from [`pik_sim_new`] and not used afterwards. Null is ignored.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_free(sim: *mut PikSim) {
-    if !sim.is_null() {
-        // SAFETY: the caller hands back ownership.
-        drop(unsafe { Box::from_raw(sim) });
-    }
+    libcommon::ffi::guard("pik_sim_free", (), || {
+        if !sim.is_null() {
+            // SAFETY: the caller hands back ownership.
+            drop(unsafe { Box::from_raw(sim) });
+        }
+    })
 }
 
 /// Where the tuning came from ("disc (N files)" or "code defaults (why)"). Valid until the sim
@@ -1515,11 +1592,13 @@ pub unsafe extern "C" fn pik_sim_free(sim: *mut PikSim) {
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_params_source(sim: *const PikSim) -> *const c_char {
-    // SAFETY: as documented.
-    match unsafe { sim.as_ref() } {
-        Some(s) => s.params_source.as_ptr(),
-        None => std::ptr::null(),
-    }
+    libcommon::ffi::guard("pik_sim_params_source", std::ptr::null(), || {
+        // SAFETY: as documented.
+        match unsafe { sim.as_ref() } {
+            Some(s) => s.params_source.as_ptr(),
+            None => std::ptr::null(),
+        }
+    })
 }
 
 /// Whether a panic has stopped this sim.
@@ -1528,8 +1607,10 @@ pub unsafe extern "C" fn pik_sim_params_source(sim: *const PikSim) -> *const c_c
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_poisoned(sim: *const PikSim) -> u8 {
-    // SAFETY: as documented.
-    unsafe { sim.as_ref() }.is_none_or(|s| s.poisoned) as u8
+    libcommon::ffi::guard("pik_sim_poisoned", 0, || {
+        // SAFETY: as documented.
+        unsafe { sim.as_ref() }.is_none_or(|s| s.poisoned) as u8
+    })
 }
 
 /// Runs `f` on a live sim, poisoning it if `f` panics. `fallback` when the sim is null or poisoned.
@@ -1559,30 +1640,34 @@ unsafe fn with<R>(sim: *mut PikSim, fallback: R, f: impl FnOnce(&mut PikSim) -> 
 /// `sim` from [`pik_sim_new`]; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_add_captain(sim: *mut PikSim, pos: *const PikVec3) -> i32 {
-    // SAFETY: as documented.
-    let Some(pos) = (unsafe { pos.as_ref() }).copied() else {
-        return -1;
-    };
-    // SAFETY: as documented.
-    unsafe { with(sim, -1, |s| s.sim.add_captain(pos.into()).0 as i32) }
+    libcommon::ffi::guard("pik_sim_add_captain", -1, || {
+        // SAFETY: as documented.
+        let Some(pos) = (unsafe { pos.as_ref() }).copied() else {
+            return -1;
+        };
+        // SAFETY: as documented.
+        unsafe { with(sim, -1, |s| s.sim.add_captain(pos.into()).0 as i32) }
+    })
 }
 
 /// # Safety
 /// `sim` from [`pik_sim_new`]; `input` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_input(sim: *mut PikSim, captain: u32, input: *const PikInput) {
-    // SAFETY: as documented.
-    let Some(input) = (unsafe { input.as_ref() }).copied() else {
-        return;
-    };
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, (), |s| {
-            if (captain as usize) < s.sim.captains().len() {
-                s.sim.set_input(CaptainId(captain), input.to_input());
-            }
-        })
-    }
+    libcommon::ffi::guard("pik_sim_set_input", (), || {
+        // SAFETY: as documented.
+        let Some(input) = (unsafe { input.as_ref() }).copied() else {
+            return;
+        };
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, (), |s| {
+                if (captain as usize) < s.sim.captains().len() {
+                    s.sim.set_input(CaptainId(captain), input.to_input());
+                }
+            })
+        }
+    })
 }
 
 /// The colour `captain` throws next ([`PikiColor::index`]) once the player has picked one
@@ -1592,16 +1677,18 @@ pub unsafe extern "C" fn pik_sim_set_input(sim: *mut PikSim, captain: u32, input
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_captain_throw_color(sim: *mut PikSim, captain: u32) -> i32 {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, -1, |s| {
-            s.sim
-                .captains()
-                .get(captain as usize)
-                .and_then(|c| c.throw_color)
-                .map_or(-1, |c| c.index() as i32)
-        })
-    }
+    libcommon::ffi::guard("pik_sim_captain_throw_color", -1, || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, -1, |s| {
+                s.sim
+                    .captains()
+                    .get(captain as usize)
+                    .and_then(|c| c.throw_color)
+                    .map_or(-1, |c| c.index() as i32)
+            })
+        }
+    })
 }
 
 /// `on` (non-zero): separated Pikmin go back to their captain by themselves; dismissed ones
@@ -1611,8 +1698,10 @@ pub unsafe extern "C" fn pik_sim_captain_throw_color(sim: *mut PikSim, captain: 
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_auto_rejoin(sim: *mut PikSim, on: u8) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.set_auto_rejoin(on != 0)) }
+    libcommon::ffi::guard("pik_sim_set_auto_rejoin", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.set_auto_rejoin(on != 0)) }
+    })
 }
 
 /// Pikmin latched for less than `seconds` hold on through [`pik_sim_shake_off`] (see
@@ -1622,8 +1711,10 @@ pub unsafe extern "C" fn pik_sim_set_auto_rejoin(sim: *mut PikSim, on: u8) {
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_shake_protection(sim: *mut PikSim, seconds: f32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.set_shake_protection(seconds)) }
+    libcommon::ffi::guard("pik_sim_set_shake_protection", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.set_shake_protection(seconds)) }
+    })
 }
 
 /// `on` (non-zero): the host draws the Onion's model with its local X mirrored (Unity's
@@ -1634,8 +1725,10 @@ pub unsafe extern "C" fn pik_sim_set_shake_protection(sim: *mut PikSim, seconds:
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_mirror_onion_legs(sim: *mut PikSim, on: u8) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.set_mirror_onion_legs(on != 0)) }
+    libcommon::ffi::guard("pik_sim_set_mirror_onion_legs", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.set_mirror_onion_legs(on != 0)) }
+    })
 }
 
 /// Scales how far `captain`'s cursor reaches, and so how far he throws, by `scale`.
@@ -1644,14 +1737,16 @@ pub unsafe extern "C" fn pik_sim_set_mirror_onion_legs(sim: *mut PikSim, on: u8)
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_captain_reach(sim: *mut PikSim, captain: u32, scale: f32) {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, (), |s| {
-            if (captain as usize) < s.sim.captains().len() {
-                s.sim.set_captain_reach(CaptainId(captain), scale);
-            }
-        })
-    }
+    libcommon::ffi::guard("pik_sim_set_captain_reach", (), || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, (), |s| {
+                if (captain as usize) < s.sim.captains().len() {
+                    s.sim.set_captain_reach(CaptainId(captain), scale);
+                }
+            })
+        }
+    })
 }
 
 /// Scales `captain`'s run speed by `scale` (the host's move speed stat over its base).
@@ -1660,14 +1755,16 @@ pub unsafe extern "C" fn pik_sim_set_captain_reach(sim: *mut PikSim, captain: u3
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_captain_speed(sim: *mut PikSim, captain: u32, scale: f32) {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, (), |s| {
-            if (captain as usize) < s.sim.captains().len() {
-                s.sim.set_captain_speed(CaptainId(captain), scale);
-            }
-        })
-    }
+    libcommon::ffi::guard("pik_sim_set_captain_speed", (), || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, (), |s| {
+                if (captain as usize) < s.sim.captains().len() {
+                    s.sim.set_captain_speed(CaptainId(captain), scale);
+                }
+            })
+        }
+    })
 }
 
 /// Host control hold: 0 free, 1 movement only, 2 movement and actions.
@@ -1675,7 +1772,9 @@ pub unsafe extern "C" fn pik_sim_set_captain_speed(sim: *mut PikSim, captain: u3
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_captain_hold(sim: *mut PikSim, captain: u32, hold: u32) {
-    unsafe { with(sim, (), |s| s.sim.set_captain_hold(CaptainId(captain), hold != 0, hold >= 2)) }
+    libcommon::ffi::guard("pik_sim_set_captain_hold", (), || {
+        unsafe { with(sim, (), |s| s.sim.set_captain_hold(CaptainId(captain), hold != 0, hold >= 2)) }
+    })
 }
 
 /// Launch a captain with a host velocity, in sim units per second.
@@ -1685,8 +1784,10 @@ pub unsafe extern "C" fn pik_sim_set_captain_hold(sim: *mut PikSim, captain: u32
 /// `sim` from [`pik_sim_new`]; `velocity` readable (null is ignored).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_launch_captain(sim: *mut PikSim, captain: u32, velocity: *const PikVec3, gravity: f32, squad: u8) {
-    let Some(v) = (unsafe { velocity.as_ref() }) else { return; };
-    unsafe { with(sim, (), |s| s.sim.launch_captain(CaptainId(captain), (*v).into(), gravity, squad != 0)) }
+    libcommon::ffi::guard("pik_sim_launch_captain", (), || {
+        let Some(v) = (unsafe { velocity.as_ref() }) else { return; };
+        unsafe { with(sim, (), |s| s.sim.launch_captain(CaptainId(captain), (*v).into(), gravity, squad != 0)) }
+    })
 }
 
 /// Spawns a Pikmin of colour `color` ([`PikiColor::index`]) at `pos`, straight into
@@ -1696,24 +1797,26 @@ pub unsafe extern "C" fn pik_sim_launch_captain(sim: *mut PikSim, captain: u32, 
 /// `sim` from [`pik_sim_new`]; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_spawn_piki(sim: *mut PikSim, color: u32, pos: *const PikVec3, captain: i32) -> i32 {
-    // SAFETY: as documented.
-    let Some(pos) = (unsafe { pos.as_ref() }).copied() else {
-        return -1;
-    };
-    let Some(color) = color_arg(color) else {
-        return -1;
-    };
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, -1, |s| {
-            let id = if captain >= 0 && (captain as usize) < s.sim.captains().len() {
-                s.sim.spawn_piki_in_squad(color, pos.into(), CaptainId(captain as u32))
-            } else {
-                s.sim.spawn_piki(color, pos.into())
-            };
-            id.map_or(-1, |p| p.0 as i32)
-        })
-    }
+    libcommon::ffi::guard("pik_sim_spawn_piki", -1, || {
+        // SAFETY: as documented.
+        let Some(pos) = (unsafe { pos.as_ref() }).copied() else {
+            return -1;
+        };
+        let Some(color) = color_arg(color) else {
+            return -1;
+        };
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, -1, |s| {
+                let id = if captain >= 0 && (captain as usize) < s.sim.captains().len() {
+                    s.sim.spawn_piki_in_squad(color, pos.into(), CaptainId(captain as u32))
+                } else {
+                    s.sim.spawn_piki(color, pos.into())
+                };
+                id.map_or(-1, |p| p.0 as i32)
+            })
+        }
+    })
 }
 
 /// Restores a Pikmin's leaf stage without changing its task.
@@ -1721,10 +1824,12 @@ pub unsafe extern "C" fn pik_sim_spawn_piki(sim: *mut PikSim, color: u32, pos: *
 /// `sim` from `pik_sim_new`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_piki_happa(sim: *mut PikSim, piki: u32, happa: u32) {
-    let Some(happa) = happa_arg(happa) else { return };
-    unsafe { with(sim, (), |s| {
-        if (piki as usize) < s.sim.pikis().len() { s.sim.piki_mut(PikiId(piki)).happa = happa; }
-    }) }
+    libcommon::ffi::guard("pik_sim_set_piki_happa", (), || {
+        let Some(happa) = happa_arg(happa) else { return };
+        unsafe { with(sim, (), |s| {
+            if (piki as usize) < s.sim.pikis().len() { s.sim.piki_mut(PikiId(piki)).happa = happa; }
+        }) }
+    })
 }
 
 /// Stored count for one colour and leaf stage; preserves maturity across host stage transfers.
@@ -1732,8 +1837,10 @@ pub unsafe extern "C" fn pik_sim_set_piki_happa(sim: *mut PikSim, piki: u32, hap
 /// `sim` from `pik_sim_new`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_onion_stock(sim: *mut PikSim, onion: u32, color: u32, happa: u32) -> u32 {
-    if color_arg(color).is_none() || happa_arg(happa).is_none() { return 0; }
-    unsafe { with(sim, 0, |s| s.sim.onions().get(onion as usize).map_or(0, |o| o.stored[color as usize][happa as usize])) }
+    libcommon::ffi::guard("pik_sim_onion_stock", 0, || {
+        if color_arg(color).is_none() || happa_arg(happa).is_none() { return 0; }
+        unsafe { with(sim, 0, |s| s.sim.onions().get(onion as usize).map_or(0, |o| o.stored[color as usize][happa as usize])) }
+    })
 }
 
 /// Settles living death-recall stragglers in their Onion with their leaf stages intact.
@@ -1741,9 +1848,11 @@ pub unsafe extern "C" fn pik_sim_onion_stock(sim: *mut PikSim, onion: u32, color
 /// `sim` from `pik_sim_new`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_finish_orphan_recall(sim: *mut PikSim, captain: u32, onion: u32) {
-    unsafe { with(sim, (), |s| {
-        if captain_ok(&s.sim, captain) { s.sim.finish_orphan_recall(CaptainId(captain), OnionId(onion)); }
-    }) }
+    libcommon::ffi::guard("pik_sim_finish_orphan_recall", (), || {
+        unsafe { with(sim, (), |s| {
+            if captain_ok(&s.sim, captain) { s.sim.finish_orphan_recall(CaptainId(captain), OnionId(onion)); }
+        }) }
+    })
 }
 
 /// Living Pikmin still entering this Onion, including walking, jumping and climbing.
@@ -1751,8 +1860,10 @@ pub unsafe extern "C" fn pik_sim_finish_orphan_recall(sim: *mut PikSim, captain:
 /// `sim` from `pik_sim_new`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_onion_returning_count(sim: *mut PikSim, onion: u32) -> u32 {
-    unsafe { with(sim, 0, |s| s.sim.pikis().iter().filter(|p| p.is_alive()
-        && matches!(p.state, PikiState::Enter { onion: on, .. } if on.0 == onion)).count() as u32) }
+    libcommon::ffi::guard("pik_sim_onion_returning_count", 0, || {
+        unsafe { with(sim, 0, |s| s.sim.pikis().iter().filter(|p| p.is_alive()
+            && matches!(p.state, PikiState::Enter { onion: on, .. } if on.0 == onion)).count() as u32) }
+    })
 }
 
 /// Places an Onion at `pos` taking the colours in the bit mask `colors` (bit
@@ -1762,16 +1873,18 @@ pub unsafe extern "C" fn pik_sim_onion_returning_count(sim: *mut PikSim, onion: 
 /// `sim` from [`pik_sim_new`]; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_add_onion(sim: *mut PikSim, pos: *const PikVec3, colors: u32) -> i32 {
-    // SAFETY: as documented.
-    let Some(pos) = (unsafe { pos.as_ref() }).copied() else {
-        return -1;
-    };
-    let colors: Vec<PikiColor> = (0..5).filter(|i| colors & (1 << i) != 0).filter_map(PikiColor::from_id).collect();
-    if colors.is_empty() {
-        return -1;
-    }
-    // SAFETY: as documented.
-    unsafe { with(sim, -1, |s| s.sim.add_onion(pos.into(), &colors).0 as i32) }
+    libcommon::ffi::guard("pik_sim_add_onion", -1, || {
+        // SAFETY: as documented.
+        let Some(pos) = (unsafe { pos.as_ref() }).copied() else {
+            return -1;
+        };
+        let colors: Vec<PikiColor> = (0..5).filter(|i| colors & (1 << i) != 0).filter_map(PikiColor::from_id).collect();
+        if colors.is_empty() {
+            return -1;
+        }
+        // SAFETY: as documented.
+        unsafe { with(sim, -1, |s| s.sim.add_onion(pos.into(), &colors).0 as i32) }
+    })
 }
 
 /// Adds the S.S. Dolphin, independently of ship-repair gameplay.
@@ -1779,12 +1892,14 @@ pub unsafe extern "C" fn pik_sim_add_onion(sim: *mut PikSim, pos: *const PikVec3
 /// `sim` from [`pik_sim_new`]; `pos` readable. No ship-parts objective is enabled.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_add_ship(sim: *mut PikSim, pos: *const PikVec3, yaw: f32) -> i32 {
-    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return -1 };
-    let pos: Vec3 = pos.into();
-    if !pos.is_finite() || !yaw.is_finite() { return -1; }
-    unsafe { with(sim, -1, |s| s.sim.add_ship(pos,
-        pos + Vec3::new(yaw.sin(), 0.0, yaw.cos()) * 100.0,
-        pos + Vec3::Y * 74.0).0 as i32) }
+    libcommon::ffi::guard("pik_sim_add_ship", -1, || {
+        let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return -1 };
+        let pos: Vec3 = pos.into();
+        if !pos.is_finite() || !yaw.is_finite() { return -1; }
+        unsafe { with(sim, -1, |s| s.sim.add_ship(pos,
+            pos + Vec3::new(yaw.sin(), 0.0, yaw.cos()) * 100.0,
+            pos + Vec3::Y * 74.0).0 as i32) }
+    })
 }
 
 /// Fits ship part `part` (0..30) to the Dolphin `ship` ([`Sim::give_ship_part`]); with all 30 it is the
@@ -1794,8 +1909,10 @@ pub unsafe extern "C" fn pik_sim_add_ship(sim: *mut PikSim, pos: *const PikVec3,
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_give_ship_part(sim: *mut PikSim, ship: u32, part: u32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.give_ship_part(OnionId(ship), part)) }
+    libcommon::ffi::guard("pik_sim_give_ship_part", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.give_ship_part(OnionId(ship), part)) }
+    })
 }
 
 /// Updates a host-controlled Onion's pose and airborne state.
@@ -1803,8 +1920,10 @@ pub unsafe extern "C" fn pik_sim_give_ship_part(sim: *mut PikSim, ship: u32, par
 /// `sim` from [`pik_sim_new`]; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_onion_pose(sim: *mut PikSim, onion: u32, pos: *const PikVec3, flying: u8) {
-    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return };
-    unsafe { with(sim, (), |s| s.sim.set_onion_pose(OnionId(onion), pos.into(), flying != 0)) }
+    libcommon::ffi::guard("pik_sim_set_onion_pose", (), || {
+        let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return };
+        unsafe { with(sim, (), |s| s.sim.set_onion_pose(OnionId(onion), pos.into(), flying != 0)) }
+    })
 }
 
 /// Disables an Onion, retaining its stock, until its timed disc startup completes.
@@ -1812,8 +1931,10 @@ pub unsafe extern "C" fn pik_sim_set_onion_pose(sim: *mut PikSim, onion: u32, po
 /// `sim` from pik_sim_new; `ground` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_make_onion_dormant(sim: *mut PikSim, onion: u32, seconds: f32, ground: *const PikVec3) {
-    let Some(ground) = (unsafe { ground.as_ref() }).copied() else { return };
-    unsafe { with(sim, (), |s| s.sim.make_onion_dormant(OnionId(onion), seconds, ground.into())) }
+    libcommon::ffi::guard("pik_sim_make_onion_dormant", (), || {
+        let Some(ground) = (unsafe { ground.as_ref() }).copied() else { return };
+        unsafe { with(sim, (), |s| s.sim.make_onion_dormant(OnionId(onion), seconds, ground.into())) }
+    })
 }
 
 /// Loose ground pickup; validates destination, proximity and pellet state.
@@ -1821,7 +1942,9 @@ pub unsafe extern "C" fn pik_sim_make_onion_dormant(sim: *mut PikSim, onion: u32
 /// `sim` from pik_sim_new.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_collect_ground_pellet(sim: *mut PikSim, onion: u32, pellet: u32) -> u8 {
-    unsafe { with(sim, 0, |s| s.sim.collect_ground_pellet(OnionId(onion), libpikmin::PelletId(pellet)) as u8) }
+    libcommon::ffi::guard("pik_sim_collect_ground_pellet", 0, || {
+        unsafe { with(sim, 0, |s| s.sim.collect_ground_pellet(OnionId(onion), libpikmin::PelletId(pellet)) as u8) }
+    })
 }
 
 /// Selects a host-timed disc flight transition without changing gameplay availability.
@@ -1829,7 +1952,9 @@ pub unsafe extern "C" fn pik_sim_collect_ground_pellet(sim: *mut PikSim, onion: 
 /// `sim` from [`pik_sim_new`]. `landing` selects landing rather than takeoff.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_onion_flight_motion(sim: *mut PikSim, onion: u32, landing: u8, progress: f32) {
-    unsafe { with(sim, (), |s| s.sim.set_onion_flight_motion(OnionId(onion), landing != 0, progress)) }
+    libcommon::ffi::guard("pik_sim_set_onion_flight_motion", (), || {
+        unsafe { with(sim, (), |s| s.sim.set_onion_flight_motion(OnionId(onion), landing != 0, progress)) }
+    })
 }
 
 /// Selects a cosmetic colour without changing storage/accepted types.
@@ -1837,8 +1962,10 @@ pub unsafe extern "C" fn pik_sim_set_onion_flight_motion(sim: *mut PikSim, onion
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_onion_color(sim: *mut PikSim, onion: u32, color: u32) {
-    let Some(color) = color_arg(color) else { return };
-    unsafe { with(sim, (), |s| s.sim.set_onion_color(OnionId(onion), color)) }
+    libcommon::ffi::guard("pik_sim_set_onion_color", (), || {
+        let Some(color) = color_arg(color) else { return };
+        unsafe { with(sim, (), |s| s.sim.set_onion_color(OnionId(onion), color)) }
+    })
 }
 
 /// Puts something carryable down. Returns its id.
@@ -1847,25 +1974,27 @@ pub unsafe extern "C" fn pik_sim_set_onion_color(sim: *mut PikSim, onion: u32, c
 /// `sim` from [`pik_sim_new`]; `desc` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_spawn_pellet(sim: *mut PikSim, desc: *const PikPelletDesc) -> i32 {
-    // SAFETY: as documented.
-    let Some(d) = (unsafe { desc.as_ref() }).copied() else {
-        return -1;
-    };
-    let desc = PelletDesc {
-        pos: d.pos.into(),
-        yaw: d.yaw,
-        radius: d.radius,
-        height: d.height,
-        min_carriers: d.min_carriers.max(1),
-        max_carriers: d.max_carriers.max(d.min_carriers).max(1),
-        seeds_matching: d.seeds_matching,
-        seeds_other: d.seeds_other,
-        color: u32::try_from(d.color).ok().and_then(color_arg),
-        creature: (d.has_creature != 0).then_some(d.creature),
-        ship_part: None,
-    };
-    // SAFETY: as documented.
-    unsafe { with(sim, -1, |s| s.sim.spawn_pellet(desc).0 as i32) }
+    libcommon::ffi::guard("pik_sim_spawn_pellet", -1, || {
+        // SAFETY: as documented.
+        let Some(d) = (unsafe { desc.as_ref() }).copied() else {
+            return -1;
+        };
+        let desc = PelletDesc {
+            pos: d.pos.into(),
+            yaw: d.yaw,
+            radius: d.radius,
+            height: d.height,
+            min_carriers: d.min_carriers.max(1),
+            max_carriers: d.max_carriers.max(d.min_carriers).max(1),
+            seeds_matching: d.seeds_matching,
+            seeds_other: d.seeds_other,
+            color: u32::try_from(d.color).ok().and_then(color_arg),
+            creature: (d.has_creature != 0).then_some(d.creature),
+            ship_part: None,
+        };
+        // SAFETY: as documented.
+        unsafe { with(sim, -1, |s| s.sim.spawn_pellet(desc).0 as i32) }
+    })
 }
 
 /// Puts down a numbered pellet: the largest of 1, 5, 10 and 20 not above `number`, in
@@ -1882,20 +2011,22 @@ pub unsafe extern "C" fn pik_sim_spawn_numbered_pellet(
     pos: *const PikVec3,
     yaw: f32,
 ) -> i32 {
-    // SAFETY: as documented.
-    let Some(pos) = (unsafe { pos.as_ref() }).copied() else {
-        return -1;
-    };
-    let Some(color) = color_arg(color) else {
-        return -1;
-    };
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, -1, |s| {
-            let desc = PelletDesc::numbered(s.sim.params(), number, color, pos.into(), yaw);
-            s.sim.spawn_pellet(desc).0 as i32
-        })
-    }
+    libcommon::ffi::guard("pik_sim_spawn_numbered_pellet", -1, || {
+        // SAFETY: as documented.
+        let Some(pos) = (unsafe { pos.as_ref() }).copied() else {
+            return -1;
+        };
+        let Some(color) = color_arg(color) else {
+            return -1;
+        };
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, -1, |s| {
+                let desc = PelletDesc::numbered(s.sim.params(), number, color, pos.into(), yaw);
+                s.sim.spawn_pellet(desc).0 as i32
+            })
+        }
+    })
 }
 
 /// Plants a sprout of colour `color` at `pos`, ready to grow and be plucked.
@@ -1904,15 +2035,17 @@ pub unsafe extern "C" fn pik_sim_spawn_numbered_pellet(
 /// `sim` from [`pik_sim_new`]; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_plant_sprout(sim: *mut PikSim, color: u32, pos: *const PikVec3) -> i32 {
-    // SAFETY: as documented.
-    let Some(pos) = (unsafe { pos.as_ref() }).copied() else {
-        return -1;
-    };
-    let Some(color) = color_arg(color) else {
-        return -1;
-    };
-    // SAFETY: as documented.
-    unsafe { with(sim, -1, |s| s.sim.plant_sprout(color, pos.into()).0 as i32) }
+    libcommon::ffi::guard("pik_sim_plant_sprout", -1, || {
+        // SAFETY: as documented.
+        let Some(pos) = (unsafe { pos.as_ref() }).copied() else {
+            return -1;
+        };
+        let Some(color) = color_arg(color) else {
+            return -1;
+        };
+        // SAFETY: as documented.
+        unsafe { with(sim, -1, |s| s.sim.plant_sprout(color, pos.into()).0 as i32) }
+    })
 }
 
 /// The host's creatures for the coming ticks: `n` creatures and the `m` parts they index into.
@@ -1928,36 +2061,38 @@ pub unsafe extern "C" fn pik_sim_set_creatures(
     parts: *const PikPart,
     m: u32,
 ) {
-    // SAFETY: as documented.
-    let cs = unsafe { slice(creatures, n) };
-    // SAFETY: as documented.
-    let ps = unsafe { slice(parts, m) };
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, (), |s| {
-            let f = &mut s.frame;
-            f.clear();
-            f.parts.extend(ps.iter().map(|p| CreaturePart {
-                centre: p.centre.into(),
-                radius: p.radius,
-                stickable: p.stickable != 0,
-            }));
-            for c in cs {
-                // Parts out of range would index past the array inside the sim.
-                let end = c.parts_start as u64 + c.parts_len as u64;
-                let len = if end <= ps.len() as u64 { c.parts_len } else { 0 };
-                f.creatures.push(CreatureView {
-                    id: c.id,
-                    pos: c.pos.into(),
-                    yaw: c.yaw,
-                    alive: c.alive != 0,
-                    flying: c.flying != 0,
-                    parts_start: c.parts_start,
-                    parts_len: len,
-                });
-            }
-        })
-    }
+    libcommon::ffi::guard("pik_sim_set_creatures", (), || {
+        // SAFETY: as documented.
+        let cs = unsafe { slice(creatures, n) };
+        // SAFETY: as documented.
+        let ps = unsafe { slice(parts, m) };
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, (), |s| {
+                let f = &mut s.frame;
+                f.clear();
+                f.parts.extend(ps.iter().map(|p| CreaturePart {
+                    centre: p.centre.into(),
+                    radius: p.radius,
+                    stickable: p.stickable != 0,
+                }));
+                for c in cs {
+                    // Parts out of range would index past the array inside the sim.
+                    let end = c.parts_start as u64 + c.parts_len as u64;
+                    let len = if end <= ps.len() as u64 { c.parts_len } else { 0 };
+                    f.creatures.push(CreatureView {
+                        id: c.id,
+                        pos: c.pos.into(),
+                        yaw: c.yaw,
+                        alive: c.alive != 0,
+                        flying: c.flying != 0,
+                        parts_start: c.parts_start,
+                        parts_len: len,
+                    });
+                }
+            })
+        }
+    })
 }
 
 /// Feeds `dt` seconds of host time into the fixed 30 Hz clock and runs the ticks that are due,
@@ -1967,31 +2102,33 @@ pub unsafe extern "C" fn pik_sim_set_creatures(
 /// `sim` from [`pik_sim_new`]; `host` readable, with callbacks safe to call as documented.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_advance(sim: *mut PikSim, host: *const PikHost, dt: f32) -> u32 {
-    // SAFETY: as documented.
-    let Some(host) = (unsafe { host.as_ref() }) else {
-        return 0;
-    };
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            s.sim.reclaim_dead_pikis(s.pending.iter().chain(&s.view_log).chain(&s.net_log).flat_map(Event::piki_ids));
-            let mut h = FfiHost { host, frame: &s.frame, path: Vec::new() };
-            let ticks = s.sim.advance(&mut h, dt.clamp(0.0, 0.25));
-            let events: Vec<Event> = s.sim.drain_events().collect();
-            // Nobody reading either queue mustn't grow it forever: keep the newest.
-            if s.view_log.len() + events.len() <= EVENT_BACKLOG {
-                s.view_log.extend_from_slice(&events);
-            }
-            if s.networked && s.net_log.len() + events.len() <= EVENT_BACKLOG {
-                s.net_log.extend_from_slice(&events);
-            }
-            s.pending.extend(events);
-            while s.pending.len() > EVENT_BACKLOG {
-                s.pending.pop_front();
-            }
-            ticks
-        })
-    }
+    libcommon::ffi::guard("pik_sim_advance", 0, || {
+        // SAFETY: as documented.
+        let Some(host) = (unsafe { host.as_ref() }) else {
+            return 0;
+        };
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                s.sim.reclaim_dead_pikis(s.pending.iter().chain(&s.view_log).chain(&s.net_log).flat_map(Event::piki_ids));
+                let mut h = FfiHost { host, frame: &s.frame, path: Vec::new() };
+                let ticks = s.sim.advance(&mut h, dt.clamp(0.0, 0.25));
+                let events: Vec<Event> = s.sim.drain_events().collect();
+                // Nobody reading either queue mustn't grow it forever: keep the newest.
+                if s.view_log.len() + events.len() <= EVENT_BACKLOG {
+                    s.view_log.extend_from_slice(&events);
+                }
+                if s.networked && s.net_log.len() + events.len() <= EVENT_BACKLOG {
+                    s.net_log.extend_from_slice(&events);
+                }
+                s.pending.extend(events);
+                while s.pending.len() > EVENT_BACKLOG {
+                    s.pending.pop_front();
+                }
+                ticks
+            })
+        }
+    })
 }
 
 /// Whether this sim has network snapshot consumers. Disable for solo/local prediction so
@@ -2000,10 +2137,12 @@ pub unsafe extern "C" fn pik_sim_advance(sim: *mut PikSim, host: *const PikHost,
 /// `sim` from `pik_sim_new`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_networked(sim: *mut PikSim, enabled: u8) {
-    unsafe { with(sim, (), |s| {
-        s.networked = enabled != 0;
-        if !s.networked { s.net_log.clear(); }
-    }) }
+    libcommon::ffi::guard("pik_sim_set_networked", (), || {
+        unsafe { with(sim, (), |s| {
+            s.networked = enabled != 0;
+            if !s.networked { s.net_log.clear(); }
+        }) }
+    })
 }
 
 /// Encodes the sim's entities, and the events since the last call, into `out` (at most `cap`
@@ -2014,21 +2153,23 @@ pub unsafe extern "C" fn pik_sim_set_networked(sim: *mut PikSim, enabled: u8) {
 /// `sim` from [`pik_sim_new`]; `out` writable for `cap` bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_snapshot(sim: *mut PikSim, out: *mut u8, cap: u32) -> u32 {
-    if out.is_null() {
-        return 0;
-    }
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            let bytes = Snapshot::of(&s.sim, &s.net_log).encode_replica();
-            if bytes.len() > cap as usize {
-                return 0;
-            }
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len());
-            s.net_log.clear();
-            bytes.len() as u32
-        })
-    }
+    libcommon::ffi::guard("pik_sim_snapshot", 0, || {
+        if out.is_null() {
+            return 0;
+        }
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                let bytes = Snapshot::of(&s.sim, &s.net_log).encode_replica();
+                if bytes.len() > cap as usize {
+                    return 0;
+                }
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len());
+                s.net_log.clear();
+                bytes.len() as u32
+            })
+        }
+    })
 }
 
 /// Creates a replica: a sim that never steps, only holds what the server's snapshots say, so the
@@ -2039,13 +2180,15 @@ pub unsafe extern "C" fn pik_sim_snapshot(sim: *mut PikSim, out: *mut u8, cap: u
 /// `assets_dir` null or a nul-terminated string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_replica_new(assets_dir: *const c_char) -> *mut PikSim {
-    // SAFETY: as documented.
-    let sim = unsafe { pik_sim_new(assets_dir, 0) };
-    // SAFETY: just made, or null.
-    if let Some(s) = unsafe { sim.as_mut() } {
-        s.replica = Some(Replica::new());
-    }
-    sim
+    libcommon::ffi::guard("pik_replica_new", std::ptr::null_mut(), || {
+        // SAFETY: as documented.
+        let sim = unsafe { pik_sim_new(assets_dir, 0) };
+        // SAFETY: just made, or null.
+        if let Some(s) = unsafe { sim.as_mut() } {
+            s.replica = Some(Replica::new());
+        }
+        sim
+    })
 }
 
 /// A snapshot from the server's [`pik_sim_snapshot`] arrived. Returns whether it was accepted
@@ -2057,27 +2200,29 @@ pub unsafe extern "C" fn pik_replica_new(assets_dir: *const c_char) -> *mut PikS
 /// `sim` from [`pik_replica_new`]; `bytes` readable for `len`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_replica_apply(sim: *mut PikSim, bytes: *const u8, len: u32) -> u8 {
-    if bytes.is_null() {
-        return 0;
-    }
-    // SAFETY: as documented.
-    let data = unsafe { std::slice::from_raw_parts(bytes, len as usize) };
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            let Some(r) = s.replica.as_mut() else { return 0 };
-            let Some(snap) = Snapshot::decode(data) else { return 0 };
-            // A newer one only: a late packet from before the newest on hand is dropped.
-            if r.newest_tick().is_some_and(|t| snap.tick <= t) {
-                return 0;
-            }
-            r.push(snap);
-            if s.replica.as_ref().is_some_and(|r| r.to.is_none()) {
-                replica_show_due(s);
-            }
-            1
-        })
-    }
+    libcommon::ffi::guard("pik_replica_apply", 0, || {
+        if bytes.is_null() {
+            return 0;
+        }
+        // SAFETY: as documented.
+        let data = unsafe { std::slice::from_raw_parts(bytes, len as usize) };
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                let Some(r) = s.replica.as_mut() else { return 0 };
+                let Some(snap) = Snapshot::decode(data) else { return 0 };
+                // A newer one only: a late packet from before the newest on hand is dropped.
+                if r.newest_tick().is_some_and(|t| snap.tick <= t) {
+                    return 0;
+                }
+                r.push(snap);
+                if s.replica.as_ref().is_some_and(|r| r.to.is_none()) {
+                    replica_show_due(s);
+                }
+                1
+            })
+        }
+    })
 }
 
 /// Shows every queued snapshot the replica's playback has reached: each is applied to the sim
@@ -2122,24 +2267,26 @@ fn replica_show_due(s: &mut PikSim) {
 /// `sim` from [`pik_replica_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_replica_update(sim: *mut PikSim, dt: f32) {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, (), |s| {
-            let Some(r) = s.replica.as_mut() else { return };
-            if r.to.is_none() && r.queue.is_empty() {
-                return;
-            }
-            r.step_clock(dt);
-            replica_show_due(s);
-            let Some(r) = s.replica.as_ref() else { return };
-            let Some(to) = r.to.as_ref() else { return };
-            let from = r.from.as_ref().unwrap_or(to);
-            let t = r.fraction();
-            s.sim.blend_snapshot_motion(from, to, t);
-            let play = r.play.max(0.0) as u64;
-            s.sim.set_tick(s.sim.tick().max(play));
-        })
-    }
+    libcommon::ffi::guard("pik_replica_update", (), || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, (), |s| {
+                let Some(r) = s.replica.as_mut() else { return };
+                if r.to.is_none() && r.queue.is_empty() {
+                    return;
+                }
+                r.step_clock(dt);
+                replica_show_due(s);
+                let Some(r) = s.replica.as_ref() else { return };
+                let Some(to) = r.to.as_ref() else { return };
+                let from = r.from.as_ref().unwrap_or(to);
+                let t = r.fraction();
+                s.sim.blend_snapshot_motion(from, to, t);
+                let play = r.play.max(0.0) as u64;
+                s.sim.set_tick(s.sim.tick().max(play));
+            })
+        }
+    })
 }
 
 /// On a replica, shows `captain` (the server's id for this player's captain) moving as captain
@@ -2158,22 +2305,24 @@ pub unsafe extern "C" fn pik_replica_overlay_captain(
     pos: *const PikVec3,
     face: f32,
 ) {
-    // SAFETY: as documented.
-    let Some(m) = (unsafe { mover.as_ref() }) else { return };
-    if m.poisoned {
-        return;
-    }
-    let Some(from) = m.sim.captains().get(from_captain as usize).cloned() else { return };
-    // SAFETY: as documented.
-    let pos = unsafe { pos.as_ref() }.map(|p| Vec3::from(*p));
-    // SAFETY: as documented.
-    unsafe {
-        with(replica, (), |s| {
-            if s.replica.is_some() {
-                s.sim.overlay_captain_motion(CaptainId(captain), &from, pos, pos.map(|_| face));
-            }
-        })
-    }
+    libcommon::ffi::guard("pik_replica_overlay_captain", (), || {
+        // SAFETY: as documented.
+        let Some(m) = (unsafe { mover.as_ref() }) else { return };
+        if m.poisoned {
+            return;
+        }
+        let Some(from) = m.sim.captains().get(from_captain as usize).cloned() else { return };
+        // SAFETY: as documented.
+        let pos = unsafe { pos.as_ref() }.map(|p| Vec3::from(*p));
+        // SAFETY: as documented.
+        unsafe {
+            with(replica, (), |s| {
+                if s.replica.is_some() {
+                    s.sim.overlay_captain_motion(CaptainId(captain), &from, pos, pos.map(|_| face));
+                }
+            })
+        }
+    })
 }
 
 /// How far into the next tick the clock is (0..1), for drawing between ticks.
@@ -2182,16 +2331,20 @@ pub unsafe extern "C" fn pik_replica_overlay_captain(
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_alpha(sim: *mut PikSim) -> f32 {
-    // SAFETY: as documented.
-    unsafe { with(sim, 0.0, |s| s.sim.alpha()) }
+    libcommon::ffi::guard("pik_sim_alpha", 0.0, || {
+        // SAFETY: as documented.
+        unsafe { with(sim, 0.0, |s| s.sim.alpha()) }
+    })
 }
 
 /// # Safety
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_tick(sim: *mut PikSim) -> u64 {
-    // SAFETY: as documented.
-    unsafe { with(sim, 0, |s| s.sim.tick()) }
+    libcommon::ffi::guard("pik_sim_tick", 0, || {
+        // SAFETY: as documented.
+        unsafe { with(sim, 0, |s| s.sim.tick()) }
+    })
 }
 
 /// A creature shook its Pikmin off (its shake attack landed).
@@ -2200,8 +2353,10 @@ pub unsafe extern "C" fn pik_sim_tick(sim: *mut PikSim) -> u64 {
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_shake_off(sim: *mut PikSim, creature: u64) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.shake_off(creature)) }
+    libcommon::ffi::guard("pik_sim_shake_off", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.shake_off(creature)) }
+    })
 }
 
 /// An attack hits one Pikmin. Hosts can apply an explosion's falloff separately to each
@@ -2211,11 +2366,13 @@ pub unsafe extern "C" fn pik_sim_shake_off(sim: *mut PikSim, creature: u64) {
 /// `sim` from [`pik_sim_new`]. Invalid ids and nonpositive/nonfinite damage are ignored.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_attack_piki(sim: *mut PikSim, id: u32, damage: f32) -> u8 {
-    if !damage.is_finite() || damage <= 0.0 { return 0; }
-    unsafe { with(sim, 0, |s| {
-        if id as usize >= s.sim.pikis().len() { return 0; }
-        u8::from(s.sim.attack_piki(PikiId(id), damage))
-    }) }
+    libcommon::ffi::guard("pik_sim_attack_piki", 0, || {
+        if !damage.is_finite() || damage <= 0.0 { return 0; }
+        unsafe { with(sim, 0, |s| {
+            if id as usize >= s.sim.pikis().len() { return 0; }
+            u8::from(s.sim.attack_piki(PikiId(id), damage))
+        }) }
+    })
 }
 
 /// An attack hits every Pikmin inside the sphere for `damage`. Returns how many it hit.
@@ -2229,12 +2386,14 @@ pub unsafe extern "C" fn pik_sim_attack_pikis_in_sphere(
     radius: f32,
     damage: f32,
 ) -> u32 {
-    // SAFETY: as documented.
-    let Some(c) = (unsafe { centre.as_ref() }).copied() else {
-        return 0;
-    };
-    // SAFETY: as documented.
-    unsafe { with(sim, 0, |s| s.sim.attack_pikis_in_sphere(c.into(), radius, damage)) }
+    libcommon::ffi::guard("pik_sim_attack_pikis_in_sphere", 0, || {
+        // SAFETY: as documented.
+        let Some(c) = (unsafe { centre.as_ref() }).copied() else {
+            return 0;
+        };
+        // SAFETY: as documented.
+        unsafe { with(sim, 0, |s| s.sim.attack_pikis_in_sphere(c.into(), radius, damage)) }
+    })
 }
 
 /// A freezing blast: every Pikmin inside the sphere stands frozen for `seconds`, letting go of
@@ -2249,12 +2408,14 @@ pub unsafe extern "C" fn pik_sim_freeze_pikis_in_sphere(
     radius: f32,
     seconds: f32,
 ) -> u32 {
-    // SAFETY: as documented.
-    let Some(c) = (unsafe { centre.as_ref() }).copied() else {
-        return 0;
-    };
-    // SAFETY: as documented.
-    unsafe { with(sim, 0, |s| s.sim.freeze_pikis_in_sphere(c.into(), radius, seconds)) }
+    libcommon::ffi::guard("pik_sim_freeze_pikis_in_sphere", 0, || {
+        // SAFETY: as documented.
+        let Some(c) = (unsafe { centre.as_ref() }).copied() else {
+            return 0;
+        };
+        // SAFETY: as documented.
+        unsafe { with(sim, 0, |s| s.sim.freeze_pikis_in_sphere(c.into(), radius, seconds)) }
+    })
 }
 
 /// Kills a Pikmin outright (a pit, a hazard the host decides on).
@@ -2263,14 +2424,16 @@ pub unsafe extern "C" fn pik_sim_freeze_pikis_in_sphere(
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_kill_piki(sim: *mut PikSim, piki: u32) {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, (), |s| {
-            if (piki as usize) < s.sim.pikis().len() {
-                s.sim.kill_piki(PikiId(piki));
-            }
-        })
-    }
+    libcommon::ffi::guard("pik_sim_kill_piki", (), || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, (), |s| {
+                if (piki as usize) < s.sim.pikis().len() {
+                    s.sim.kill_piki(PikiId(piki));
+                }
+            })
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2283,8 +2446,10 @@ pub unsafe extern "C" fn pik_sim_kill_piki(sim: *mut PikSim, piki: u32) {
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_onion_in_reach(sim: *mut PikSim, captain: u32) -> i32 {
-    // SAFETY: as documented.
-    unsafe { with(sim, -1, |s| s.sim.onion_in_reach(CaptainId(captain)).map_or(-1, |o| o.0 as i32)) }
+    libcommon::ffi::guard("pik_sim_onion_in_reach", -1, || {
+        // SAFETY: as documented.
+        unsafe { with(sim, -1, |s| s.sim.onion_in_reach(CaptainId(captain)).map_or(-1, |o| o.0 as i32)) }
+    })
 }
 
 /// Fills `out` with what the Onion window would show for `color`. Returns 0 for a bad id.
@@ -2299,29 +2464,31 @@ pub unsafe extern "C" fn pik_sim_onion_counts(
     color: u32,
     out: *mut PikOnionCounts,
 ) -> u8 {
-    // SAFETY: as documented.
-    let Some(out) = (unsafe { out.as_mut() }) else {
-        return 0;
-    };
-    let Some(color) = color_arg(color) else {
-        return 0;
-    };
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            if !onion_ok(&s.sim, onion) {
-                return 0;
-            }
-            let c = s.sim.onion_counts(OnionId(onion), CaptainId(captain), color);
-            *out = PikOnionCounts {
-                in_onion: c.in_onion,
-                in_squad: c.in_squad,
-                on_field: c.on_field,
-                max_on_field: c.max_on_field,
-            };
-            1
-        })
-    }
+    libcommon::ffi::guard("pik_sim_onion_counts", 0, || {
+        // SAFETY: as documented.
+        let Some(out) = (unsafe { out.as_mut() }) else {
+            return 0;
+        };
+        let Some(color) = color_arg(color) else {
+            return 0;
+        };
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                if !onion_ok(&s.sim, onion) {
+                    return 0;
+                }
+                let c = s.sim.onion_counts(OnionId(onion), CaptainId(captain), color);
+                *out = PikOnionCounts {
+                    in_onion: c.in_onion,
+                    in_squad: c.in_squad,
+                    on_field: c.on_field,
+                    max_on_field: c.max_on_field,
+                };
+                1
+            })
+        }
+    })
 }
 
 /// Sends up to `n` of `captain`'s squad Pikmin of `color` into the Onion
@@ -2334,16 +2501,18 @@ pub unsafe extern "C" fn pik_sim_onion_counts(
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_adopt_orphans(sim: *mut PikSim, from: u32, to: u32) -> u32 {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            let n = s.sim.captains().len() as u32;
-            if from >= n || to >= n {
-                return 0;
-            }
-            s.sim.adopt_orphans(CaptainId(from), CaptainId(to))
-        })
-    }
+    libcommon::ffi::guard("pik_sim_adopt_orphans", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                let n = s.sim.captains().len() as u32;
+                if from >= n || to >= n {
+                    return 0;
+                }
+                s.sim.adopt_orphans(CaptainId(from), CaptainId(to))
+            })
+        }
+    })
 }
 
 /// The Pikmin captain `from` left behind go into the landed Onion `onion`; returns how many.
@@ -2352,15 +2521,17 @@ pub unsafe extern "C" fn pik_sim_adopt_orphans(sim: *mut PikSim, from: u32, to: 
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_send_orphans_home(sim: *mut PikSim, from: u32, onion: u32) -> u32 {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            if !onion_ok(&s.sim, onion) || from as usize >= s.sim.captains().len() {
-                return 0;
-            }
-            s.sim.send_orphans_home(CaptainId(from), OnionId(onion))
-        })
-    }
+    libcommon::ffi::guard("pik_sim_send_orphans_home", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                if !onion_ok(&s.sim, onion) || from as usize >= s.sim.captains().len() {
+                    return 0;
+                }
+                s.sim.send_orphans_home(CaptainId(from), OnionId(onion))
+            })
+        }
+    })
 }
 
 /// How many seconds a dormant Onion still waits before reviving (0 wakes it).
@@ -2369,31 +2540,35 @@ pub unsafe extern "C" fn pik_sim_send_orphans_home(sim: *mut PikSim, from: u32, 
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_onion_dormancy_seconds(sim: *mut PikSim, onion: u32, seconds: f32) {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, (), |s| {
-            if onion_ok(&s.sim, onion) {
-                s.sim.set_onion_dormancy_seconds(OnionId(onion), seconds);
-            }
-        })
-    }
+    libcommon::ffi::guard("pik_sim_set_onion_dormancy_seconds", (), || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, (), |s| {
+                if onion_ok(&s.sim, onion) {
+                    s.sim.set_onion_dormancy_seconds(OnionId(onion), seconds);
+                }
+            })
+        }
+    })
 }
 
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_onion_put_away(sim: *mut PikSim, captain: u32, onion: u32, color: u32, n: u32) -> u32 {
-    let Some(color) = color_arg(color) else {
-        return 0;
-    };
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            if !onion_ok(&s.sim, onion) || captain as usize >= s.sim.captains().len() {
-                return 0;
-            }
-            s.sim.onion_put_away(CaptainId(captain), OnionId(onion), color, n)
-        })
-    }
+    libcommon::ffi::guard("pik_sim_onion_put_away", 0, || {
+        let Some(color) = color_arg(color) else {
+            return 0;
+        };
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                if !onion_ok(&s.sim, onion) || captain as usize >= s.sim.captains().len() {
+                    return 0;
+                }
+                s.sim.onion_put_away(CaptainId(captain), OnionId(onion), color, n)
+            })
+        }
+    })
 }
 
 /// Onion Ride ends: `captain`'s Pikmin still climbing into `onion` rejoin his squad. Returns how many.
@@ -2402,15 +2577,17 @@ pub unsafe extern "C" fn pik_sim_onion_put_away(sim: *mut PikSim, captain: u32, 
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_onion_cancel_entries(sim: *mut PikSim, captain: u32, onion: u32) -> u32 {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            if !onion_ok(&s.sim, onion) || captain as usize >= s.sim.captains().len() {
-                return 0;
-            }
-            s.sim.onion_cancel_entries(CaptainId(captain), OnionId(onion))
-        })
-    }
+    libcommon::ffi::guard("pik_sim_onion_cancel_entries", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                if !onion_ok(&s.sim, onion) || captain as usize >= s.sim.captains().len() {
+                    return 0;
+                }
+                s.sim.onion_cancel_entries(CaptainId(captain), OnionId(onion))
+            })
+        }
+    })
 }
 
 /// Onion Ride's sneeze: lets up to `n` Pikmin of `color` out of `onion` at once, a third down each leg, to join
@@ -2420,18 +2597,20 @@ pub unsafe extern "C" fn pik_sim_onion_cancel_entries(sim: *mut PikSim, captain:
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_onion_burst_out(sim: *mut PikSim, captain: u32, onion: u32, color: u32, n: u32) -> u32 {
-    let Some(color) = color_arg(color) else {
-        return 0;
-    };
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            if !onion_ok(&s.sim, onion) || captain as usize >= s.sim.captains().len() {
-                return 0;
-            }
-            s.sim.onion_burst_out(CaptainId(captain), OnionId(onion), color, n)
-        })
-    }
+    libcommon::ffi::guard("pik_sim_onion_burst_out", 0, || {
+        let Some(color) = color_arg(color) else {
+            return 0;
+        };
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                if !onion_ok(&s.sim, onion) || captain as usize >= s.sim.captains().len() {
+                    return 0;
+                }
+                s.sim.onion_burst_out(CaptainId(captain), OnionId(onion), color, n)
+            })
+        }
+    })
 }
 
 /// Calls up to `n` Pikmin of `color` out of the Onion to join `captain` (`GoalItem::exitPikis`),
@@ -2441,18 +2620,20 @@ pub unsafe extern "C" fn pik_sim_onion_burst_out(sim: *mut PikSim, captain: u32,
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_onion_call_out(sim: *mut PikSim, captain: u32, onion: u32, color: u32, n: u32) -> u32 {
-    let Some(color) = color_arg(color) else {
-        return 0;
-    };
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            if !onion_ok(&s.sim, onion) || captain as usize >= s.sim.captains().len() {
-                return 0;
-            }
-            s.sim.onion_call_out(CaptainId(captain), OnionId(onion), color, n)
-        })
-    }
+    libcommon::ffi::guard("pik_sim_onion_call_out", 0, || {
+        let Some(color) = color_arg(color) else {
+            return 0;
+        };
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                if !onion_ok(&s.sim, onion) || captain as usize >= s.sim.captains().len() {
+                    return 0;
+                }
+                s.sim.onion_call_out(CaptainId(captain), OnionId(onion), color, n)
+            })
+        }
+    })
 }
 
 /// Sacrifice unreserved Onion stock, keeping one inside. Leaf/bud/flower restore 5/10/20%.
@@ -2461,9 +2642,11 @@ pub unsafe extern "C" fn pik_sim_onion_call_out(sim: *mut PikSim, captain: u32, 
 /// `sim` from `pik_sim_new`; `killed` null or writable for one u32.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_sacrifice_onion(sim: *mut PikSim, onion: u32, missing: f32, killed: *mut u32) -> f32 {
-    let (count, fraction) = unsafe { with(sim, (0, 0.0), |s| s.sim.sacrifice_onion_stock(OnionId(onion), missing)) };
-    if !killed.is_null() { unsafe { *killed = count; } }
-    fraction
+    libcommon::ffi::guard("pik_sim_sacrifice_onion", 0.0, || {
+        let (count, fraction) = unsafe { with(sim, (0, 0.0), |s| s.sim.sacrifice_onion_stock(OnionId(onion), missing)) };
+        if !killed.is_null() { unsafe { *killed = count; } }
+        fraction
+    })
 }
 
 /// Puts `n` Pikmin of `color` at leaf stage `happa` (0 leaf, 1 bud, 2 flower) straight into an
@@ -2473,17 +2656,19 @@ pub unsafe extern "C" fn pik_sim_sacrifice_onion(sim: *mut PikSim, onion: u32, m
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_store_in_onion(sim: *mut PikSim, onion: u32, color: u32, happa: u32, n: u32) {
-    let (Some(color), Some(happa)) = (color_arg(color), happa_arg(happa)) else {
-        return;
-    };
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, (), |s| {
-            if onion_ok(&s.sim, onion) {
-                s.sim.store_in_onion(OnionId(onion), color, happa, n);
-            }
-        })
-    }
+    libcommon::ffi::guard("pik_sim_store_in_onion", (), || {
+        let (Some(color), Some(happa)) = (color_arg(color), happa_arg(happa)) else {
+            return;
+        };
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, (), |s| {
+                if onion_ok(&s.sim, onion) {
+                    s.sim.store_in_onion(OnionId(onion), color, happa, n);
+                }
+            })
+        }
+    })
 }
 
 /// A real Onion (the ship has no menu).
@@ -2495,35 +2680,37 @@ fn onion_ok(sim: &Sim, onion: u32) -> bool {
 /// `sim` from [`pik_sim_new`]; `out` writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_captain(sim: *mut PikSim, captain: u32, out: *mut PikCaptain) -> u8 {
-    // SAFETY: as documented.
-    let Some(out) = (unsafe { out.as_mut() }) else {
-        return 0;
-    };
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            let Some(c) = s.sim.captains().get(captain as usize) else {
-                return 0;
-            };
-            let id = CaptainId(captain);
-            let squad = s.sim.pikis().iter().filter(|p| p.captain == Some(id) && p.state.in_squad()).count();
-            *out = PikCaptain {
-                pos: c.pos.into(),
-                vel: c.vel.into(),
-                face: c.face,
-                cursor_world: c.cursor_world.into(),
-                whistle_radius: c.whistle_radius(s.sim.params()),
-                health: c.health,
-                held_piki: c.held_piki().map_or(-1, |p| p.0 as i32),
-                squad: squad as u32,
-                on_ground: c.on_ground as u8,
-                down: c.down as u8,
-                throwing: matches!(c.throw, libpikmin::captain::ThrowState::Wait { .. }) as u8,
-                plucking: c.pluck.is_some() as u8,
-            };
-            1
-        })
-    }
+    libcommon::ffi::guard("pik_sim_captain", 0, || {
+        // SAFETY: as documented.
+        let Some(out) = (unsafe { out.as_mut() }) else {
+            return 0;
+        };
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                let Some(c) = s.sim.captains().get(captain as usize) else {
+                    return 0;
+                };
+                let id = CaptainId(captain);
+                let squad = s.sim.pikis().iter().filter(|p| p.captain == Some(id) && p.state.in_squad()).count();
+                *out = PikCaptain {
+                    pos: c.pos.into(),
+                    vel: c.vel.into(),
+                    face: c.face,
+                    cursor_world: c.cursor_world.into(),
+                    whistle_radius: c.whistle_radius(s.sim.params()),
+                    health: c.health,
+                    held_piki: c.held_piki().map_or(-1, |p| p.0 as i32),
+                    squad: squad as u32,
+                    on_ground: c.on_ground as u8,
+                    down: c.down as u8,
+                    throwing: matches!(c.throw, libpikmin::captain::ThrowState::Wait { .. }) as u8,
+                    plucking: c.pluck.is_some() as u8,
+                };
+                1
+            })
+        }
+    })
 }
 
 /// Copies up to `max` Pikmin (by id, the dead included) into `out`. Returns how many there are
@@ -2533,43 +2720,45 @@ pub unsafe extern "C" fn pik_sim_captain(sim: *mut PikSim, captain: u32, out: *m
 /// `sim` from [`pik_sim_new`]; `out` writable for `max` (or null if 0).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_pikis(sim: *mut PikSim, out: *mut PikPiki, max: u32) -> u32 {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            let all = s.sim.pikis();
-            for (i, p) in all.iter().take(max as usize).enumerate() {
-                let (creature, pellet) = match p.state {
-                    PikiState::Attack(a) => (Some(a.target), None),
-                    PikiState::Swallowed { creature, .. } => (Some(creature), None),
-                    PikiState::Carry(c) => (None, Some(c.pellet.0)),
-                    _ => (None, None),
-                };
-                let v = PikPiki {
-                    creature: creature.unwrap_or(0),
-                    pos: p.pos.into(),
-                    vel: p.vel.into(),
-                    face: p.face,
-                    size: p.size,
-                    id: p.id.0,
-                    generation: p.generation,
-                    captain: p.captain.map_or(-1, |c| c.0 as i32),
-                    pellet: pellet.map_or(-1, |id| id as i32),
-                    health: p.health,
-                    state: state_code(&p.state),
-                    color: p.color.index() as u8,
-                    happa: happa_code(p.happa),
-                    alive: p.is_alive() as u8,
-                    has_creature: creature.is_some() as u8,
-                    on_ground: p.on_ground as u8,
-                    frozen: (p.frozen > 0.0) as u8,
-                    _pad: 0,
-                };
-                // SAFETY: `i < max`, which the caller promised is writable.
-                out.add(i).write(v);
-            }
-            all.len() as u32
-        })
-    }
+    libcommon::ffi::guard("pik_sim_pikis", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                let all = s.sim.pikis();
+                for (i, p) in all.iter().take(max as usize).enumerate() {
+                    let (creature, pellet) = match p.state {
+                        PikiState::Attack(a) => (Some(a.target), None),
+                        PikiState::Swallowed { creature, .. } => (Some(creature), None),
+                        PikiState::Carry(c) => (None, Some(c.pellet.0)),
+                        _ => (None, None),
+                    };
+                    let v = PikPiki {
+                        creature: creature.unwrap_or(0),
+                        pos: p.pos.into(),
+                        vel: p.vel.into(),
+                        face: p.face,
+                        size: p.size,
+                        id: p.id.0,
+                        generation: p.generation,
+                        captain: p.captain.map_or(-1, |c| c.0 as i32),
+                        pellet: pellet.map_or(-1, |id| id as i32),
+                        health: p.health,
+                        state: state_code(&p.state),
+                        color: p.color.index() as u8,
+                        happa: happa_code(p.happa),
+                        alive: p.is_alive() as u8,
+                        has_creature: creature.is_some() as u8,
+                        on_ground: p.on_ground as u8,
+                        frozen: (p.frozen > 0.0) as u8,
+                        _pad: 0,
+                    };
+                    // SAFETY: `i < max`, which the caller promised is writable.
+                    out.add(i).write(v);
+                }
+                all.len() as u32
+            })
+        }
+    })
 }
 
 /// Copies up to `max` pellets into `out`. Returns how many there are in all.
@@ -2578,41 +2767,43 @@ pub unsafe extern "C" fn pik_sim_pikis(sim: *mut PikSim, out: *mut PikPiki, max:
 /// `sim` from [`pik_sim_new`]; `out` writable for `max` (or null if 0).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_pellets(sim: *mut PikSim, out: *mut PikPellet, max: u32) -> u32 {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            let all = s.sim.pellets();
-            for (i, p) in all.iter().take(max as usize).enumerate() {
-                let (state, onion) = match &p.state {
-                    PelletState::Idle => (0, -1),
-                    PelletState::Carried { onion, .. } => (1, onion.0 as i32),
-                    PelletState::Sucking { onion, .. } => (2, onion.0 as i32),
-                    PelletState::Gone => (3, -1),
-                    PelletState::Held => (4, -1),
-                };
-                let v = PikPellet {
-                    creature: p.desc.creature.unwrap_or(0),
-                    pos: p.pos.into(),
-                    yaw: p.yaw,
-                    radius: p.desc.radius,
-                    scale: p.scale,
-                    id: p.id.0,
-                    onion,
-                    carriers: p.carriers.len() as u32,
-                    min_carriers: p.desc.min_carriers,
-                    max_carriers: p.desc.max_carriers,
-                    state,
-                    has_creature: p.desc.creature.is_some() as u8,
-                    has_ship_part: p.desc.ship_part.is_some() as u8,
-                    color: p.desc.color.map_or(255, |c| c as u8),
-                    _pad: [0; 4],
-                };
-                // SAFETY: `i < max`, which the caller promised is writable.
-                out.add(i).write(v);
-            }
-            all.len() as u32
-        })
-    }
+    libcommon::ffi::guard("pik_sim_pellets", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                let all = s.sim.pellets();
+                for (i, p) in all.iter().take(max as usize).enumerate() {
+                    let (state, onion) = match &p.state {
+                        PelletState::Idle => (0, -1),
+                        PelletState::Carried { onion, .. } => (1, onion.0 as i32),
+                        PelletState::Sucking { onion, .. } => (2, onion.0 as i32),
+                        PelletState::Gone => (3, -1),
+                        PelletState::Held => (4, -1),
+                    };
+                    let v = PikPellet {
+                        creature: p.desc.creature.unwrap_or(0),
+                        pos: p.pos.into(),
+                        yaw: p.yaw,
+                        radius: p.desc.radius,
+                        scale: p.scale,
+                        id: p.id.0,
+                        onion,
+                        carriers: p.carriers.len() as u32,
+                        min_carriers: p.desc.min_carriers,
+                        max_carriers: p.desc.max_carriers,
+                        state,
+                        has_creature: p.desc.creature.is_some() as u8,
+                        has_ship_part: p.desc.ship_part.is_some() as u8,
+                        color: p.desc.color.map_or(255, |c| c as u8),
+                        _pad: [0; 4],
+                    };
+                    // SAFETY: `i < max`, which the caller promised is writable.
+                    out.add(i).write(v);
+                }
+                all.len() as u32
+            })
+        }
+    })
 }
 
 /// Copies up to `max` Onions into `out`. Returns how many there are in all.
@@ -2621,34 +2812,36 @@ pub unsafe extern "C" fn pik_sim_pellets(sim: *mut PikSim, out: *mut PikPellet, 
 /// `sim` from [`pik_sim_new`]; `out` writable for `max` (or null if 0).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_onions(sim: *mut PikSim, out: *mut PikOnion, max: u32) -> u32 {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            let all = s.sim.onions();
-            for (i, o) in all.iter().take(max as usize).enumerate() {
-                let v = PikOnion {
-                    pos: o.pos.into(),
-                    id: o.id.0,
-                    colors: o.colors.iter().fold(0, |m, c| m | 1 << c.index()),
-                    stored: o.stored.map(|by_happa| by_happa.iter().sum()),
-                    anim: if let Some(d) = o.dormancy { if d.reviving { 8 } else { 7 } } else { match o.anim {
-                        OnionAnim::Idle => 0,
-                        OnionAnim::Hover => 6,
-                        OnionAnim::Suction { .. } => 1,
-                        OnionAnim::Emitting { .. } => 2,
-                        OnionAnim::TakeOff { .. } => 3,
-                        OnionAnim::Away => 4,
-                        OnionAnim::Landing { .. } => 5,
-                    } },
-                    is_ship: o.ship.is_some() as u8,
-                    _pad: [0; 2],
-                };
-                // SAFETY: `i < max`, which the caller promised is writable.
-                out.add(i).write(v);
-            }
-            all.len() as u32
-        })
-    }
+    libcommon::ffi::guard("pik_sim_onions", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                let all = s.sim.onions();
+                for (i, o) in all.iter().take(max as usize).enumerate() {
+                    let v = PikOnion {
+                        pos: o.pos.into(),
+                        id: o.id.0,
+                        colors: o.colors.iter().fold(0, |m, c| m | 1 << c.index()),
+                        stored: o.stored.map(|by_happa| by_happa.iter().sum()),
+                        anim: if let Some(d) = o.dormancy { if d.reviving { 8 } else { 7 } } else { match o.anim {
+                            OnionAnim::Idle => 0,
+                            OnionAnim::Hover => 6,
+                            OnionAnim::Suction { .. } => 1,
+                            OnionAnim::Emitting { .. } => 2,
+                            OnionAnim::TakeOff { .. } => 3,
+                            OnionAnim::Away => 4,
+                            OnionAnim::Landing { .. } => 5,
+                        } },
+                        is_ship: o.ship.is_some() as u8,
+                        _pad: [0; 2],
+                    };
+                    // SAFETY: `i < max`, which the caller promised is writable.
+                    out.add(i).write(v);
+                }
+                all.len() as u32
+            })
+        }
+    })
 }
 
 /// Returns a receiver's actual carry destination, including the Dolphin's offset.
@@ -2656,12 +2849,14 @@ pub unsafe extern "C" fn pik_sim_onions(sim: *mut PikSim, out: *mut PikOnion, ma
 /// `sim` is live and `out` is writable for one vector.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_onion_goal(sim: *mut PikSim, id: u32, out: *mut PikVec3) -> u32 {
-    if out.is_null() { return 0; }
-    unsafe { with(sim, 0, |s| {
-        let Some(o) = s.sim.onions().iter().find(|o| o.id.0 == id) else { return 0; };
-        out.write(o.goal_pos().into());
-        1
-    }) }
+    libcommon::ffi::guard("pik_sim_onion_goal", 0, || {
+        if out.is_null() { return 0; }
+        unsafe { with(sim, 0, |s| {
+            let Some(o) = s.sim.onions().iter().find(|o| o.id.0 == id) else { return 0; };
+            out.write(o.goal_pos().into());
+            1
+        }) }
+    })
 }
 
 /// Plants a Candypop Bud ([`libpikmin::bulb`]) of colour `colour` at `pos`; `queen` makes it the rainbow Pop. Returns its
@@ -2671,11 +2866,13 @@ pub unsafe extern "C" fn pik_sim_onion_goal(sim: *mut PikSim, id: u32, out: *mut
 /// `sim` from [`pik_sim_new`]; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_add_bulb(sim: *mut PikSim, colour: u32, queen: u32, pos: *const PikVec3) -> i32 {
-    // SAFETY: as documented.
-    let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return -1 };
-    let Some(colour) = color_arg(colour) else { return -1 };
-    // SAFETY: as documented.
-    unsafe { with(sim, -1, |s| s.sim.add_bulb(colour, queen != 0, pos.into()).0 as i32) }
+    libcommon::ffi::guard("pik_sim_add_bulb", -1, || {
+        // SAFETY: as documented.
+        let Some(pos) = (unsafe { pos.as_ref() }).copied() else { return -1 };
+        let Some(colour) = color_arg(colour) else { return -1 };
+        // SAFETY: as documented.
+        unsafe { with(sim, -1, |s| s.sim.add_bulb(colour, queen != 0, pos.into()).0 as i32) }
+    })
 }
 
 /// Takes the Candypop Bud `id` away.
@@ -2684,8 +2881,10 @@ pub unsafe extern "C" fn pik_sim_add_bulb(sim: *mut PikSim, colour: u32, queen: 
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_remove_bulb(sim: *mut PikSim, id: u32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.remove_bulb(libpikmin::BulbId(id))) }
+    libcommon::ffi::guard("pik_sim_remove_bulb", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.remove_bulb(libpikmin::BulbId(id))) }
+    })
 }
 
 /// Copies up to `max` Candypop Buds into `out`. Returns how many there are in all.
@@ -2694,34 +2893,36 @@ pub unsafe extern "C" fn pik_sim_remove_bulb(sim: *mut PikSim, id: u32) {
 /// `sim` from [`pik_sim_new`]; `out` writable for `max` (or null if 0).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_bulbs(sim: *mut PikSim, out: *mut PikBulb, max: u32) -> u32 {
-    use libpikmin::BulbState;
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            let bulbs = s.sim.bulbs();
-            for (i, b) in bulbs.iter().take(max as usize).enumerate() {
-                let (state, t) = match b.state {
-                    BulbState::Open { t } => (if b.used > 0 || t >= libpikmin::bulb::OPEN_TIME { 1 } else { 0 }, t),
-                    BulbState::Swing { t } => (1, t),
-                    BulbState::Close { t } => (2, t),
-                    BulbState::Shot { t, .. } => (3, t),
-                    BulbState::Dead { t } => (4, t),
-                };
-                let v = PikBulb {
-                    pos: b.pos.into(),
-                    id: b.id.0,
-                    colour: b.colour.index() as u32,
-                    queen: b.queen as u32,
-                    state,
-                    t,
-                    free: b.slots().saturating_sub(b.used),
-                };
-                // SAFETY: `i < max`, which the caller promised is writable.
-                out.add(i).write(v);
-            }
-            bulbs.len() as u32
-        })
-    }
+    libcommon::ffi::guard("pik_sim_bulbs", 0, || {
+        use libpikmin::BulbState;
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                let bulbs = s.sim.bulbs();
+                for (i, b) in bulbs.iter().take(max as usize).enumerate() {
+                    let (state, t) = match b.state {
+                        BulbState::Open { t } => (if b.used > 0 || t >= libpikmin::bulb::OPEN_TIME { 1 } else { 0 }, t),
+                        BulbState::Swing { t } => (1, t),
+                        BulbState::Close { t } => (2, t),
+                        BulbState::Shot { t, .. } => (3, t),
+                        BulbState::Dead { t } => (4, t),
+                    };
+                    let v = PikBulb {
+                        pos: b.pos.into(),
+                        id: b.id.0,
+                        colour: b.colour.index() as u32,
+                        queen: b.queen as u32,
+                        state,
+                        t,
+                        free: b.slots().saturating_sub(b.used),
+                    };
+                    // SAFETY: `i < max`, which the caller promised is writable.
+                    out.add(i).write(v);
+                }
+                bulbs.len() as u32
+            })
+        }
+    })
 }
 
 /// How much weight of Pikmin brings the flying creature `creature` down ([`libpikmin::weigh`]: 5 small, 15 large,
@@ -2731,22 +2932,26 @@ pub unsafe extern "C" fn pik_sim_bulbs(sim: *mut PikSim, out: *mut PikBulb, max:
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_ground_need(sim: *mut PikSim, creature: u64, need: u32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.set_ground_need(creature, need)) }
+    libcommon::ffi::guard("pik_sim_set_ground_need", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.set_ground_need(creature, need)) }
+    })
 }
 
 /// The weight of Pikmin that brings a flying creature of a class down ([`libpikmin::weigh`]): 0 a small flier (5), 1 a large
 /// one (15), 2 a boss (25), 3 a projectile that can be shot (1). A Purple counts five. 0 for any other class.
 #[unsafe(no_mangle)]
 pub extern "C" fn pik_weigh_need(kind: u32) -> u32 {
-    use libpikmin::weigh;
-    match kind {
-        0 => weigh::SMALL,
-        1 => weigh::LARGE,
-        2 => weigh::BOSS,
-        3 => weigh::PROJECTILE,
-        _ => 0,
-    }
+    libcommon::ffi::guard("pik_weigh_need", 0, || {
+        use libpikmin::weigh;
+        match kind {
+            0 => weigh::SMALL,
+            1 => weigh::LARGE,
+            2 => weigh::BOSS,
+            3 => weigh::PROJECTILE,
+            _ => 0,
+        }
+    })
 }
 
 /// Copies up to `max` sprouts in the ground or in the air into `out`. Returns how many there
@@ -2756,34 +2961,36 @@ pub extern "C" fn pik_weigh_need(kind: u32) -> u32 {
 /// `sim` from [`pik_sim_new`]; `out` writable for `max` (or null if 0).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_sprouts(sim: *mut PikSim, out: *mut PikSprout, max: u32) -> u32 {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            let mut n = 0u32;
-            for sp in s.sim.sprouts() {
-                if n < max {
-                    let v = PikSprout {
-                        pos: sp.pos.into(),
-                        id: sp.id.0,
-                        color: sp.color.index() as u8,
-                        happa: happa_code(sp.happa),
-                        state: match sp.state {
-                            SproutState::Flying => 0,
-                            SproutState::Buried { .. } => 1,
-                            SproutState::Tane { .. } => 2,
-                            SproutState::Ready { .. } => 3,
-                            SproutState::Wilted { .. } => 4,
-                        },
-                        _pad: 0,
-                    };
-                    // SAFETY: `n < max`, which the caller promised is writable.
-                    out.add(n as usize).write(v);
+    libcommon::ffi::guard("pik_sim_sprouts", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                let mut n = 0u32;
+                for sp in s.sim.sprouts() {
+                    if n < max {
+                        let v = PikSprout {
+                            pos: sp.pos.into(),
+                            id: sp.id.0,
+                            color: sp.color.index() as u8,
+                            happa: happa_code(sp.happa),
+                            state: match sp.state {
+                                SproutState::Flying => 0,
+                                SproutState::Buried { .. } => 1,
+                                SproutState::Tane { .. } => 2,
+                                SproutState::Ready { .. } => 3,
+                                SproutState::Wilted { .. } => 4,
+                            },
+                            _pad: 0,
+                        };
+                        // SAFETY: `n < max`, which the caller promised is writable.
+                        out.add(n as usize).write(v);
+                    }
+                    n += 1;
                 }
-                n += 1;
-            }
-            n
-        })
-    }
+                n
+            })
+        }
+    })
 }
 
 /// Moves up to `max` of the events since the last call into `out`, oldest first, and returns
@@ -2793,23 +3000,25 @@ pub unsafe extern "C" fn pik_sim_sprouts(sim: *mut PikSim, out: *mut PikSprout, 
 /// `sim` from [`pik_sim_new`]; `out` writable for `max`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_events(sim: *mut PikSim, out: *mut PikEvent, max: u32) -> u32 {
-    if out.is_null() {
-        return 0;
-    }
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, 0, |s| {
-            let mut n = 0;
-            while n < max as usize
-                && let Some(e) = s.pending.pop_front()
-            {
-                // SAFETY: `n < max`, which the caller promised is writable.
-                out.add(n).write(event(e));
-                n += 1;
-            }
-            n as u32
-        })
-    }
+    libcommon::ffi::guard("pik_sim_events", 0, || {
+        if out.is_null() {
+            return 0;
+        }
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| {
+                let mut n = 0;
+                while n < max as usize
+                    && let Some(e) = s.pending.pop_front()
+                {
+                    // SAFETY: `n < max`, which the caller promised is writable.
+                    out.add(n).write(event(e));
+                    n += 1;
+                }
+                n as u32
+            })
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -3015,8 +3224,10 @@ fn captain_ok(sim: &Sim, captain: u32) -> bool {
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_captain_attack_rate(sim: *mut PikSim, captain: u32, rate: f32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.set_captain_attack_rate(CaptainId(captain), rate) }) }
+    libcommon::ffi::guard("pik_sim_set_captain_attack_rate", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.set_captain_attack_rate(CaptainId(captain), rate) }) }
+    })
 }
 
 /// [`Sim::set_squad_speed`].
@@ -3025,8 +3236,10 @@ pub unsafe extern "C" fn pik_sim_set_captain_attack_rate(sim: *mut PikSim, capta
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_squad_speed(sim: *mut PikSim, captain: u32, scale: f32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.set_squad_speed(CaptainId(captain), scale) }) }
+    libcommon::ffi::guard("pik_sim_set_squad_speed", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.set_squad_speed(CaptainId(captain), scale) }) }
+    })
 }
 
 /// [`Sim::set_captain_motion`]: his jumps' takeoff speed and his acceleration as multiples of
@@ -3036,8 +3249,10 @@ pub unsafe extern "C" fn pik_sim_set_squad_speed(sim: *mut PikSim, captain: u32,
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_captain_motion(sim: *mut PikSim, captain: u32, jump: f32, accel: f32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.set_captain_motion(CaptainId(captain), jump, accel) }) }
+    libcommon::ffi::guard("pik_sim_set_captain_motion", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.set_captain_motion(CaptainId(captain), jump, accel) }) }
+    })
 }
 
 /// Match a host's jump height; squad jumps inherit the same takeoff speed.
@@ -3045,7 +3260,9 @@ pub unsafe extern "C" fn pik_sim_set_captain_motion(sim: *mut PikSim, captain: u
 /// `sim` from `pik_sim_new`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_captain_jump_height(sim: *mut PikSim, captain: u32, height: f32) {
-    unsafe { with(sim, (), |s| s.sim.set_captain_jump_height(CaptainId(captain), height)) }
+    libcommon::ffi::guard("pik_sim_set_captain_jump_height", (), || {
+        unsafe { with(sim, (), |s| s.sim.set_captain_jump_height(CaptainId(captain), height)) }
+    })
 }
 
 /// [`Sim::set_captain_air_jumps`] and [`Sim::set_captain_stomp`].
@@ -3054,15 +3271,17 @@ pub unsafe extern "C" fn pik_sim_set_captain_jump_height(sim: *mut PikSim, capta
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_captain_jumps(sim: *mut PikSim, captain: u32, air_jumps: u32, stomp: u8) {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, (), |s| {
-            if captain_ok(&s.sim, captain) {
-                s.sim.set_captain_air_jumps(CaptainId(captain), air_jumps);
-                s.sim.set_captain_stomp(CaptainId(captain), stomp != 0);
-            }
-        })
-    }
+    libcommon::ffi::guard("pik_sim_set_captain_jumps", (), || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, (), |s| {
+                if captain_ok(&s.sim, captain) {
+                    s.sim.set_captain_air_jumps(CaptainId(captain), air_jumps);
+                    s.sim.set_captain_stomp(CaptainId(captain), stomp != 0);
+                }
+            })
+        }
+    })
 }
 
 /// [`Sim::boost_captain_jump`] (Wax Quail).
@@ -3071,8 +3290,10 @@ pub unsafe extern "C" fn pik_sim_set_captain_jumps(sim: *mut PikSim, captain: u3
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_boost_captain_jump(sim: *mut PikSim, captain: u32, factor: f32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.boost_captain_jump(CaptainId(captain), factor) }) }
+    libcommon::ffi::guard("pik_sim_boost_captain_jump", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.boost_captain_jump(CaptainId(captain), factor) }) }
+    })
 }
 
 /// [`Sim::set_sprout_stages`]: seconds per planted sprout's stage and its flower's time
@@ -3082,8 +3303,10 @@ pub unsafe extern "C" fn pik_sim_boost_captain_jump(sim: *mut PikSim, captain: u
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_sprout_stages(sim: *mut PikSim, stage: f32, flower: f32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.set_sprout_stages(stage, flower)) }
+    libcommon::ffi::guard("pik_sim_set_sprout_stages", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.set_sprout_stages(stage, flower)) }
+    })
 }
 
 /// [`Sim::set_kill_growth`]: credited kills per growth stage (0: off).
@@ -3092,8 +3315,10 @@ pub unsafe extern "C" fn pik_sim_set_sprout_stages(sim: *mut PikSim, stage: f32,
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_kill_growth(sim: *mut PikSim, kills: u32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.set_kill_growth(kills)) }
+    libcommon::ffi::guard("pik_sim_set_kill_growth", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.set_kill_growth(kills)) }
+    })
 }
 
 /// [`Sim::credit_kill`]: creature `creature` (the host's handle) died. Returns how many
@@ -3103,8 +3328,10 @@ pub unsafe extern "C" fn pik_sim_set_kill_growth(sim: *mut PikSim, kills: u32) {
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_credit_kill(sim: *mut PikSim, creature: u64) -> u32 {
-    // SAFETY: as documented.
-    unsafe { with(sim, 0, |s| s.sim.credit_kill(creature)) }
+    libcommon::ffi::guard("pik_sim_credit_kill", 0, || {
+        // SAFETY: as documented.
+        unsafe { with(sim, 0, |s| s.sim.credit_kill(creature)) }
+    })
 }
 
 /// [`Sim::attackers_by_colour`]: how many living Pikmin of each colour (blue, red, yellow, written to
@@ -3114,13 +3341,15 @@ pub unsafe extern "C" fn pik_sim_credit_kill(sim: *mut PikSim, creature: u64) ->
 /// `sim` from [`pik_sim_new`]; `out` is null or has room for 5 values.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_attackers(sim: *mut PikSim, creature: u64, out: *mut u32) -> u32 {
-    // SAFETY: as documented.
-    let by_colour = unsafe { with(sim, [0; 5], |s| s.sim.attackers_by_colour(creature)) };
-    if !out.is_null() {
-        // SAFETY: the caller promised room for 5.
-        unsafe { std::ptr::copy_nonoverlapping(by_colour.as_ptr(), out, 5) };
-    }
-    by_colour.iter().sum()
+    libcommon::ffi::guard("pik_sim_attackers", 0, || {
+        // SAFETY: as documented.
+        let by_colour = unsafe { with(sim, [0; 5], |s| s.sim.attackers_by_colour(creature)) };
+        if !out.is_null() {
+            // SAFETY: the caller promised room for 5.
+            unsafe { std::ptr::copy_nonoverlapping(by_colour.as_ptr(), out, 5) };
+        }
+        by_colour.iter().sum()
+    })
 }
 
 /// [`Sim::set_dismiss_strike`]: the dismiss button strikes (0 or less for `damage_scale`: dismisses).
@@ -3129,8 +3358,10 @@ pub unsafe extern "C" fn pik_sim_attackers(sim: *mut PikSim, creature: u64, out:
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_dismiss_strike(sim: *mut PikSim, damage_scale: f32, reach: f32, cooldown: f32, charge: f32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.set_dismiss_strike(damage_scale, reach, cooldown, charge)) }
+    libcommon::ffi::guard("pik_sim_set_dismiss_strike", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.set_dismiss_strike(damage_scale, reach, cooldown, charge)) }
+    })
 }
 
 /// [`Sim::set_punch_damage`]: the punch's damage (and so the strike's).
@@ -3139,8 +3370,10 @@ pub unsafe extern "C" fn pik_sim_set_dismiss_strike(sim: *mut PikSim, damage_sca
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_punch_damage(sim: *mut PikSim, damage: f32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.set_punch_damage(damage)) }
+    libcommon::ffi::guard("pik_sim_set_punch_damage", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.set_punch_damage(damage)) }
+    })
 }
 
 /// [`Sim::set_cursor_homing`]: throws without a lock-on are steered onto the cursor point.
@@ -3149,8 +3382,10 @@ pub unsafe extern "C" fn pik_sim_set_punch_damage(sim: *mut PikSim, damage: f32)
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_cursor_homing(sim: *mut PikSim, on: u8) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.set_cursor_homing(on != 0)) }
+    libcommon::ffi::guard("pik_sim_set_cursor_homing", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.set_cursor_homing(on != 0)) }
+    })
 }
 
 /// [`Sim::set_squad_pace`]: Pikmin speed by stage as a multiple of their captain's top speed.
@@ -3159,8 +3394,10 @@ pub unsafe extern "C" fn pik_sim_set_cursor_homing(sim: *mut PikSim, on: u8) {
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_squad_pace(sim: *mut PikSim, leaf: f32, bud: f32, flower: f32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.set_squad_pace(leaf, bud, flower)) }
+    libcommon::ffi::guard("pik_sim_set_squad_pace", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.set_squad_pace(leaf, bud, flower)) }
+    })
 }
 
 /// Cooldown items: [`Sim::set_growth_rate`] and [`Sim::set_rejoin_delay`].
@@ -3169,13 +3406,15 @@ pub unsafe extern "C" fn pik_sim_set_squad_pace(sim: *mut PikSim, leaf: f32, bud
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_growth(sim: *mut PikSim, growth_rate: f32, rejoin_delay: f32) {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, (), |s| {
-            s.sim.set_growth_rate(growth_rate);
-            s.sim.set_rejoin_delay(rejoin_delay);
-        })
-    }
+    libcommon::ffi::guard("pik_sim_set_growth", (), || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, (), |s| {
+                s.sim.set_growth_rate(growth_rate);
+                s.sim.set_rejoin_delay(rejoin_delay);
+            })
+        }
+    })
 }
 
 /// [`Sim::give_onion_seeds`]: `seeds` more of `color` for the Onion to send out (Backup
@@ -3185,15 +3424,17 @@ pub unsafe extern "C" fn pik_sim_set_growth(sim: *mut PikSim, growth_rate: f32, 
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_give_onion_seeds(sim: *mut PikSim, onion: u32, color: u32, seeds: u32) {
-    let Some(color) = color_arg(color) else { return };
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, (), |s| {
-            if onion_ok(&s.sim, onion) {
-                s.sim.give_onion_seeds(OnionId(onion), color, seeds.min(i32::MAX as u32));
-            }
-        })
-    }
+    libcommon::ffi::guard("pik_sim_give_onion_seeds", (), || {
+        let Some(color) = color_arg(color) else { return };
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, (), |s| {
+                if onion_ok(&s.sim, onion) {
+                    s.sim.give_onion_seeds(OnionId(onion), color, seeds.min(i32::MAX as u32));
+                }
+            })
+        }
+    })
 }
 
 /// [`Sim::set_auto_carry_range`], in sim units (0 off).
@@ -3202,8 +3443,10 @@ pub unsafe extern "C" fn pik_sim_give_onion_seeds(sim: *mut PikSim, onion: u32, 
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_auto_carry(sim: *mut PikSim, range: f32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.set_auto_carry_range(range)) }
+    libcommon::ffi::guard("pik_sim_set_auto_carry", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.set_auto_carry_range(range)) }
+    })
 }
 
 /// [`Sim::set_auto_pluck`]: seconds, or below 0 for off.
@@ -3212,8 +3455,10 @@ pub unsafe extern "C" fn pik_sim_set_auto_carry(sim: *mut PikSim, range: f32) {
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_auto_pluck(sim: *mut PikSim, seconds: f32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.set_auto_pluck((seconds >= 0.0).then_some(seconds))) }
+    libcommon::ffi::guard("pik_sim_set_auto_pluck", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.set_auto_pluck((seconds >= 0.0).then_some(seconds))) }
+    })
 }
 
 /// Trigger the landed Onion's plucker for ready sprouts in reach.
@@ -3221,7 +3466,9 @@ pub unsafe extern "C" fn pik_sim_set_auto_pluck(sim: *mut PikSim, seconds: f32) 
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_trigger_plucker(sim: *mut PikSim, onion: u32) -> u8 {
-    unsafe { with(sim, 0, |s| s.sim.trigger_plucker(OnionId(onion)) as u8) }
+    libcommon::ffi::guard("pik_sim_trigger_plucker", 0, || {
+        unsafe { with(sim, 0, |s| s.sim.trigger_plucker(OnionId(onion)) as u8) }
+    })
 }
 
 /// Recall a captain's carriers from pellets whose team is below minimum.
@@ -3229,7 +3476,9 @@ pub unsafe extern "C" fn pik_sim_trigger_plucker(sim: *mut PikSim, onion: u32) -
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_recall_stuck_carriers(sim: *mut PikSim, captain: u32) -> u32 {
-    unsafe { with(sim, 0, |s| s.sim.recall_stuck_carriers(CaptainId(captain)) as u32) }
+    libcommon::ffi::guard("pik_sim_recall_stuck_carriers", 0, || {
+        unsafe { with(sim, 0, |s| s.sim.recall_stuck_carriers(CaptainId(captain)) as u32) }
+    })
 }
 
 /// [`Sim::set_emergency_recovery`] (`count` 0 off).
@@ -3238,8 +3487,10 @@ pub unsafe extern "C" fn pik_sim_recall_stuck_carriers(sim: *mut PikSim, captain
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_emergency(sim: *mut PikSim, seconds: f32, count: u32) {
-    // SAFETY: as documented.
-    unsafe { with(sim, (), |s| s.sim.set_emergency_recovery(seconds, count)) }
+    libcommon::ffi::guard("pik_sim_set_emergency", (), || {
+        // SAFETY: as documented.
+        unsafe { with(sim, (), |s| s.sim.set_emergency_recovery(seconds, count)) }
+    })
 }
 
 /// [`Sim::set_onion_owner`]; `captain` below 0 for none.
@@ -3248,15 +3499,17 @@ pub unsafe extern "C" fn pik_sim_set_emergency(sim: *mut PikSim, seconds: f32, c
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_set_onion_owner(sim: *mut PikSim, onion: u32, captain: i32) {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, (), |s| {
-            if onion_ok(&s.sim, onion) {
-                let owner = (captain >= 0 && captain_ok(&s.sim, captain as u32)).then_some(CaptainId(captain as u32));
-                s.sim.set_onion_owner(OnionId(onion), owner);
-            }
-        })
-    }
+    libcommon::ffi::guard("pik_sim_set_onion_owner", (), || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, (), |s| {
+                if onion_ok(&s.sim, onion) {
+                    let owner = (captain >= 0 && captain_ok(&s.sim, captain as u32)).then_some(CaptainId(captain as u32));
+                    s.sim.set_onion_owner(OnionId(onion), owner);
+                }
+            })
+        }
+    })
 }
 
 /// [`Sim::heal_squad`]. Returns the health restored, summed.
@@ -3265,8 +3518,10 @@ pub unsafe extern "C" fn pik_sim_set_onion_owner(sim: *mut PikSim, onion: u32, c
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_heal_squad(sim: *mut PikSim, captain: u32, amount: f32) -> f32 {
-    // SAFETY: as documented.
-    unsafe { with(sim, 0.0, |s| if captain_ok(&s.sim, captain) { s.sim.heal_squad(CaptainId(captain), amount) } else { 0.0 }) }
+    libcommon::ffi::guard("pik_sim_heal_squad", 0.0, || {
+        // SAFETY: as documented.
+        unsafe { with(sim, 0.0, |s| if captain_ok(&s.sim, captain) { s.sim.heal_squad(CaptainId(captain), amount) } else { 0.0 }) }
+    })
 }
 
 /// [`Sim::heal_pikis_in_sphere`]. Returns the health restored, summed.
@@ -3275,11 +3530,13 @@ pub unsafe extern "C" fn pik_sim_heal_squad(sim: *mut PikSim, captain: u32, amou
 /// `sim` from [`pik_sim_new`]; `centre` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_heal_pikis_in_sphere(sim: *mut PikSim, centre: *const PikVec3, radius: f32, amount: f32) -> f32 {
-    // SAFETY: as documented.
-    let Some(c) = (unsafe { centre.as_ref() }).copied() else {
-        return 0.0;
-    };
-    unsafe { with(sim, 0.0, |s| s.sim.heal_pikis_in_sphere(c.into(), radius, amount)) }
+    libcommon::ffi::guard("pik_sim_heal_pikis_in_sphere", 0.0, || {
+        // SAFETY: as documented.
+        let Some(c) = (unsafe { centre.as_ref() }).copied() else {
+            return 0.0;
+        };
+        unsafe { with(sim, 0.0, |s| s.sim.heal_pikis_in_sphere(c.into(), radius, amount)) }
+    })
 }
 
 /// [`Sim::teleport_squad`].
@@ -3288,11 +3545,13 @@ pub unsafe extern "C" fn pik_sim_heal_pikis_in_sphere(sim: *mut PikSim, centre: 
 /// `sim` from [`pik_sim_new`]; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_teleport_squad(sim: *mut PikSim, captain: u32, pos: *const PikVec3) {
-    // SAFETY: as documented.
-    let Some(p) = (unsafe { pos.as_ref() }).copied() else {
-        return;
-    };
-    unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.teleport_squad(CaptainId(captain), p.into()) }) }
+    libcommon::ffi::guard("pik_sim_teleport_squad", (), || {
+        // SAFETY: as documented.
+        let Some(p) = (unsafe { pos.as_ref() }).copied() else {
+            return;
+        };
+        unsafe { with(sim, (), |s| if captain_ok(&s.sim, captain) { s.sim.teleport_squad(CaptainId(captain), p.into()) }) }
+    })
 }
 
 /// [`Sim::captain_piki_count`].
@@ -3301,8 +3560,10 @@ pub unsafe extern "C" fn pik_sim_teleport_squad(sim: *mut PikSim, captain: u32, 
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_captain_piki_count(sim: *mut PikSim, captain: u32) -> u32 {
-    // SAFETY: as documented.
-    unsafe { with(sim, 0, |s| if captain_ok(&s.sim, captain) { s.sim.captain_piki_count(CaptainId(captain)) } else { 0 }) }
+    libcommon::ffi::guard("pik_sim_captain_piki_count", 0, || {
+        // SAFETY: as documented.
+        unsafe { with(sim, 0, |s| if captain_ok(&s.sim, captain) { s.sim.captain_piki_count(CaptainId(captain)) } else { 0 }) }
+    })
 }
 
 /// [`Sim::spawn_squad`]: `count` Pikmin straight into his squad around `pos`.
@@ -3311,11 +3572,13 @@ pub unsafe extern "C" fn pik_sim_captain_piki_count(sim: *mut PikSim, captain: u
 /// `sim` from [`pik_sim_new`]; `pos` readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_spawn_squad(sim: *mut PikSim, captain: u32, pos: *const PikVec3, count: u32) -> u32 {
-    // SAFETY: as documented.
-    let Some(p) = (unsafe { pos.as_ref() }).copied() else {
-        return 0;
-    };
-    unsafe { with(sim, 0, |s| if captain_ok(&s.sim, captain) { s.sim.spawn_squad(CaptainId(captain), p.into(), count) } else { 0 }) }
+    libcommon::ffi::guard("pik_sim_spawn_squad", 0, || {
+        // SAFETY: as documented.
+        let Some(p) = (unsafe { pos.as_ref() }).copied() else {
+            return 0;
+        };
+        unsafe { with(sim, 0, |s| if captain_ok(&s.sim, captain) { s.sim.spawn_squad(CaptainId(captain), p.into(), count) } else { 0 }) }
+    })
 }
 
 /// [`Sim::remove_captain_pikis`].
@@ -3324,8 +3587,10 @@ pub unsafe extern "C" fn pik_sim_spawn_squad(sim: *mut PikSim, captain: u32, pos
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_remove_captain_pikis(sim: *mut PikSim, captain: u32) -> u32 {
-    // SAFETY: as documented.
-    unsafe { with(sim, 0, |s| if captain_ok(&s.sim, captain) { s.sim.remove_captain_pikis(CaptainId(captain)) } else { 0 }) }
+    libcommon::ffi::guard("pik_sim_remove_captain_pikis", 0, || {
+        // SAFETY: as documented.
+        unsafe { with(sim, 0, |s| if captain_ok(&s.sim, captain) { s.sim.remove_captain_pikis(CaptainId(captain)) } else { 0 }) }
+    })
 }
 
 /// [`Sim::down_captain`]: he's out (his squad goes idle), as when his host body dies.
@@ -3334,21 +3599,23 @@ pub unsafe extern "C" fn pik_sim_remove_captain_pikis(sim: *mut PikSim, captain:
 /// `sim` from [`pik_sim_new`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_down_captain(sim: *mut PikSim, captain: u32, down: u8) {
-    // SAFETY: as documented.
-    unsafe {
-        with(sim, (), |s| {
-            if !captain_ok(&s.sim, captain) {
-                return;
-            }
-            let id = CaptainId(captain);
-            if down != 0 {
-                s.sim.down_captain(id);
-            } else if s.sim.captain(id).down {
-                let pos = s.sim.captain(id).pos;
-                s.sim.revive_captain(id, pos);
-            }
-        })
-    }
+    libcommon::ffi::guard("pik_sim_down_captain", (), || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, (), |s| {
+                if !captain_ok(&s.sim, captain) {
+                    return;
+                }
+                let id = CaptainId(captain);
+                if down != 0 {
+                    s.sim.down_captain(id);
+                } else if s.sim.captain(id).down {
+                    let pos = s.sim.captain(id).pos;
+                    s.sim.revive_captain(id, pos);
+                }
+            })
+        }
+    })
 }
 
 #[cfg(test)]
