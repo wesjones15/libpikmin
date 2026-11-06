@@ -84,8 +84,7 @@ fn extractor_matches_existing_assets() {
     ) else {
         return;
     };
-    let out = std::env::temp_dir().join("libpikmin_extract_test");
-    let _ = std::fs::remove_dir_all(&out);
+    let out = libcommon::scratch::dir(env!("CARGO_MANIFEST_DIR"), "libpikmin-extract");
     let report = libpikmin_assets::extract::extract_assets(&iso, &out, &mut |_| {}).unwrap();
     assert!(report.files > 20);
     for rel in libpikmin_assets::extract::REQUIRED {

@@ -65,14 +65,7 @@ mod tests {
         let Some(assets) = Assets::discover(None) else {
             return;
         };
-        let out = std::env::temp_dir().join(format!(
-            "pikmin-intro-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let out = libcommon::scratch::dir(env!("CARGO_MANIFEST_DIR"), "pikmin-intro");
         render_into(&assets.root, &out).unwrap();
         let path = out.join("spawn.wav");
         let wav = std::fs::read(&path).unwrap();
