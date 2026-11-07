@@ -4,6 +4,7 @@ members = ["crates/libpikmin", "crates/libpikmin-teki", "crates/libpikmin-assets
 default-members = ["crates/libpikmin", "crates/libpikmin-teki", "crates/libpikmin-teki", "crates/libpikmin-assets", "crates/libpikmin-audio", "crates/libpikmin-present", "crates/libpikmin-ffi"]
 
 [workspace.package]
+license = "CC0-1.0"
 version = "0.1.0"
 edition = "2024"
 publish = false
