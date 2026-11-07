@@ -489,3 +489,31 @@ fn a_host_placed_captain_reports_no_fall() {
     let seen = landings(&mut sim);
     assert!(seen.iter().all(|(d, _)| *d < 1.0), "{seen:?}");
 }
+
+// A pad throw that scrapes a cliff on the way up (the sphere touches its face) loses the
+// horizontal component into the wall for that step only; once clear of the lip it carries on
+// with the pad's authored horizontal speed and lands on the platform, instead of dropping back.
+struct PadCliff;
+impl Host for PadCliff {
+    fn ground_height(&self, pos: Vec3) -> Option<f32> {
+        let floor = if pos.x >= 300.0 { 300.0 } else { 0.0 };
+        (pos.y >= floor).then_some(floor)
+    }
+    fn walls(&self, centre: Vec3, radius: f32) -> Vec3 {
+        // The cliff face stands at x = 300 up to the platform's height.
+        if centre.y < 300.0 && centre.x > 300.0 - radius {
+            Vec3::new(300.0 - radius, centre.y, centre.z)
+        } else {
+            centre
+        }
+    }
+}
+
+#[test]
+fn jump_pad_throw_keeps_its_horizontal_speed_after_scraping_a_cliff() {
+    let (mut sim, c, _p) = setup();
+    sim.launch_captain(c, Vec3::new(400.0, 400.0, 0.0), 200.0, false);
+    for _ in 0..240 { sim.step(&mut PadCliff); }
+    assert_eq!(sim.captain(c).pos.y, 300.0, "landed on the platform, at {}", sim.captain(c).pos);
+    assert!(sim.captain(c).pos.x >= 300.0);
+}

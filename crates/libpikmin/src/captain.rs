@@ -579,7 +579,16 @@ impl Sim {
             }
             // Keep a pad's horizontal throw through flight rather than accelerating back
             // to the movement stick on the next tick. Ground contact restores normal walking.
-            let target = if c.launched { c.vel.with_y(0.0) } else { c.target_vel };
+            // A pad's throw aims for its authored horizontal speed every tick: a cliff face
+            // that takes the speed away for a step (the wall push removes the part into it)
+            // must not take it for good, or he climbs the cliff and drops back at its foot.
+            let target = if pad_flight {
+                c.jump.map_or(c.vel.with_y(0.0), |j| j.horizontal)
+            } else if c.launched {
+                c.vel.with_y(0.0)
+            } else {
+                c.target_vel
+            };
             integrate(
                 host,
                 &mut c.pos,
