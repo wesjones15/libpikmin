@@ -499,7 +499,10 @@ pub fn teki_creature_id(id: u32) -> libpikmin::host::CreatureId {
     (1u64 << 40) | id as u64
 }
 
+#[derive(Default)]
 pub struct View {
+    /// Only optional captain art is available; the host draws its own world stand-ins.
+    pub captains_only: bool,
     /// Enemy kinds that loaded ([`set_teki_models`]), by [`crate::teki::TekiInfo::kind`] order.
     pub tekis: Vec<TekiView>,
     /// Pikmin 2's enemy kinds that loaded ([`View::load_p2_tekis`]).
@@ -704,6 +707,21 @@ fn ship_smoke(fx: EffectDef) -> bool {
 }
 
 impl View {
+    /// An asset-independent twelve-anchor rig lets optional captain bodies load
+    /// without requiring Pikmin 1's army/Onion/ship models or animations.
+    pub fn captains_only() -> Self {
+        let mut view = Self { captains_only: true, model_mirror_x: true, camera: [Vec3::X, Vec3::Y, Vec3::Z], ..Self::default() };
+        for _ in 0..models::COUNT {
+            let mut vm = ViewModel::external(Vec::new(), Vec3::new(-8.,0.,-8.), Vec3::new(8.,25.1,8.), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            vm.model.joints = (0..12).map(|i| libpikmin_assets::model::Joint {
+                parent: if i == 0 { -1 } else { 0 }, flags: 0, scale: Vec3::ONE, rotation: Vec3::ZERO,
+                translation: match i { 1 => Vec3::Y*12., 2 => Vec3::Y*21., 7 => Vec3::new(-7.,12.,0.), 8 => Vec3::new(7.,12.,0.), _ => Vec3::ZERO }, matpolys: Vec::new(),
+            }).collect();
+            vm.skel = Skeleton::new(&vm.model);
+            view.models.push(vm);
+        }
+        view
+    }
     pub fn pending_repairs(&self) -> usize {
         self.ships.values().map(|s| s.pending.len() + usize::from(s.repair.is_some())).sum()
     }
@@ -821,6 +839,7 @@ impl View {
         }
         let ship_contexts = models[models::SHIP as usize].skel.override_map(&libpikmin_assets::ship::CONTEXT_JOINTS);
         Ok(View {
+            captains_only: false,
             tekis,
             p2_tekis: Vec::new(),
             teki_input: Vec::new(),
@@ -1781,6 +1800,7 @@ impl View {
         let mut live = HashSet::new();
         let no_inputs = |_: usize| Inputs::default();
 
+        if !self.captains_only {
         // Onions (`GoalItem`): their colour is a register animation at frame colour * 2
         // (`GoalItem::refresh`). The Dolphin uses UfoAnimator's eight skeleton contexts.
         for (i, o) in sim.onions().iter().enumerate() {
@@ -2629,6 +2649,7 @@ impl View {
             }
         }
 
+        }
         // Captains, and each one's cursor with the marker under it (`Navi::refresh`).
         for c in sim.captains() {
             live.insert(crate::animator::captain_key(c.id));

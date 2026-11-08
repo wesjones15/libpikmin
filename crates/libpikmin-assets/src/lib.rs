@@ -117,7 +117,7 @@ pub mod paths {
 }
 
 /// An animation set: the AnimMgr's infos with their data resolved from a bundle.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AnimSet {
     pub mgr: AnimMgr,
     /// `anims[i]` is the data for `mgr.infos[i]`, if the bundle had it.

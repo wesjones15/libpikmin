@@ -211,7 +211,7 @@ impl AnimInfo {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AnimMgr {
     pub base_path: String,
     pub infos: Vec<AnimInfo>,

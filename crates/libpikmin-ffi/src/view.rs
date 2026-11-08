@@ -171,12 +171,13 @@ pub unsafe extern "C" fn pik_view_new(assets_dir: *const c_char, sound: u8) -> *
     };
     let made = catch_unwind(|| {
         let assets = Assets { root: dir };
-        let mut view = View::load(&assets).ok()?;
+        let mut view = if assets.root.as_os_str().is_empty() { View::captains_only() }
+            else { View::load(&assets).unwrap_or_else(|_| View::captains_only()) };
         // Pikmin 2's enemies join the model table when the enemy models are asked for and the cache has them.
         if libpikmin_present::view::teki_models_enabled() {
             view.load_p2_tekis(&assets.root.join("p2"));
         }
-        let (audio, sound_status) = if sound != 0 {
+        let (audio, sound_status) = if sound != 0 && !view.captains_only {
             match Audio::start(&assets) {
                 Ok(a) => {
                     let s = format!("sound {} Hz, {} channels", a.rate, a.channels);
@@ -237,6 +238,12 @@ pub unsafe extern "C" fn pik_view_status(view: *const PikView) -> *const c_char 
             None => std::ptr::null(),
         }
     })
+}
+
+/// Whether the view has the base Pikmin presentation; optional captain art is independent.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_view_has_base(view: *const PikView) -> u8 {
+    unsafe { view.as_ref() }.is_some_and(|v| !v.view.captains_only) as u8
 }
 
 /// Whether to draw each captain's cursor and marker (`show` nonzero; the default). Off for a

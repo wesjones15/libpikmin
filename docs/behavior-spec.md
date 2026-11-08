@@ -6,6 +6,19 @@ spec, in our own words. Citations are `file: function` under `pikmin-main/src/`
 
 Status: **implemented** = in `crates/libpikmin` with tests; **planned** = not yet.
 
+## Optional base presentation (implemented, ABI 65)
+
+`pik_view_new` with no usable Pikmin 1 cache creates a captain-only view rather
+than failing. `pik_view_has_base` tells the host to draw generic world objects.
+Existing Pianta, Louie and Captain Pikachu loaders append their own models to that
+view; their optional source game does not require Pikmin 1 art. Empty base models
+retain authored anchor joints for existing retargeting, with no base textures,
+world draws or audio. Missing Pikmin animation clips cannot supply original motion
+timing; alternate skins retain their own available clips and fallback anchors.
+The FFI regression checks that the empty-cache view emits only captain draws.
+`viewer --example standalone_captain` captures multiple animated frames with the
+exact model identity and loader citation. Extracted captures remain local.
+
 ## Host extension: jumping (implemented)
 
 This mod adds voluntary jumps rather than reproducing a Pikmin 1 control. A rising edge

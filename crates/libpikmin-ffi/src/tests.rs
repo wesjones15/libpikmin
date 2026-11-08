@@ -3,6 +3,22 @@
 use super::*;
 
 #[test]
+fn captain_only_view_does_not_require_base_assets_or_world_models() {
+    unsafe {
+        let path=CString::new("").unwrap();let sim=pik_sim_new(path.as_ptr(),1);
+        let at=PikVec3::default();let captain=pik_sim_add_captain(sim,&at);
+        pik_sim_spawn_piki(sim,0,&at,captain);pik_sim_add_onion(sim,&at,7);
+        let view=pik_view_new(path.as_ptr(),0);assert!(!view.is_null());assert_eq!(pik_view_has_base(view),0);
+        let frame=PikViewFrame {dt:1./60.,..Default::default()};
+        for _ in 0..5 {pik_view_update(view,sim,&frame);}
+        let count=pik_view_draws(view,std::ptr::null_mut(),0);assert!(count>0);
+        let mut draws=vec![PikDraw::default();count as usize];pik_view_draws(view,draws.as_mut_ptr(),count);
+        assert!(draws.iter().all(|d|d.kind==libpikmin_present::view::kinds::CAPTAIN));
+        pik_view_free(view);pik_sim_free(sim);
+    }
+}
+
+#[test]
 fn individual_host_hits_do_not_damage_overlapping_pikmin_twice() {
     unsafe {
         let sim = pik_sim_new(std::ptr::null(), 1);
