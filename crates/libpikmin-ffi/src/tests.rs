@@ -13,7 +13,11 @@ fn captain_only_view_does_not_require_base_assets_or_world_models() {
         for _ in 0..5 {pik_view_update(view,sim,&frame);}
         let count=pik_view_draws(view,std::ptr::null_mut(),0);assert!(count>0);
         let mut draws=vec![PikDraw::default();count as usize];pik_view_draws(view,draws.as_mut_ptr(),count);
-        assert!(draws.iter().all(|d|d.kind==libpikmin_present::view::kinds::CAPTAIN));
+        use libpikmin_present::view::kinds;
+        assert!(draws.iter().all(|d|matches!(d.kind,kinds::CAPTAIN|kinds::CURSOR|kinds::MARKER)));
+        let cursor=draws.iter().find(|d|d.kind==kinds::CURSOR).expect("missing asset-independent cursor pose");
+        let up=glam::Quat::from_xyzw(cursor.rot[0],cursor.rot[1],cursor.rot[2],cursor.rot[3])*Vec3::Y;
+        assert!(up.dot(Vec3::Y)>0.999,"free cursor must lie on the ground");
         pik_view_free(view);pik_sim_free(sim);
     }
 }

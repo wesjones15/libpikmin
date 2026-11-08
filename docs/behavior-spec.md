@@ -15,7 +15,11 @@ view; their optional source game does not require Pikmin 1 art. Empty base model
 retain authored anchor joints for existing retargeting, with no base textures,
 world draws or audio. Missing Pikmin animation clips cannot supply original motion
 timing; alternate skins retain their own available clips and fallback anchors.
-The FFI regression checks that the empty-cache view emits only captain draws.
+The empty-cache view also emits cursor/marker draw transforms, using the same
+ground placement, vertical lock facing, interpolation and 2.5-radian/second spin
+as the textured view. These empty meshes let the host draw a pink primitive circle
+from the native pose rather than invent a second aiming behavior. FFI and
+`fallback_cursor` tests cover free, locked, spinning and released poses.
 `viewer --example standalone_captain` captures multiple animated frames with the
 exact model identity and loader citation. Extracted captures remain local.
 

@@ -710,7 +710,9 @@ impl View {
     /// An asset-independent twelve-anchor rig lets optional captain bodies load
     /// without requiring Pikmin 1's army/Onion/ship models or animations.
     pub fn captains_only() -> Self {
-        let mut view = Self { captains_only: true, model_mirror_x: true, camera: [Vec3::X, Vec3::Y, Vec3::Z], ..Self::default() };
+        // Keep cursor draw transforms even without meshes: stand-in hosts consume
+        // the same lock placement, facing, interpolation and spin as original art.
+        let mut view = Self { captains_only: true, show_cursors: true, model_mirror_x: true, camera: [Vec3::X, Vec3::Y, Vec3::Z], ..Self::default() };
         for _ in 0..models::COUNT {
             let mut vm = ViewModel::external(Vec::new(), Vec3::new(-8.,0.,-8.), Vec3::new(8.,25.1,8.), Vec::new(), Vec::new(), Vec::new(), Vec::new());
             vm.model.joints = (0..12).map(|i| libpikmin_assets::model::Joint {
