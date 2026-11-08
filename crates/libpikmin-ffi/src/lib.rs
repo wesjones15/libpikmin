@@ -1318,7 +1318,7 @@ pub unsafe extern "C" fn pik_sim_set_field_limit(sim: *mut PikSim, limit: u32) {
 }
 
 // PelletConfig/PelletShapeObject (pelletMgr.cpp): dimensions and weights come from
-// the user's disc; absent or invalid required assets disable spawning that part.
+// the user's disc; missing/invalid assets use authored generic carry objectives.
 fn load_part_specs(params: &Params, dir: Option<&Path>) -> Vec<Option<PelletDesc>> {
     // Authored generic objectives keep Ship Repair playable without extracted configs/models.
     // Never discover a developer cache when the caller deliberately supplied no assets.
@@ -1502,7 +1502,7 @@ pub unsafe extern "C" fn pik_sim_set_ship_part_host_delivery(sim: *mut PikSim, e
     })
 }
 
-/// The part's disc carry requirement, or zero when its assets/config are invalid.
+/// The part's disc or built-in carry requirement, or zero for an invalid part ID.
 /// # Safety
 /// `sim` is a live handle.
 #[unsafe(no_mangle)]
