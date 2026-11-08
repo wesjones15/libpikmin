@@ -541,3 +541,13 @@ The beam's PVW texture matrices advance independently at 30 frames/second times 
 
 ### Ship Repair enemy presentation and P2 music
 See [p2-presentations.md](p2-presentations.md) for exact source resource identities, shared TEV/sampler handling, viewer evidence, and directed-music selection.
+## Optional asset runtime (2026-11-07)
+
+The existing code-default simulation remains usable without extracted game files.
+An empty FFI path explicitly selects defaults without discovering a developer cache.
+Ship Repair now supplies 30 authored generic carry objectives when part models/configs
+are missing: radius/height 25 native units, minimum 5 and maximum 20 carriers. These are
+fallback gameplay values, not disc tuning. Existing valid part configs remain preferred.
+Required Rust/C# checks exercise the empty-path constructor and every part requirement.
+The host retains existing swarm stand-ins and uses RoR2's drop pod for missing arrivals.
+Not yet played in RoR2.

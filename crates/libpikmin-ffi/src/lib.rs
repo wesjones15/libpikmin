@@ -1265,7 +1265,7 @@ impl Host for FfiHost<'_> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pik_sim_new(assets_dir: *const c_char, seed: u64) -> *mut PikSim {
     // SAFETY: as documented.
-    let dir = unsafe { path_arg(assets_dir) };
+    let dir = unsafe { path_arg(assets_dir) }.filter(|p| !p.as_os_str().is_empty());
     let made = catch_unwind(|| {
         let mut params = Params::default();
         let source = match dir.as_ref() {
@@ -1320,10 +1320,19 @@ pub unsafe extern "C" fn pik_sim_set_field_limit(sim: *mut PikSim, limit: u32) {
 // PelletConfig/PelletShapeObject (pelletMgr.cpp): dimensions and weights come from
 // the user's disc; absent or invalid required assets disable spawning that part.
 fn load_part_specs(params: &Params, dir: Option<&Path>) -> Vec<Option<PelletDesc>> {
-    let Some(assets) = libpikmin_assets::Assets::discover(dir) else { return Vec::new() };
+    // Authored generic objectives keep Ship Repair playable without extracted configs/models.
+    // Never discover a developer cache when the caller deliberately supplied no assets.
+    let fallback = |part: usize| Some(PelletDesc { pos: Vec3::ZERO, yaw: 0., radius: 25., height: 25.,
+        min_carriers: 5, max_carriers: 20, seeds_matching: 0, seeds_other: 0,
+        color: None, creature: None, ship_part: Some(part as u32) });
+    let Some(root) = dir.filter(|p| libpikmin_assets::extract::is_complete(p)) else {
+        return (0..30).map(fallback).collect();
+    };
+    let assets = libpikmin_assets::Assets { root: root.to_path_buf() };
     let infos = assets.read(libpikmin_assets::ship::PEL_ANIM).ok()
         .and_then(|b| libpikmin_assets::ship::parse_pel_anim(&b).ok()).unwrap_or_default();
     libpikmin_assets::ship::PART_IDS.iter().enumerate().map(|(part, id)| {
+        (|| {
         let cfg = params.pellets.iter().find(|c| c.kind == 3 && (c.model_id == *id || c.pellet_id == *id))?;
         let info = infos.iter().find(|i| i.id == *id)?;
         let model = assets.model(&info.model()).ok()?;
@@ -1332,7 +1341,27 @@ fn load_part_specs(params: &Params, dir: Option<&Path>) -> Vec<Option<PelletDesc
         Some(PelletDesc { pos: Vec3::ZERO, yaw: 0.0, radius, height: cfg.carry_info_height.max(1.0),
             min_carriers: cfg.min_carriers as u32, max_carriers: cfg.max_carriers as u32,
             seeds_matching: 0, seeds_other: 0, color: None, creature: None, ship_part: Some(part as u32) })
+        })().or_else(|| fallback(part))
     }).collect()
+}
+
+#[cfg(test)]
+mod builtin_parts_tests {
+    use super::*;
+    #[test]
+    fn all_thirty_ship_parts_spawn_without_any_assets() {
+        unsafe {
+            let path = CString::new("").unwrap();
+            let sim = pik_sim_new(path.as_ptr(), 1);
+            assert!(!sim.is_null());
+            assert_eq!(CStr::from_ptr(pik_sim_params_source(sim)).to_str().unwrap(), "code defaults");
+            for id in 0..30 {
+                assert_eq!(pik_sim_ship_part_weight(sim, id), 5);
+                assert!(pik_sim_spawn_ship_part(sim, id, &PikVec3::default(), 0.) >= 0);
+            }
+            pik_sim_free(sim);
+        }
+    }
 }
 
 /// A Pikmin 2 treasure as a Ship Repair objective: its pellet (a ship-part pellet from
