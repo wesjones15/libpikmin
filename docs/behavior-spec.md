@@ -177,11 +177,19 @@ the frame delta to 1/30 s. We tick exactly 1/30 s and accumulate host time (max 
   - If nobody is in range, the original punches (not implemented).
 - Releasing throws the held Pikmin **at the cursor**. Distance parameters p10/p11 are computed
   but never used.
+  - Host lock-on extension: a locked throw leads a moving target. The initial aim point is
+    `cursor + creature velocity * flightTime`, capped at `GUIDANCE_MAX_LEAD`; the arc's vertical
+    speed is solved to the predicted height. In flight, the horizontal velocity is blended toward
+    the predicted intercept (`GUIDANCE_GAIN` per second), and the vertical arc is left to gravity.
+    This keeps a constant-speed target on the arc without the old per-tick 3D re-solve that made
+    a locked Pikmin visibly hook in from behind. A target that changes direction is still
+    corrected, but smoothly; there is no teleport and no vertical snap.
 - Trajectory from captain + (0, 10, 0):
   - half = flightTime/2
   - height = yellow ? `mYellowThrowHeight` : lerp(min, max height, holdTime / maxHoldTime)
-  - vy = g·half/2 + height/half
-  - vxz = dist / (2·half), toward the cursor
+  - unlocked vy = g·half/2 + height/half
+  - locked vy = (aim.y − start.y)/flightTime + g·flightTime/2 (solved to the predicted height)
+  - vxz = dist / (2·half), toward the cursor (or the led aim point)
   - the captain's velocity is added
 - Thrown Pikmin leave the squad.
 - Not yet: the throw animation's release-frame delay (we throw on the release tick), flower

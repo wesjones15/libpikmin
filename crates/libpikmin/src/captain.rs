@@ -1153,26 +1153,58 @@ impl Sim {
 
     /// `Navi::throwPiki`: a parabola that reaches the cursor after `throw_flight_time`.
     fn throw_piki(&mut self, ci: usize, id: PikiId, hold_time: f32) {
-        let n = &self.params.navi;
+        let (flight_time, throw_min_height, throw_max_height, yellow_throw_height, throw_hold_max_time) = {
+            let n = &self.params.navi;
+            (
+                n.throw_flight_time,
+                n.throw_min_height,
+                n.throw_max_height,
+                n.yellow_throw_height,
+                n.throw_hold_max_time,
+            )
+        };
         let gravity = self.params.ai.gravity;
+        let (lock_target, cursor_world) = {
+            let c = &self.captains[ci];
+            (c.lock_target, c.cursor_world)
+        };
+        // Host extension: a locked throw leads the enemy instead of aiming where it is now. The
+        // full intercept is baked into the release arc; the in-flight guidance below only has to
+        // correct a target that changes speed or direction. Without a lock, the cursor point is
+        // unchanged.
+        let aim = if let Some(target) = lock_target {
+            let velocity = self.creature_velocity(target);
+            let lead = (velocity * (flight_time * crate::piki::GUIDANCE_LEAD_SHARE))
+                .clamp_length_max(crate::piki::GUIDANCE_MAX_LEAD);
+            cursor_world + lead
+        } else {
+            cursor_world
+        };
+
         let c = &mut self.captains[ci];
         c.plate.remove(id);
 
         let p = &mut self.pikis[id.0 as usize];
         p.pos = c.pos + Vec3::new(0.0, 10.0, 0.0);
-        let to = c.cursor_world - p.pos;
+        let to = aim - p.pos;
         let dist = to.x.hypot(to.z);
         let angle = to.x.atan2(to.z);
         p.face = round_ang(angle);
 
-        let half_time = 0.5 * n.throw_flight_time;
+        let half_time = 0.5 * flight_time;
         let height = if p.color == PikiColor::Yellow {
-            n.yellow_throw_height
+            yellow_throw_height
         } else {
-            n.throw_min_height
-                + (hold_time / n.throw_hold_max_time) * (n.throw_max_height - n.throw_min_height)
+            throw_min_height + (hold_time / throw_hold_max_time) * (throw_max_height - throw_min_height)
         };
-        let v_speed = gravity * 0.5 * half_time + height / half_time;
+        // A locked throw solves the arc to the target's predicted height, so a flying or
+        // elevated enemy is met on the way rather than being flown over. Unlocked throws keep
+        // the authored height parameter, which is the arc the player expects at the cursor.
+        let v_speed = if lock_target.is_some() {
+            (aim.y - p.pos.y) / flight_time + gravity * 0.5 * flight_time
+        } else {
+            gravity * 0.5 * half_time + height / half_time
+        };
         let h_speed = dist / (2.0 * half_time);
         p.vel = Vec3::new(h_speed * angle.sin(), v_speed, h_speed * angle.cos()) + c.vel;
         p.target_vel = p.vel;
@@ -1182,11 +1214,19 @@ impl Sim {
         // the cursor point (which also makes up for the captain's own speed).
         // A thing to carry is a point: where it lies when thrown, or where it is carried to in the flight.
         let on_pellet = (c.lock_pellet.is_some() || c.lock_bulb.is_some()) && c.lock_view.is_some();
-        let (creature, point) = (c.lock_target, (self.cursor_homing || on_pellet).then_some(c.cursor_world));
+        let cursor_homing = self.cursor_homing;
+        let (creature, point) = (
+            c.lock_target,
+            if c.lock_target.is_some() {
+                Some(aim)
+            } else {
+                (cursor_homing || on_pellet).then_some(cursor_world)
+            },
+        );
         p.guided_throw = (creature.is_some() || point.is_some()).then(|| crate::piki::GuidedThrow {
             creature,
-            point: point.or(creature.map(|_| c.cursor_world)),
-            remaining: n.throw_flight_time.max(0.2),
+            point: point.or(creature.map(|_| cursor_world)),
+            remaining: flight_time.max(0.2),
         });
         p.captain = Some(c.id);
         self.events.push(Event::Thrown {

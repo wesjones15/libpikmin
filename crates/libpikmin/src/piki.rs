@@ -10,6 +10,19 @@ use crate::math::{ang_dist, dist_xz, rotate_y, round_ang, yaw_of};
 use crate::sim::{Sim, integrate};
 use crate::{CaptainId, Host, PikiId};
 
+/// Host extension: how much of a locked target's velocity the throw bakes into its initial arc.
+/// 0: aim where it is now (vanilla cursor). 1: aim at the full intercept. The in-flight
+/// guidance below only has to correct a target that changes speed or direction.
+pub(crate) const GUIDANCE_LEAD_SHARE: f32 = 1.0;
+/// Host extension: the most a throw leads, in sim units (~4 cm each). A teleporting or very fast
+/// target must not send the arc off the map.
+pub(crate) const GUIDANCE_MAX_LEAD: f32 = 300.0;
+/// Host extension: per-second blend toward the guided velocity. 1 s⁻¹ is a gentle curve;
+/// 30 s⁻¹ reproduces the old snap-to-target every tick.
+pub(crate) const GUIDANCE_GAIN: f32 = 5.0;
+/// Host extension: a guard against a guided throw accelerating without bound near impact.
+pub(crate) const GUIDANCE_MAX_SPEED: f32 = 1200.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PikiColor {
     Blue,
@@ -702,13 +715,32 @@ impl Sim {
         // A locked-on creature is followed to its first holdable part; with none (or once it
         // has died) the throw keeps heading for the cursor point it was thrown at.
         if let Some(g) = self.pikis[pi].guided_throw {
-            let part = g.creature.and_then(|id| self.creatures.get(id)).filter(|c| c.alive)
-                .and_then(|c| self.creatures.parts_of(c).iter().find(|p| p.stickable)).map(|p| p.centre);
-            let aim = part.or(g.point);
+            let mut aim = g.point;
+            if let Some(id) = g.creature {
+                if let Some(c) = self.creatures.get(id).filter(|c| c.alive) {
+                    if let Some(part) = self.creatures.parts_of(c).iter().find(|p| p.stickable) {
+                        // Lead the remaining flight instead of aiming at where the part is
+                        // now: a constant-speed target needs almost no correction, so the
+                        // path stays an arc rather than hooking in from behind.
+                        let lead = (self.creature_velocity(id) * g.remaining)
+                            .clamp_length_max(GUIDANCE_MAX_LEAD);
+                        aim = Some(part.centre + lead);
+                    }
+                }
+            }
             if let Some(aim) = aim.filter(|_| g.remaining > 0.) {
                 let t = g.remaining.max(dt);
+                let pos = self.pikis[pi].pos;
+                // Horizontal steering only: the authored throw height is the arc the player
+                // sees, and re-solving the vertical component every tick was what made a
+                // locked Pikmin hook down onto a target. Gravity keeps the vertical arc; the
+                // lead above already put the arc where the target will be.
+                let horizontal = (aim - pos).with_y(0.0) / t;
                 let p = &mut self.pikis[pi];
-                p.vel = (aim - p.pos) / t + Vec3::Y * (self.params.ai.gravity * (t + dt) * 0.5);
+                let blend = (GUIDANCE_GAIN * dt).clamp(0.0, 1.0);
+                p.vel.x += (horizontal.x - p.vel.x) * blend;
+                p.vel.z += (horizontal.z - p.vel.z) * blend;
+                p.vel = p.vel.clamp_length_max(GUIDANCE_MAX_SPEED);
                 p.guided_throw = Some(GuidedThrow { remaining: g.remaining - dt, ..g });
             } else { self.pikis[pi].guided_throw = None; }
         }

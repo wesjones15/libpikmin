@@ -498,6 +498,58 @@ fn locked_throw_tracks_an_elevated_moving_enemy_then_releases_lock() {
 }
 
 #[test]
+fn locked_throw_leads_a_strafing_enemy_without_hooking() {
+    let mut sim = Sim::new(retail_params(), 92);
+    let mut host = TestHost::default();
+    let captain = sim.add_captain(Vec3::ZERO);
+    squad(&mut sim, captain, 3, Vec3::ZERO);
+    let mut events = Vec::new();
+    run(&mut sim, &mut host, 2., &mut events);
+
+    // A target 3 m out (sim units: ~4 cm each) crossing at 8 m/s, fast enough that aiming at
+    // where it is now would miss by most of the throw's range.
+    let target = 100;
+    host.creatures.push(Dummy {
+        id: target,
+        pos: Vec3::new(300., 15., 0.),
+        radius: 12.,
+        height: 15.,
+        hp: 1000.,
+    });
+    sim.set_lock_target(captain, Some(target));
+    sim.set_input(captain, CaptainInput { throw: true, ..Default::default() });
+    for _ in 0..6 {
+        host.creatures[0].pos.z += 8.0;
+        sim.step(&mut host);
+        events.extend(sim.drain_events());
+    }
+    sim.set_input(captain, CaptainInput::default());
+
+    let mut first_direction = None;
+    let mut max_turn: f32 = 0.0;
+    for _ in 0..70 {
+        host.creatures[0].pos.z += 8.0;
+        sim.step(&mut host);
+        events.extend(sim.drain_events());
+        if let Some(p) = sim.pikis().iter().find(|p| matches!(p.state, PikiState::Flying { .. })) {
+            // Horizontal heading only: the vertical arc is gravity, not homing.
+            let direction = Vec2::new(p.vel.x, p.vel.z).normalize_or_zero();
+            let start = *first_direction.get_or_insert(direction);
+            max_turn = max_turn.max(direction.angle_to(start));
+        }
+    }
+
+    assert!(
+        sim.pikis().iter().any(|p| p.state.latched_to() == Some(target)),
+        "the led throw should still latch onto a strafing target"
+    );
+    assert!(
+        max_turn < 0.35,
+        "the throw should not hook sideways after release (max horizontal turn {max_turn:.2} rad)"
+    );
+}
+
+#[test]
 fn latched_hits_follow_the_cling_animation() {
     let mut sim = Sim::new(retail_params(), 9);
     let mut host = TestHost::default();

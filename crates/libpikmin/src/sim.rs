@@ -23,6 +23,11 @@ pub struct Sim {
     protected_pikis: std::collections::HashSet<PikiId>,
     pub(crate) piki_deaths: u64,
     pub(crate) creatures: CreatureFrame,
+    /// Previous tick's creature positions, for the throw lead's velocity estimate. A host can
+    /// supply exact velocity later; this keeps the core API unchanged for now.
+    prev_creature_pos: std::collections::HashMap<CreatureId, Vec3>,
+    /// Creature velocities estimated from the last two frames (host extension, units per second).
+    creature_velocity: std::collections::HashMap<CreatureId, Vec3>,
     pub(crate) pellets: Vec<crate::carry::Pellet>,
     /// Opt-in host delivery policy; replicas do not run carry AI.
     pub(crate) ship_part_delivery: u8,
@@ -111,6 +116,8 @@ impl Sim {
             protected_pikis: Default::default(),
             piki_deaths: 0,
             creatures: CreatureFrame::default(),
+            prev_creature_pos: Default::default(),
+            creature_velocity: Default::default(),
             pellets: Vec::new(),
             ship_part_delivery: 0,
             ship_part_owners: Default::default(),
@@ -312,6 +319,7 @@ impl Sim {
     pub fn step(&mut self, host: &mut dyn Host) {
         let dt = crate::TICK_DT;
         host.creatures(&mut self.creatures);
+        self.update_creature_velocity(dt);
 
         for creature in std::mem::take(&mut self.pending_shakes) {
             for pi in 0..self.pikis.len() {
@@ -384,6 +392,31 @@ impl Sim {
     /// The creature snapshot from the last tick.
     pub fn creatures(&self) -> &CreatureFrame {
         &self.creatures
+    }
+
+    /// Host extension: the creature's velocity estimated from the last two host frames, in sim
+    /// units a second. Zero for a new creature or one that moved far enough this tick to be a
+    /// teleport rather than motion. Purely local: never serialized, so replicas do not need it.
+    pub(crate) fn creature_velocity(&self, id: CreatureId) -> Vec3 {
+        self.creature_velocity.get(&id).copied().unwrap_or(Vec3::ZERO)
+    }
+
+    fn update_creature_velocity(&mut self, dt: f32) {
+        // A body that moved more than this in one 30 Hz tick is a teleport (or a respawn), not
+        // something a throw should chase. 40 units a tick is 1200 units/s, well past any walker.
+        const TELEPORT: f32 = 40.0;
+        self.creature_velocity.clear();
+        for c in &self.creatures.creatures {
+            let velocity = self.prev_creature_pos.get(&c.id).map_or(Vec3::ZERO, |previous| {
+                let delta = c.pos - *previous;
+                if delta.length() > TELEPORT { Vec3::ZERO } else { delta / dt.max(0.0001) }
+            });
+            self.creature_velocity.insert(c.id, velocity);
+        }
+        self.prev_creature_pos.clear();
+        for c in &self.creatures.creatures {
+            self.prev_creature_pos.insert(c.id, c.pos);
+        }
     }
 
     pub fn drain_events(&mut self) -> std::vec::Drain<'_, Event> {
