@@ -17,9 +17,6 @@ pub(crate) const GUIDANCE_LEAD_SHARE: f32 = 1.0;
 /// Host extension: the most a throw leads, in sim units (~4 cm each). A teleporting or very fast
 /// target must not send the arc off the map.
 pub(crate) const GUIDANCE_MAX_LEAD: f32 = 300.0;
-/// Host extension: per-second blend toward the guided velocity. 1 s⁻¹ is a gentle curve;
-/// 30 s⁻¹ reproduces the old snap-to-target every tick.
-pub(crate) const GUIDANCE_GAIN: f32 = 5.0;
 /// Host extension: a guard against a guided throw accelerating without bound near impact.
 pub(crate) const GUIDANCE_MAX_SPEED: f32 = 1200.0;
 
@@ -719,10 +716,12 @@ impl Sim {
             if let Some(id) = g.creature {
                 if let Some(c) = self.creatures.get(id).filter(|c| c.alive) {
                     if let Some(part) = self.creatures.parts_of(c).iter().find(|p| p.stickable) {
-                        // Lead the remaining flight instead of aiming at where the part is
-                        // now: a constant-speed target needs almost no correction, so the
-                        // path stays an arc rather than hooking in from behind.
-                        let lead = (self.creature_velocity(id) * g.remaining)
+                        // Aim at where the part will be on arrival: its current estimated
+                        // velocity over the flight still to go. The lead shrinks with the
+                        // remaining time and is zero on the final guidance tick, so contact
+                        // goes through the actual hurtbox and a target that turned is tracked
+                        // to where it really is.
+                        let lead = (self.creature_velocity(id) * (g.remaining - dt).max(0.0))
                             .clamp_length_max(GUIDANCE_MAX_LEAD);
                         aim = Some(part.centre + lead);
                     }
@@ -730,17 +729,11 @@ impl Sim {
             }
             if let Some(aim) = aim.filter(|_| g.remaining > 0.) {
                 let t = g.remaining.max(dt);
-                let pos = self.pikis[pi].pos;
-                // Horizontal steering only: the authored throw height is the arc the player
-                // sees, and re-solving the vertical component every tick was what made a
-                // locked Pikmin hook down onto a target. Gravity keeps the vertical arc; the
-                // lead above already put the arc where the target will be.
-                let horizontal = (aim - pos).with_y(0.0) / t;
                 let p = &mut self.pikis[pi];
-                let blend = (GUIDANCE_GAIN * dt).clamp(0.0, 1.0);
-                p.vel.x += (horizontal.x - p.vel.x) * blend;
-                p.vel.z += (horizontal.z - p.vel.z) * blend;
-                p.vel = p.vel.clamp_length_max(GUIDANCE_MAX_SPEED);
+                // Gravity-aware 3D arrival: the velocity that reaches `aim` in the time left,
+                // with the gravity this tick's integration will add already accounted for.
+                p.vel = ((aim - p.pos) / t + Vec3::Y * (self.params.ai.gravity * (t + dt) * 0.5))
+                    .clamp_length_max(GUIDANCE_MAX_SPEED);
                 p.guided_throw = Some(GuidedThrow { remaining: g.remaining - dt, ..g });
             } else { self.pikis[pi].guided_throw = None; }
         }

@@ -550,6 +550,47 @@ fn locked_throw_leads_a_strafing_enemy_without_hooking() {
 }
 
 #[test]
+fn locked_throw_still_latches_when_the_target_reverses_mid_flight() {
+    let mut sim = Sim::new(retail_params(), 93);
+    let mut host = TestHost::default();
+    let captain = sim.add_captain(Vec3::ZERO);
+    squad(&mut sim, captain, 3, Vec3::ZERO);
+    let mut events = Vec::new();
+    run(&mut sim, &mut host, 2., &mut events);
+
+    let target = 101;
+    host.creatures.push(Dummy { id: target, pos: Vec3::new(250., 15., 0.), radius: 12., height: 15., hp: 1000. });
+    sim.set_lock_target(captain, Some(target));
+    sim.set_input(captain, CaptainInput { throw: true, ..Default::default() });
+    for _ in 0..6 {
+        host.creatures[0].pos.z += 6.0;
+        sim.step(&mut host);
+        events.extend(sim.drain_events());
+    }
+    sim.set_input(captain, CaptainInput::default());
+
+    // The throw was led for a target running +z; once it is in the air the target turns
+    // around, so the baked lead is stale and guidance has to pull the arc back.
+    let mut released = false;
+    let mut flying_ticks = 0;
+    for _ in 0..90 {
+        let flying = sim.pikis().iter().any(|p| matches!(p.state, PikiState::Flying { .. }));
+        if flying {
+            released = true;
+            flying_ticks += 1;
+        }
+        host.creatures[0].pos.z += if released && flying_ticks > 3 { -6.0 } else { 6.0 };
+        sim.step(&mut host);
+        events.extend(sim.drain_events());
+    }
+    assert!(released, "a Pikmin was thrown");
+    assert!(
+        sim.pikis().iter().any(|p| p.state.latched_to() == Some(target)),
+        "the throw should latch even after the target reverses"
+    );
+}
+
+#[test]
 fn latched_hits_follow_the_cling_animation() {
     let mut sim = Sim::new(retail_params(), 9);
     let mut host = TestHost::default();
