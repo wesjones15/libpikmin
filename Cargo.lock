@@ -493,6 +493,7 @@ name = "libpikmin"
 version = "0.1.0"
 dependencies = [
  "glam 0.30.10",
+ "libcommon",
  "miniz_oxide 0.8.9",
 ]
 
@@ -598,6 +599,7 @@ name = "libssbm"
 version = "0.1.0"
 dependencies = [
  "glam 0.30.10",
+ "libcommon",
 ]
 
 [[package]]

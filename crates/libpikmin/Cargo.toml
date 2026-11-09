@@ -7,4 +7,5 @@ publish.workspace = true
 
 [dependencies]
 glam.workspace = true
+libcommon.workspace = true
 miniz_oxide = "0.8.9"

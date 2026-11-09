@@ -29,6 +29,13 @@ pub struct StrikeSpec {
     pub charge: f32,
 }
 
+/// Forward pitch (radians) a stand-in captain body tips by `frame` motion frames into the strike:
+/// the shared strike pose (`libcommon::strike_pose`), upright at the start, 45 degrees when the
+/// blow lands at [`STRIKE_ACTION`] and upright again by [`STRIKE_END`]. Presentation only.
+pub fn pose_pitch(frame: f32) -> f32 {
+    libcommon::strike_pose::pitch(frame, STRIKE_ACTION, STRIKE_END)
+}
+
 /// A strike in progress.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Strike {
@@ -154,6 +161,36 @@ impl Sim {
         }
         self.captains[ci].strike = (strike.frame < STRIKE_END).then_some(strike);
         true
+    }
+}
+
+impl Sim {
+    /// The stand-in pitch of `captain`'s strike in progress ([`pose_pitch`]), or `None` when he is
+    /// not striking. Read from the strike clock the snapshot carries, so a replica shows it too.
+    pub fn strike_pose_pitch(&self, captain: crate::CaptainId) -> Option<f32> {
+        let strike = self.captains().get(captain.0 as usize)?.strike?;
+        Some(pose_pitch(strike.frame))
+    }
+}
+
+#[cfg(test)]
+mod pose_tests {
+    use super::*;
+
+    #[test]
+    fn the_pose_peaks_when_the_blow_lands_and_is_upright_at_both_ends() {
+        assert_eq!(pose_pitch(0.0), 0.0);
+        assert!((pose_pitch(STRIKE_ACTION) - std::f32::consts::FRAC_PI_4).abs() < 1e-6);
+        assert_eq!(pose_pitch(STRIKE_END), 0.0);
+        assert!(pose_pitch(STRIKE_ACTION - 2.0) < pose_pitch(STRIKE_ACTION));
+        assert!(pose_pitch(STRIKE_ACTION + 2.0) < pose_pitch(STRIKE_ACTION));
+    }
+
+    #[test]
+    fn no_strike_no_pose() {
+        let sim = Sim::new(crate::Params::default(), 1);
+        assert_eq!(sim.strike_pose_pitch(crate::CaptainId(0)), None);
+        assert_eq!(sim.strike_pose_pitch(crate::CaptainId(9)), None);
     }
 }
 

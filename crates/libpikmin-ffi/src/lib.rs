@@ -42,7 +42,7 @@ pub use music::*;
 pub use view::*;
 
 /// Bumped whenever a function or struct here changes.
-pub const PIK_ABI_VERSION: u32 = 65;
+pub const PIK_ABI_VERSION: u32 = 66;
 
 /// The replica snapshot's wire version (`libpikmin::snapshot::SNAPSHOT_VERSION`). Hosts put it in
 /// their multiplayer envelope: a snapshot is nested bytes there, so without this a host and client
@@ -1694,6 +1694,31 @@ pub unsafe extern "C" fn pik_sim_set_input(sim: *mut PikSim, captain: u32, input
                 if (captain as usize) < s.sim.captains().len() {
                     s.sim.set_input(CaptainId(captain), input.to_input());
                 }
+            })
+        }
+    })
+}
+
+/// The forward pitch (radians) a stand-in captain body tips by during his dismiss strike
+/// ([`Sim::strike_pose_pitch`]): 0 to 45 degrees as the blow lands, back to upright as it ends. Written
+/// to `out`; returns 1 while he is striking, else 0. Works on a replica, whose snapshots carry the strike.
+///
+/// # Safety
+/// `sim` from [`pik_sim_new`] or [`pik_replica_new`]; `out` writable or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pik_sim_captain_strike_pitch(sim: *mut PikSim, captain: u32, out: *mut f32) -> u8 {
+    libcommon::ffi::guard("pik_sim_captain_strike_pitch", 0, || {
+        // SAFETY: as documented.
+        unsafe {
+            with(sim, 0, |s| match s.sim.strike_pose_pitch(CaptainId(captain)) {
+                Some(pitch) => {
+                    // SAFETY: as documented.
+                    if let Some(out) = unsafe { out.as_mut() } {
+                        *out = pitch;
+                    }
+                    1
+                }
+                None => 0,
             })
         }
     })
